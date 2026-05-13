@@ -1,13 +1,13 @@
 import { db } from './index';
 import type { Job } from './index';
-
-// )=- Seed data imported from JSON for easy editing
 import seedData from './seed-data.json';
 
 export async function seedSampleData(force = false) {
 	const clientCount = await db.clients.count();
+
+	// )=- Only seed if empty OR user forces it
 	if (clientCount > 0 && !force) {
-		console.log('✅ Sample data already exists (use seedSampleData(true) to force)');
+		console.log('✅ Sample data already exists');
 		return;
 	}
 
@@ -15,27 +15,17 @@ export async function seedSampleData(force = false) {
 
 	if (force) {
 		await Promise.all([db.clients.clear(), db.jobs.clear()]);
-		console.log('🧹 Cleared previous sample data');
+		console.log('🧹 Cleared previous data');
 	}
 
-	// )=- FIXED: More reliable bulkAdd with explicit options
-	console.log('Adding clients...');
-	const clientIds = await db.clients.bulkAdd(seedData.clients as any[], { allKeys: true });
+	const clientIds = await db.clients.bulkAdd(seedData.clients, { allKeys: true });
+	console.log(`✅ Inserted ${clientIds.length} clients`);
 
-	console.log('Raw clientIds returned from Dexie:', clientIds);
-
-	if (!clientIds || clientIds.length === 0) {
-		console.error('❌ No client IDs returned from bulkAdd');
-		throw new Error('Failed to insert clients');
-	}
-
-	console.log(`✅ Inserted ${clientIds.length} clients with IDs:`, clientIds);
-
-	// )=- FIXED: Proper mapping
 	const jobsToSeed: Job[] = seedData.jobs.map((job, index) => {
 		const originalClientIndex = job.clientId - 1;
 		const realClientId = clientIds[originalClientIndex] ?? clientIds[0];
 
+		// )=- Keep dates stable unless forcing
 		return {
 			...job,
 			clientId: realClientId,
@@ -46,13 +36,11 @@ export async function seedSampleData(force = false) {
 		};
 	});
 
-	console.log('Adding jobs...');
 	await db.jobs.bulkAdd(jobsToSeed);
-
 	console.log(`✅ Successfully seeded ${clientIds.length} clients and ${jobsToSeed.length} jobs`);
 }
 
-// )=- Quick helper
+// )=- Only force when you really want to reset
 export async function forceSeed() {
 	await seedSampleData(true);
 }

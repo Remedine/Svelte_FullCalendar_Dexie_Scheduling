@@ -15,6 +15,8 @@ export const BUSINESS_CONFIG = {
 	// === Tax Settings (Juneau) ===
 	defaultTaxRate: 0.05, // 5% - Update here if it changes
 
+	crewMembers: ['Mike', 'Emily', 'James'] as const,
+
 	// === Juneau Service Areas ===
 	areasOfTown: {
 		thane: {
@@ -100,7 +102,7 @@ export const BUSINESS_CONFIG = {
 // ========================
 
 export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;
-
+export type CrewMember = (typeof BUSINESS_CONFIG.crewMembers)[number];
 export type BillableItemTemplate = (typeof BUSINESS_CONFIG.commonBillableItems)[number];
 
 export default BUSINESS_CONFIG;

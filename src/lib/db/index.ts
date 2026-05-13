@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
+import { BUSINESS_CONFIG } from '$lib/config';
 
 export interface Client {
 	id?: number;
@@ -54,6 +55,48 @@ export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
 	return await db.jobs.where('start').between(start, end, true, true).toArray();
 }
 
+// )=- Used by drag & drop
+export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date) {
+	await db.jobs.update(jobId, {
+		start: newStart,
+		end: newEnd,
+		updatedAt: new Date()
+	});
+	console.log(`✅ Job ${jobId} rescheduled`);
+}
+
+// )=- NEW: Save new job from modal
+export async function createJob(jobData: any): Promise<number> {
+	const newJob = {
+		clientId: Number(jobData.clientId),
+		title: String(jobData.title),
+		start: new Date(jobData.start),
+		end: new Date(jobData.end),
+		assignedCrew: [...jobData.assignedCrew], // )=- shallow copy array
+		areaOfTown: jobData.areaOfTown,
+		status: 'scheduled' as const,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+		billableItems: [
+			{
+				title: String(jobData.title),
+				price: 450,
+				quantity: 1,
+				total: 450
+			}
+		],
+		subtotal: 450,
+		taxRate: BUSINESS_CONFIG.defaultTaxRate,
+		taxAmount: 450 * BUSINESS_CONFIG.defaultTaxRate,
+		totalAmount: 450 * (1 + BUSINESS_CONFIG.defaultTaxRate)
+	};
+
+	const id = await db.jobs.add(newJob);
+	console.log(`✅ New job created with ID: ${id}`);
+	return id;
+}
+
+// )=- Added back for your +page.svelte
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 	const now = new Date();
 	return await db.jobs.where('start').aboveOrEqual(now).limit(limit).toArray();
@@ -61,3 +104,4 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 
 export { db };
 export type { Client, Job };
+export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;
