@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+
+    let { children } = $props();
 </script>
 
 <div class="app-layout">
@@ -30,7 +32,7 @@
 
 	<!-- Main Content Area -->
 	<main class="main-content">
-		<slot />
+		{@render children()}
 	</main>
 </div>
 

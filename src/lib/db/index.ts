@@ -128,4 +128,13 @@ export async function getClientWithJobs(clientId: number) {
 	return { client, jobs };
 }
 
+/** Get upcoming jobs for the next N days */
+export async function getUpcomingJobs(daysAhead: number) {
+	const start = new Date();
+	const end = new Date();
+	end.setDate(end.getDate() + daysAhead);
+
+	return await getJobsForRange(start, end);
+}
+
 export default db;

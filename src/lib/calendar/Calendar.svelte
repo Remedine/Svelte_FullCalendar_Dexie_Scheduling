@@ -1,83 +1,91 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import FullCalendar from '@fullcalendar/core';
-	import dayGridPlugin from '@fullcalendar/daygrid';
-	import timeGridPlugin from '@fullcalendar/timegrid';
-	import interactionPlugin from '@fullcalendar/interaction';
+	import { browser } from '$app/environment';
 
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import type { Job } from '$lib/db';
 	import { getJobsForRange } from '$lib/db';
 
-	// Svelte 5 Props
 	let { jobs = [] }: { jobs?: Job[] } = $props();
 
-	let calendarEl: HTMLElement;
-	let calendar: FullCalendar | null = null;
+	let calendarEl = $state<HTMLElement | null>(null);
+	let calendar: any = $state(null);
 
-	onMount(() => {
-		calendar = new FullCalendar(calendarEl, {
-			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
+	// Only run on client
+	onMount(async () => {
+		if (!browser) return;
 
-			initialView: 'timeGridWeek',
-			headerToolbar: {
-				left: 'prev,next today',
-				center: 'title',
-				right: 'dayGridMonth,timeGridWeek,timeGridDay'
-			},
+		try {
+			const { Calendar } = await import('@fullcalendar/core');
+			const dayGrid = await import('@fullcalendar/daygrid');
+			const timeGrid = await import('@fullcalendar/timegrid');
+			const interaction = await import('@fullcalendar/interaction');
 
-			editable: true,
-			selectable: true,
-			selectMirror: true,
-			dayMaxEvents: true,
+			calendar = new Calendar(calendarEl!, {
+				plugins: [dayGrid.default, timeGrid.default, interaction.default],
 
-			// Custom Event Rendering using colors from config
-			eventContent: (arg) => {
-				const job = arg.event.extendedProps as Job;
-				const areaConfig = BUSINESS_CONFIG.areasOfTown[job.areaOfTown];
+				initialView: 'timeGridWeek',
+				headerToolbar: {
+					left: 'prev,next today',
+					center: 'title',
+					right: 'dayGridMonth,timeGridWeek,timeGridDay'
+				},
 
-				const html = `
-					<div class="calendar-event" 
-					     style="background-color: ${areaConfig.color};">
-						<div class="calendar-event__title">${arg.event.title}</div>
-						<div class="calendar-event__crew">
-							${job.assignedCrew.map((crew) => 
-								`<span class="calendar-event__crew-member">${crew}</span>`
-							).join('')}
+				editable: true,
+				selectable: true,
+				selectMirror: true,
+				dayMaxEvents: true,
+
+				eventContent: (arg: any) => {
+					const job = arg.event.extendedProps as Job;
+					const areaConfig = BUSINESS_CONFIG.areasOfTown[job.areaOfTown];
+
+					const html = `
+						<div class="calendar-event" style="background-color: ${areaConfig.color};">
+							<div class="calendar-event__title">${arg.event.title}</div>
+							<div class="calendar-event__crew">
+								${job.assignedCrew.map((crew: string) => 
+									`<span class="calendar-event__crew-member">${crew}</span>`
+								).join('')}
+							</div>
 						</div>
-					</div>
-				`;
+					`;
 
-				const div = document.createElement('div');
-				div.innerHTML = html;
-				return { domNodes: [div] };
-			},
+					const div = document.createElement('div');
+					div.innerHTML = html;
+					return { domNodes: [div] };
+				},
 
-			eventClick: (info) => {
-				console.log('Job clicked:', info.event.extendedProps);
-			},
+				events: async (fetchInfo: any, successCallback: any) => {
+					const fetchedJobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
+					const events = fetchedJobs.map((job: Job) => ({
+						id: job.id?.toString(),
+						title: job.title,
+						start: job.start,
+						end: job.end,
+						extendedProps: job
+					}));
+					successCallback(events);
+				}
+			});
 
-			events: async (fetchInfo, successCallback) => {
-				const fetchedJobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
-				const events = fetchedJobs.map((job) => ({
-					id: job.id?.toString(),
-					title: job.title,
-					start: job.start,
-					end: job.end,
-					extendedProps: job
-				}));
-				successCallback(events);
-			}
-		});
+			calendar.render();
+		} catch (err) {
+			console.error('Failed to load FullCalendar:', err);
+		}
 
-		calendar.render();
-
-		return () => calendar?.destroy();
+		return () => {
+			calendar?.destroy();
+		};
 	});
 </script>
 
 <div class="calendar-wrapper">
-	<div bind:this={calendarEl} class="calendar"></div>
+	{#if browser}
+		<div bind:this={calendarEl} class="calendar"></div>
+	{:else}
+		<div class="calendar-loading">Loading scheduler...</div>
+	{/if}
 </div>
 
 <style>
@@ -92,8 +100,14 @@
 		margin: 0 auto;
 	}
 
-	/* BEM Base Styles */
-	.calendar-event {
+	.calendar-loading {
+		padding: 4rem 2rem;
+		text-align: center;
+		color: #64748b;
+		font-size: 1.1rem;
+	}
+
+	:global(.calendar-event) {
 		padding: 6px 8px;
 		border-radius: 6px;
 		font-size: 0.875rem;
@@ -102,19 +116,19 @@
 		line-height: 1.3;
 	}
 
-	.calendar-event__title {
+	:global(.calendar-event__title) {
 		font-weight: 600;
 		margin-bottom: 4px;
 	}
 
-	.calendar-event__crew {
+	:global(.calendar-event__crew) {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 4px;
 		margin-top: 4px;
 	}
 
-	.calendar-event__crew-member {
+	:global(.calendar-event__crew-member) {
 		background: rgba(255, 255, 255, 0.3);
 		padding: 1px 7px;
 		border-radius: 9999px;
