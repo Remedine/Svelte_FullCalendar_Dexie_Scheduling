@@ -1,9 +1,4 @@
 import Dexie, { type EntityTable } from 'dexie';
-import { BUSINESS_CONFIG, type AreaOfTown } from '$lib/config';
-
-// =======================
-// TYPES
-// =======================
 
 export interface Client {
 	id?: number;
@@ -12,35 +7,14 @@ export interface Client {
 	serviceAddressCity: string;
 	serviceAddressState: string;
 	serviceAddressZip: string;
-	areaOfTown: AreaOfTown;
-	billingAddressStreet?: string;
-	billingAddressCity?: string;
-	billingAddressState?: string;
-	billingAddressZip?: string;
-	preferredBillingMethod: 'check' | 'credit-debit' | 'cash' | 'btc';
+	areaOfTown: 'thane' | 'downtown' | 'douglas';
+	preferredBillingMethod: 'email' | 'check' | 'invoice';
 	phone: string;
 	email: string;
 	notes?: string;
-	createdAt: Date;
-	updatedAt: Date;
+	createdAt: Date | string;
+	updatedAt: Date | string;
 }
-
-// ========================
-// BILLABLE ITEM
-// ========================
-
-export interface BillableItem {
-	id?: string;
-	title: string;
-	price: number;
-	quantity: number;
-	total: number;
-	description?: string;
-}
-
-// ========================
-// JOB
-// ========================
 
 export interface Job {
 	id?: number;
@@ -49,92 +23,41 @@ export interface Job {
 	start: Date;
 	end: Date;
 	assignedCrew: string[];
-	status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled';
-	billableItems: BillableItem[];
+	status: 'scheduled' | 'confirmed' | 'completed';
+	billableItems: Array<{
+		title: string;
+		price: number;
+		quantity: number;
+		total: number;
+	}>;
 	subtotal: number;
-	taxRate?: number;
-	taxAmount?: number;
+	taxRate: number;
+	taxAmount: number;
 	totalAmount: number;
-	notes?: string;
-	areaOfTown: AreaOfTown;
-	invoiceSentAt?: Date;
-	invoicePaidAt?: Date;
-	createdAt: Date;
-	updatedAt: Date;
-}
-
-// ========================
-// SERVICE HISTORY
-// ========================
-
-export interface ServiceHistory {
-	id?: number;
-	clientId: number;
-	jobId: number;
-	serviceDate: Date;
-	serviceType: string;
-	price: number;
+	areaOfTown: 'thane' | 'downtown' | 'douglas';
 	notes?: string;
 	createdAt: Date;
 	updatedAt: Date;
 }
 
-// ========================
-// DATABASE
-// ========================
-
-export const db = new Dexie('CapitalCityWindows') as Dexie & {
+const db = new Dexie('CapitalCityWindows') as Dexie & {
 	clients: EntityTable<Client, 'id'>;
 	jobs: EntityTable<Job, 'id'>;
-	serviceHistory: EntityTable<ServiceHistory, 'id'>;
 };
 
 db.version(1).stores({
-	clients: '++id, name, areaOfTown, email, phone, createdAt',
-	jobs: '++id, clientId, start, end, status, areaOfTown, *assignedCrew, createdAt',
-	serviceHistory: '++id, clientId, jobId, serviceDate'
+	clients: '++id, name, areaOfTown, email',
+	jobs: '++id, clientId, start, end, status, areaOfTown'
 });
 
-// ========================
-// HELPER FUNCTIONS
-// ========================
-
-/** Calculate totals for a job */
-export function calculateJobTotals(billableItems: BillableItem[], customTaxRate?: number) {
-	const subtotal = billableItems.reduce((sum, item) => {
-		return sum + (item.total || item.price * item.quantity);
-	}, 0);
-
-	const taxRate = customTaxRate ?? BUSINESS_CONFIG.defaultTaxRate;
-	const taxAmount = subtotal * taxRate;
-	const totalAmount = subtotal + taxAmount;
-
-	return { subtotal, taxRate, taxAmount, totalAmount };
+export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
+	return await db.jobs.where('start').between(start, end, true, true).toArray();
 }
 
-/** Get jobs for FullCalendar in a date range */
-export async function getJobsForRange(start: Date, end: Date) {
-	return await db.jobs
-		.where('start')
-		.between(start, end, true, true) // inclusive on both ends
-		.sortBy('start');
+export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
+	const now = new Date();
+	return await db.jobs.where('start').aboveOrEqual(now).limit(limit).toArray();
 }
 
-/** Get client + all their jobs */
-export async function getClientWithJobs(clientId: number) {
-	const client = await db.clients.get(clientId);
-	const jobs = await db.jobs.where('clientId').equals(clientId).sortBy('start');
-
-	return { client, jobs };
-}
-
-/** Get upcoming jobs for the next N days */
-export async function getUpcomingJobs(daysAhead: number) {
-	const start = new Date();
-	const end = new Date();
-	end.setDate(end.getDate() + daysAhead);
-
-	return await getJobsForRange(start, end);
-}
-
-export default db;
+export { db };
+export type { Client, Job };

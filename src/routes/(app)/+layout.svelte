@@ -95,6 +95,7 @@
 	/* Main Content */
 	.main-content {
 		flex: 1;
+		min-height: 0;
 		overflow: auto;
 		padding: 0;
 	}

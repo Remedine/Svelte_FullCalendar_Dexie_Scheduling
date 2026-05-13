@@ -1,137 +1,91 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
+	import { Calendar } from '@fullcalendar/core';
+	import dayGridPlugin from '@fullcalendar/daygrid';
+	import timeGridPlugin from '@fullcalendar/timegrid';
+	import interactionPlugin from '@fullcalendar/interaction';
+	import multiMonthPlugin from '@fullcalendar/multimonth';
 
-	import { BUSINESS_CONFIG } from '$lib/config';
-	import type { Job } from '$lib/db';
-	import { getJobsForRange } from '$lib/db';
+	import { getJobsForRange } from '$lib/db/index';
+	import { forceSeed } from '$lib/db/seed';
 
-	let { jobs = [] }: { jobs?: Job[] } = $props();
+	let calendarEl: HTMLDivElement;
+	let calendarInstance: Calendar | null = $state(null);
 
-	let calendarEl = $state<HTMLElement | null>(null);
-	let calendar: any = $state(null);
-
-	// Only run on client
 	onMount(async () => {
-		if (!browser) return;
+		// )=- Force seed
+		await forceSeed();
 
-		try {
-			const { Calendar } = await import('@fullcalendar/core');
-			const dayGrid = await import('@fullcalendar/daygrid');
-			const timeGrid = await import('@fullcalendar/timegrid');
-			const interaction = await import('@fullcalendar/interaction');
+		calendarInstance = new Calendar(calendarEl, {
+			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin],
+			initialView: 'timeGridWeek',
+			editable: true,
+			selectable: true,
+			height: '100%',           // )=- Critical
+			expandRows: true,         // )=- Helps fill the space
+			headerToolbar: {
+				left: 'prev,next today',
+				center: 'title',
+				right: 'dayGridMonth,timeGridWeek,timeGridDay'
+			},
+			events: async (fetchInfo, successCallback) => {
+				const jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
+				console.log(`📅 Loaded ${jobs.length} jobs for range`, jobs); // )=- Debug
 
-			calendar = new Calendar(calendarEl!, {
-				plugins: [dayGrid.default, timeGrid.default, interaction.default],
+				const events = jobs.map((job: any) => ({
+					id: job.id?.toString() || '',
+					title: `${job.title} — ${job.assignedCrew.join(', ')}`,
+					start: job.start,
+					end: job.end,
+					backgroundColor: getEventColor(job.areaOfTown),
+					extendedProps: {
+						clientId: job.clientId,
+						assignedCrew: job.assignedCrew,
+						status: job.status,
+						areaOfTown: job.areaOfTown
+					}
+				}));
 
-				initialView: 'timeGridWeek',
-				headerToolbar: {
-					left: 'prev,next today',
-					center: 'title',
-					right: 'dayGridMonth,timeGridWeek,timeGridDay'
-				},
+				successCallback(events);
+			}
+		});
 
-				editable: true,
-				selectable: true,
-				selectMirror: true,
-				dayMaxEvents: true,
+		calendarInstance.render();
+	});
 
-				eventContent: (arg: any) => {
-					const job = arg.event.extendedProps as Job;
-					const areaConfig = BUSINESS_CONFIG.areasOfTown[job.areaOfTown];
-
-					const html = `
-						<div class="calendar-event" style="background-color: ${areaConfig.color};">
-							<div class="calendar-event__title">${arg.event.title}</div>
-							<div class="calendar-event__crew">
-								${job.assignedCrew.map((crew: string) => 
-									`<span class="calendar-event__crew-member">${crew}</span>`
-								).join('')}
-							</div>
-						</div>
-					`;
-
-					const div = document.createElement('div');
-					div.innerHTML = html;
-					return { domNodes: [div] };
-				},
-
-				events: async (fetchInfo: any, successCallback: any) => {
-					const fetchedJobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
-					const events = fetchedJobs.map((job: Job) => ({
-						id: job.id?.toString(),
-						title: job.title,
-						start: job.start,
-						end: job.end,
-						extendedProps: job
-					}));
-					successCallback(events);
-				}
-			});
-
-			calendar.render();
-		} catch (err) {
-			console.error('Failed to load FullCalendar:', err);
+	function getEventColor(area: string): string {
+		switch (area) {
+			case 'thane': return '#3b82f6';
+			case 'downtown': return '#10b981';
+			case 'douglas': return '#8b5cf6';
+			default: return '#6b7280';
 		}
+	}
 
-		return () => {
-			calendar?.destroy();
-		};
+	// Cleanup
+	$effect(() => {
+		return () => calendarInstance?.destroy();
 	});
 </script>
 
 <div class="calendar-wrapper">
-	{#if browser}
-		<div bind:this={calendarEl} class="calendar"></div>
-	{:else}
-		<div class="calendar-loading">Loading scheduler...</div>
-	{/if}
+	<div bind:this={calendarEl} class="calendar-container"></div>
 </div>
 
 <style>
 	.calendar-wrapper {
-		padding: 1rem;
-		height: 100%;
-		background: white;
-	}
-
-	.calendar {
-		max-width: 100%;
-		margin: 0 auto;
-	}
-
-	.calendar-loading {
-		padding: 4rem 2rem;
-		text-align: center;
-		color: #64748b;
-		font-size: 1.1rem;
-	}
-
-	:global(.calendar-event) {
-		padding: 6px 8px;
-		border-radius: 6px;
-		font-size: 0.875rem;
-		color: white;
-		overflow: hidden;
-		line-height: 1.3;
-	}
-
-	:global(.calendar-event__title) {
-		font-weight: 600;
-		margin-bottom: 4px;
-	}
-
-	:global(.calendar-event__crew) {
+		height: 100vh;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-		margin-top: 4px;
+		flex-direction: column;
+		padding: 1rem;
+		background: #f8fafc;
 	}
 
-	:global(.calendar-event__crew-member) {
-		background: rgba(255, 255, 255, 0.3);
-		padding: 1px 7px;
-		border-radius: 9999px;
-		font-size: 0.75rem;
+	.calendar-container {
+		flex: 1;           /* )=- This is the key fix */
+		min-height: 0;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		overflow: hidden;
 	}
 </style>

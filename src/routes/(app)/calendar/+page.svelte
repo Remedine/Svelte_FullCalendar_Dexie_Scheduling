@@ -29,7 +29,7 @@
 
 <style>
 	.page {
-		height: 100dvh;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
 		background-color: #f8fafc;
@@ -58,5 +58,6 @@
 		flex: 1;
 		overflow: hidden;
 		padding: 0.5rem;
+		min-width: 0;
 	}
 </style>
