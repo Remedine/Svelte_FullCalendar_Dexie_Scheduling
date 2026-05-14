@@ -5,11 +5,11 @@
 	import timeGridPlugin from '@fullcalendar/timegrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import multiMonthPlugin from '@fullcalendar/multimonth';
-
 	import { getJobsForRange, updateJobDates, createJob } from '$lib/db/index';
 	import { seedSampleData } from '$lib/db/seed';
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import type { AreaOfTown } from '$lib/config';
+	import ClientPicker from '$lib/components/ClientPicker.svelte';
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
@@ -31,6 +31,22 @@
 		label: value.label
 	}));
 
+	// Convert Date → datetime-local string (YYYY-MM-DDTHH:mm)
+	function toDatetimeLocal(date: Date): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		return `${year}-${month}-${day}T${hours}:${minutes}`;
+	}
+	// Add Hours Helper
+	function addHours(date: Date, hours: number): Date {
+		const result = new Date(date);
+		result.setHours(result.getHours() + hours);
+		return result;
+	}
+
 	onMount(async () => {
 		await seedSampleData(false);
 
@@ -50,7 +66,12 @@
 
 			select: (info) => {
 				newJob.start = info.start;
-				newJob.end = info.end;
+				newJob.end = addHours(info.start, 2);
+
+				newJob.title = "Full Comercial Window Cleaning"
+				newJob.clientId = null;
+				newJob.assignedCrew = ['Mike'];
+				newJob.areaOfTown = 'than';
 				showNewJobForm = true;
 			},
 
@@ -127,7 +148,7 @@
 	<div bind:this={calendarEl} class="calendar-container"></div>
 </div>
 
-<!-- )=- New Job Modal with full a11y compliance -->
+<!-- )=- New Job Modal -->
 {#if showNewJobForm}
 	<div class="new-job-modal">
 		<div class="new-job-modal__content">
@@ -139,14 +160,35 @@
 					<input id="job-title" class="new-job-modal__input" bind:value={newJob.title} />
 				</div>
 
+				<!-- Added client picker component -->
+				<div class="new-job-modal__field">
+					<label for="client-picker" class="new-job-modal__lable" >Client</label>
+					<ClientPicker 
+						bind:value={newJob.clientId}
+						placeholder="Select client..."
+						/>
+				</div>
+
 				<div class="new-job-modal__field-group">
 					<div class="new-job-modal__field">
 						<label for="job-start" class="new-job-modal__label">Start</label>
-						<input id="job-start" type="datetime-local" class="new-job-modal__input" bind:value={newJob.start} />
+						<input 
+							id="job-start" 
+							type="datetime-local" 
+							class="new-job-modal__input"
+							value={toDatetimeLocal(newJob.start)}
+							oninput={(e) => newJob.start = new Date((e.target as HTMLInputElement).value)} 
+						/>
 					</div>
 					<div class="new-job-modal__field">
 						<label for="job-end" class="new-job-modal__label">End</label>
-						<input id="job-end" type="datetime-local" class="new-job-modal__input" bind:value={newJob.end} />
+						<input 
+							id="job-end" 
+							type="datetime-local" 
+							class="new-job-modal__input" 
+							value={toDatetimeLocal(newJob.end)}
+							oninput={(e) => newJob.end = new Date((e.target as HTMLInputElement).value)}
+							 />
 					</div>
 				</div>
 
