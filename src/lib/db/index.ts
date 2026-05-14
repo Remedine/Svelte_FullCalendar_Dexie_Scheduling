@@ -139,3 +139,4 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 export { db };
 export type { Client, Job };
 export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;
+

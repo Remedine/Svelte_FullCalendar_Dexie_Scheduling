@@ -88,6 +88,15 @@ export const BUSINESS_CONFIG = {
 		{ title: 'Spider Treatment', price: 125, quantity: 1 }
 	],
 
+	//  NEW: Cancellation reasons (centralized)
+	cancelReasons: [
+		'Customer cancelled',
+		'Scheduling conflict',
+		'Weather / No access',
+		'Crew unavailable',
+		'Other'
+	] as const,
+
 	// === Job Settings ===
 	defaultJobDurationHours: 4,
 	defaultStartTime: '09:00',
@@ -96,6 +105,8 @@ export const BUSINESS_CONFIG = {
 	invoiceDueDays: 15,
 	currency: 'USD'
 } as const;
+
+
 
 // ========================
 // DERIVED TYPES

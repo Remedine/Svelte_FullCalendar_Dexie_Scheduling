@@ -15,6 +15,7 @@
     let isOpen = $state(false);
     let selectedClient = $state<Client | null>(null);
     let inputEl= $state<HTMLInputElement>();
+	let buttonEl = $state<HTMLButtonElement>();
 
     //load clients from Dexie
     onMount(async () => {

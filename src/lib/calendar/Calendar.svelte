@@ -20,7 +20,7 @@
 		title: 'Full Exterior Window Cleaning',
 		start: new Date(),
 		end: new Date(),
-		clientId: 1 as number,
+		clientId: null as number | null,
 		assignedCrew: ['Mike'] as string[],
 		areaOfTown: 'thane' as AreaOfTown,
 		notes: '' as string,
@@ -102,10 +102,25 @@
 				}
 			},
 
-			eventClick: (info) => {
-				const props = info.event.extendedProps;
-				const message = `🪟 ${info.event.title}\n📍 ${props.areaOfTown}\n👥 ${props.assignedCrew?.join(', ') || 'None'}\n🕒 ${info.event.start?.toLocaleString() || ''}`;
-				confirm(message);
+			eventClick: async (info) => {
+				const job = info.event.extendedProps as any;
+				if (!job?.id) return;
+				
+
+				isEditing = true;
+				editingJobId = job.id;
+
+				currentJob.title = job.title;
+				currentJob.start = new Date(job.start);
+				currentJob.end = new Date(job.end);
+				currentJob.clientId = job.clientId;
+				currentJob.assignedCrew = [...(job.assignedCrew || [])];
+				currentJob.areaOfTown = job.areaOfTown;
+				currentJob.notes = job.notes || '';
+				currentJob.cancelReason = job.cancelReason || '';
+				currentJob.cancelNotes = job.cancelNotes || '';
+
+				showJobForm = true;
 			},
 
 			events: async (fetchInfo, successCallback) => {
@@ -132,24 +147,71 @@
 		return BUSINESS_CONFIG.areasOfTown?.[area as keyof typeof BUSINESS_CONFIG.areasOfTown]?.color || '#6b7280';
 	}
 
-		// )=- Updated createNewJob
-	async function createNewJob() {
-		try {
-			await createJob({
-				clientId: newJob.clientId,
-				title: newJob.title,
-				start: newJob.start,
-				end: newJob.end,
-				assignedCrew: newJob.assignedCrew,
-				areaOfTown: newJob.areaOfTown
-			});
+	// Save or update job
+	async function saveJob() {
+		if (currentJob.end <= currentJob.start) {
+			alert('End time must be after start time');
+			return;
+		}
 
-			showNewJobForm = false;
+		if (!currentJob.clientId) {
+			alert('Please select a client');
+			return;
+		}
+
+		try {
+			if (isEditing && editingJobId) {
+				await updateJob(editingJobId, {
+					title: currentJob.title,
+					start: currentJob.start,
+					end: currentJob.end,
+					clientId: currentJob.clientId,
+					assignedCrew: [...currentJob.assignedCrew],
+					areaOfTown: currentJob.areaOfTown,
+					notes: currentJob.notes || undefined
+				});
+				alert('✅ Job updated successfully!');
+			} else {
+				await createJob({
+					clientId: currentJob.clientId,
+					title: currentJob.title,
+					start: currentJob.start,
+					end: currentJob.end,
+					assignedCrew: [...currentJob.assignedCrew],
+					areaOfTown: currentJob.areaOfTown
+			});
+				alert('✅ Job created successfully!');
+			}
+
+			showJobForm = false;
 			calendarInstance?.refetchEvents();
-			alert('✅ Job saved successfully!');
 		} catch (err) {
-			console.error('Failed to create job', err);
+			console.error('Failed to save job', err);
 			alert('❌ Error saving job - check console');
+		}
+	}
+
+	//  Cancel confirmation dialog state
+	let showCancelConfirm = $state(false);
+	let selectedCancelReason = $state('');
+
+	const cancelReasons = BUSINESS_CONFIG.cancelReasons;
+
+	//  Handle job cancellation
+	async function confirmCancel() {
+		if (!editingJobId || !selectedCancelReason) {
+			alert('Please select a reason');
+			return;
+		}
+
+		try {
+			await cancelJob(editingJobId, selectedCancelReason, currentJob.cancelNotes || undefined);
+			showCancelConfirm = false;
+			showJobForm = false;
+			calendarInstance?.refetchEvents();
+			alert('❌ Job cancelled successfully');
+		} catch (err) {
+			console.error('Failed to cancel job', err);
 		}
 	}
 
@@ -163,22 +225,24 @@
 </div>
 
 <!-- )=- New Job Modal -->
-{#if showNewJobForm}
+{#if showJobForm}
 	<div class="new-job-modal">
 		<div class="new-job-modal__content">
-			<h2 class="new-job-modal__title">Create New Job</h2>
+			<h2 class="new-job-modal__title">
+				{isEditing ? 'Edit Job' : 'Create New Job'}
+			</h2>
 
 			<div class="new-job-modal__form">
 				<div class="new-job-modal__field">
 					<label for="job-title" class="new-job-modal__label">Title</label>
-					<input id="job-title" class="new-job-modal__input" bind:value={newJob.title} />
+					<input id="job-title" class="new-job-modal__input" bind:value={currentJob.title} />
 				</div>
 
 				<!-- Added client picker component -->
 				<div class="new-job-modal__field">
-					<label for="client-picker" class="new-job-modal__lable" >Client</label>
+					<label for="client-picker" class="new-job-modal__label" >Client</label>
 					<ClientPicker 
-						bind:value={newJob.clientId}
+						bind:value={currentJob.clientId}
 						placeholder="Select client..."
 						/>
 				</div>
@@ -190,8 +254,8 @@
 							id="job-start" 
 							type="datetime-local" 
 							class="new-job-modal__input"
-							value={toDatetimeLocal(newJob.start)}
-							oninput={(e) => newJob.start = new Date((e.target as HTMLInputElement).value)} 
+							value={toDatetimeLocal(currentJob.start)}
+							oninput={(e) => currentJob.start = new Date((e.target as HTMLInputElement).value)} 
 						/>
 					</div>
 					<div class="new-job-modal__field">
@@ -200,15 +264,15 @@
 							id="job-end" 
 							type="datetime-local" 
 							class="new-job-modal__input" 
-							value={toDatetimeLocal(newJob.end)}
-							oninput={(e) => newJob.end = new Date((e.target as HTMLInputElement).value)}
+							value={toDatetimeLocal(currentJob.end)}
+							oninput={(e) => currentJob.end = new Date((e.target as HTMLInputElement).value)}
 							 />
 					</div>
 				</div>
 
 				<div class="new-job-modal__field">
 					<label for="job-area" class="new-job-modal__label">Area of Town</label>
-					<select id="job-area" class="new-job-modal__input" bind:value={newJob.areaOfTown}>
+					<select id="job-area" class="new-job-modal__input" bind:value={currentJob.areaOfTown}>
 						{#each areaOptions as option (option.value)}
 							<option value={option.value}>{option.label}</option>
 						{/each}
@@ -223,12 +287,12 @@
 							<label class="new-job-modal__crew-option">
 								<input 
 									type="checkbox" 
-									checked={newJob.assignedCrew.includes(crew)}
+									checked={currentJob.assignedCrew.includes(crew)}
 									onchange={(e) => {
 										if ((e.currentTarget as HTMLInputElement).checked) {
-											newJob.assignedCrew = [...newJob.assignedCrew, crew];
+											currentJob.assignedCrew = [...currentJob.assignedCrew, crew];
 										} else {
-											newJob.assignedCrew = newJob.assignedCrew.filter(c => c !== crew);
+											currentJob.assignedCrew = currentJob.assignedCrew.filter(c => c !== crew);
 										}
 									}}
 								/>
@@ -240,11 +304,74 @@
 			</div>
 
 			<div class="new-job-modal__actions">
-				<button class="new-job-modal__btn new-job-modal__btn--cancel" onclick={() => showNewJobForm = false}>
-					Cancel
+				{#if isEditing}
+					<button 
+						class="new-job-modal__btn new-job-modal__btn--cancel-job"
+						onclick={() => showCancelConfirm = true}
+					>
+						Cancel Job
+					</button>
+				{/if}
+
+				<button class="new-job-modal__btn new-job-modal__btn--cancel" onclick={() => { 
+					showJobForm = false; 
+					showCancelConfirm = false;
+				}}>
+					{isEditing ? 'Close' : 'Cancel'}
 				</button>
-				<button class="new-job-modal__btn new-job-modal__btn--primary" onclick={createNewJob}>
-					Create Job
+				
+				<button class="new-job-modal__btn new-job-modal__btn--primary" onclick={saveJob}>
+					{isEditing ? 'Save Changes' : 'Create Job'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Cancel Confirmation Dialog -->
+{#if showCancelConfirm}
+	<div class="cancel-confirm-modal">
+		<div class="cancel-confirm-modal__content">
+			<h3 class="cancel-confirm-modal__title">Cancel Job?</h3>
+			<p class="cancel-confirm-modal__subtitle">Please select a reason:</p>
+
+			<div class="cancel-reasons">
+				{#each cancelReasons as reason}
+					<label class="reason-option">
+						<input 
+							type="radio" 
+							name="cancelReason"
+							value={reason}
+							bind:group={selectedCancelReason}
+						/>
+						{reason}
+					</label>
+				{/each}
+			</div>
+
+			<div class="new-job-modal__field">
+				<label class="new-job-modal__label">Additional notes (optional)</label>
+				<textarea 
+					class="new-job-modal__input" 
+					rows="3"
+					bind:value={currentJob.cancelNotes}
+					placeholder="Any extra details..."
+				></textarea>
+			</div>
+
+			<div class="cancel-confirm-modal__actions">
+				<button 
+					class="new-job-modal__btn new-job-modal__btn--cancel"
+					onclick={() => showCancelConfirm = false}
+				>
+					Nevermind
+				</button>
+				<button 
+					class="new-job-modal__btn new-job-modal__btn--cancel-job"
+					onclick={confirmCancel}
+					disabled={!selectedCancelReason}
+				>
+					Confirm Cancellation
 				</button>
 			</div>
 		</div>
@@ -367,5 +494,52 @@
 
 	.new-job-modal__btn--primary:hover {
 		background: #2563eb;
+	}
+		.new-job-modal__btn--cancel-job {
+		background: transparent;
+		color: #ef4444;
+		border: 1px solid #ef4444;
+	}
+
+	.new-job-modal__btn--cancel-job:hover {
+		background: #fee2e2;
+	}
+
+	/* Cancel Confirmation Modal */
+	.cancel-confirm-modal {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.7);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1100;
+	}
+
+	.cancel-confirm-modal__content {
+		background: white;
+		padding: 2rem;
+		border-radius: 12px;
+		min-width: 420px;
+		max-width: 90%;
+	}
+
+	.cancel-confirm-modal__title {
+		margin: 0 0 0.5rem 0;
+		color: #ef4444;
+	}
+
+	.cancel-reasons {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin: 1rem 0;
+	}
+
+	.reason-option {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
 	}
 </style>
