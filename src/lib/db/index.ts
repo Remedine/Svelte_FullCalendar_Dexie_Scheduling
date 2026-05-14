@@ -24,7 +24,7 @@ export interface Job {
 	start: Date;
 	end: Date;
 	assignedCrew: string[];
-	status: 'scheduled' | 'confirmed' | 'completed';
+	status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
 	billableItems: Array<{
 		title: string;
 		price: number;
@@ -37,6 +37,10 @@ export interface Job {
 	totalAmount: number;
 	areaOfTown: 'thane' | 'downtown' | 'douglas';
 	notes?: string;
+	cancelReason?: string;
+	cancelNotes?: string;
+	cancelledAt?: Date;
+	cancelledBy: string;
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -46,16 +50,42 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(1).stores({
+db.version(2).stores({
 	clients: '++id, name, areaOfTown, email',
 	jobs: '++id, clientId, start, end, status, areaOfTown'
 });
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
-	return await db.jobs.where('start').between(start, end, true, true).toArray();
+	return await db.jobs
+	.where('start')
+	.between(start, end, true, true)
+	.and(job => job.status !== 'cancelled')
+	.toArray();
 }
 
-// )=- Used by drag & drop
+// Helper Editing and cancelling jobs
+export async function updateJob(jobId: number, updates: Partial<Job>) {
+	await db.jobs.update(jobId, {
+		...updates,
+		updatedAt: new Date()
+	});
+	console.log(`✅ Job ${jobId} updated`);
+}
+
+// Cancel Job
+export async function cancelJob(jobId: number, cancelReason: string, notes?: string) {
+	await db.jobs.update(jobId, {
+		status: 'cancelled',
+		cancelReason,
+		cancelledAt: new Date(),
+		cancelledBy: 'User', // TODO: replace with real user later
+		notes: notes || undefined,
+		updatedAt: new Date() 
+	});
+	console.log(`❌ Job ${jobId} cancelled with reason: ${cancelReason}`);
+}
+
+// Used by drag & drop
 export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date) {
 	await db.jobs.update(jobId, {
 		start: newStart,
@@ -65,14 +95,14 @@ export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date
 	console.log(`✅ Job ${jobId} rescheduled`);
 }
 
-// )=- NEW: Save new job from modal
+// )=- NEW: Create new job 
 export async function createJob(jobData: any): Promise<number> {
 	const newJob = {
 		clientId: Number(jobData.clientId),
 		title: String(jobData.title),
 		start: new Date(jobData.start),
 		end: new Date(jobData.end),
-		assignedCrew: [...jobData.assignedCrew], // )=- shallow copy array
+		assignedCrew: [...jobData.assignedCrew], // shallow copy array
 		areaOfTown: jobData.areaOfTown,
 		status: 'scheduled' as const,
 		createdAt: new Date(),
@@ -96,10 +126,14 @@ export async function createJob(jobData: any): Promise<number> {
 	return id;
 }
 
-// )=- Added back for your +page.svelte
+// Added back for your +page.svelte
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 	const now = new Date();
-	return await db.jobs.where('start').aboveOrEqual(now).limit(limit).toArray();
+	return await db.jobs
+	.where('start').aboveOrEqual(now)
+	.and(job => job.status !== 'cancelled')
+	.limit(limit)
+	.toArray();
 }
 
 export { db };
