@@ -136,19 +136,22 @@
 </div>
 
 <style>
-.client-picker {
+	.client-picker { 
 		font-family: inherit;
+		width: 100%;                    
 	}
 
 	.selected-display {
 		display: flex;
 		align-items: center;
+		width: 100%;                   
+		background: white;
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		padding: 0.75rem 1rem;
-		background: white;
 		cursor: pointer;
-		position: relative;
+		text-align: left;
+		font-size: 1rem;
 	}
 
 	.selected-display input {
@@ -186,17 +189,36 @@
 		border-bottom: 1px solid #f1f5f9;
 	}
 
-	.option:hover {
+	.option:hover,
+	.option:focus {
 		background: #f8fafc;
 	}
 
 	.option.selected {
 		background: #eff6ff;
+		font-weight: 500;               
+	}
+
+	.option small {
+		display: block;
+		margin-top: 2px;
+		color: #64748b;
 	}
 
 	.no-results {
 		padding: 1rem;
 		text-align: center;
 		color: #64748b;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		border: 0;
 	}
 </style>

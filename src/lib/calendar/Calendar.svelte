@@ -306,23 +306,25 @@
 			<div class="new-job-modal__actions">
 				{#if isEditing}
 					<button 
-						class="new-job-modal__btn new-job-modal__btn--cancel-job"
+						class="cancel-job-text"
 						onclick={() => showCancelConfirm = true}
 					>
 						Cancel Job
 					</button>
 				{/if}
 
-				<button class="new-job-modal__btn new-job-modal__btn--cancel" onclick={() => { 
-					showJobForm = false; 
-					showCancelConfirm = false;
-				}}>
-					{isEditing ? 'Close' : 'Cancel'}
-				</button>
-				
-				<button class="new-job-modal__btn new-job-modal__btn--primary" onclick={saveJob}>
-					{isEditing ? 'Save Changes' : 'Create Job'}
-				</button>
+				<div class="actions-right">
+					<button class="new-job-modal__btn new-job-modal__btn--cancel" onclick={() => { 
+						showJobForm = false; 
+						showCancelConfirm = false;
+					}}>
+						{isEditing ? 'Close' : 'Cancel'}
+					</button>
+					
+					<button class="new-job-modal__btn new-job-modal__btn--primary" onclick={saveJob}>
+						{isEditing ? 'Save Changes' : 'Create Job'}
+					</button>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -535,11 +537,36 @@
 		gap: 0.75rem;
 		margin: 1rem 0;
 	}
-
+	.actions-right {
+		display: flex;
+		gap: 1rem;
+	}
+	.new-job-modal__actions {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-top: 1rem;
+	}
 	.reason-option {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		cursor: pointer;
+	}
+	.cancel-job-text {
+		background: none;
+		border: none;
+		color: #ef4444;
+		font-size: 0.95rem;
+		cursor: pointer;
+		padding: 0.5rem 0;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		font-weight: 500;
+	}
+
+	.cancel-job-text:hover {
+		color: #dc2626;
+		text-decoration-thickness: 2px;
 	}
 </style>
