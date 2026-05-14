@@ -5,7 +5,7 @@
 	import timeGridPlugin from '@fullcalendar/timegrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import multiMonthPlugin from '@fullcalendar/multimonth';
-	import { getJobsForRange, updateJobDates, createJob } from '$lib/db/index';
+	import { getJobsForRange, updateJobDates, createJob, updateJob, cancelJob } from '$lib/db/index';
 	import { seedSampleData } from '$lib/db/seed';
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import type { AreaOfTown } from '$lib/config';
@@ -14,16 +14,23 @@
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
 
-	// )=- New job form state
-	let showNewJobForm = $state(false);
-	let newJob = $state({
+	//  New Job form state
+	let showJobForm = $state(false);
+	let currentJob = $state({
 		title: 'Full Exterior Window Cleaning',
 		start: new Date(),
 		end: new Date(),
 		clientId: 1 as number,
 		assignedCrew: ['Mike'] as string[],
-		areaOfTown: 'thane' as AreaOfTown
+		areaOfTown: 'thane' as AreaOfTown,
+		notes: '' as string,
+		cancelReason: '' as string,
+		cancelNotes: '' as string
 	});
+
+	// Edit mode state
+	let isEditing = $state(false);
+	let editingJobId = $state<number | null>(null);
 
 	const crewOptions = BUSINESS_CONFIG.crewMembers;
 	const areaOptions = Object.entries(BUSINESS_CONFIG.areasOfTown).map(([key, value]) => ({
@@ -65,14 +72,21 @@
 			},
 
 			select: (info) => {
-				newJob.start = info.start;
-				newJob.end = addHours(info.start, 2);
+				//reset for new job
+				isEditing = false;
+				editingJobId = null;
 
-				newJob.title = "Full Comercial Window Cleaning"
-				newJob.clientId = null;
-				newJob.assignedCrew = ['Mike'];
-				newJob.areaOfTown = 'than';
-				showNewJobForm = true;
+				currentJob.start = info.start;
+				currentJob.end = addHours(info.start, 2);
+				currentJob.title = "Window Cleaning"
+				currentJob.clientId = null;
+				currentJob.assignedCrew = ['Mike'];
+				currentJob.areaOfTown = 'thane';
+				currentJob.notes = '';
+				currentJob.cancelReason = '';
+				currentJob.cancelNotes = '';
+
+				showJobForm = true;
 			},
 
 			eventDrop: async (info) => {
