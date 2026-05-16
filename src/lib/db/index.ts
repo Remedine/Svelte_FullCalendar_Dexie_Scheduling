@@ -97,28 +97,35 @@ export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date
 
 // )=- NEW: Create new job 
 export async function createJob(jobData: any): Promise<number> {
+	const billableItems = jobData.billableItems?.length
+		? jobData.billableItems.map((item: any) => ({ ...item }))
+		: [
+				{
+					title: String(jobData.title),
+					price: 450,
+					quantity: 1,
+					total: 450
+				}
+			];
+
 	const newJob = {
 		clientId: Number(jobData.clientId),
 		title: String(jobData.title),
 		start: new Date(jobData.start),
 		end: new Date(jobData.end),
-		assignedCrew: [...jobData.assignedCrew], // shallow copy array
+		assignedCrew: [...jobData.assignedCrew],
 		areaOfTown: jobData.areaOfTown,
 		status: 'scheduled' as const,
+		notes: jobData.notes || undefined,
 		createdAt: new Date(),
 		updatedAt: new Date(),
-		billableItems: [
-			{
-				title: String(jobData.title),
-				price: 450,
-				quantity: 1,
-				total: 450
-			}
-		],
-		subtotal: 450,
+		billableItems,
+		subtotal:
+			jobData.subtotal ||
+			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
 		taxRate: BUSINESS_CONFIG.defaultTaxRate,
-		taxAmount: 450 * BUSINESS_CONFIG.defaultTaxRate,
-		totalAmount: 450 * (1 + BUSINESS_CONFIG.defaultTaxRate)
+		taxAmount: jobData.taxAmount || 0,
+		totalAmount: jobData.totalAmount || 0
 	};
 
 	const id = await db.jobs.add(newJob);

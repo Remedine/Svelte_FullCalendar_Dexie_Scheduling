@@ -10,41 +10,47 @@
     } = $props();
 
     let clients = $state<Client[]>([]);
-    let filteredClients = $state<Client[]>([]);
     let searchTerm = $state('');
     let isOpen = $state(false);
     let selectedClient = $state<Client | null>(null);
-    let inputEl= $state<HTMLInputElement>();
-	let buttonEl = $state<HTMLButtonElement>();
+    let inputEl = $state<HTMLInputElement>();
+    let buttonEl = $state<HTMLButtonElement>();
 
-    //load clients from Dexie
+    // )=- FIXED: Removed old $state declaration for filteredClients (caused "already declared" error)
+    // )=- Now using clean $derived.by (Svelte 5 best practice for computed lists)
+    let filteredClients = $derived.by(() => {
+        const term = searchTerm.toLowerCase().trim();
+        if (!term) {
+            return [...clients];
+        }
+        return clients.filter(c =>
+            c.name.toLowerCase().includes(term) ||
+            (c.email && c.email.toLowerCase().includes(term)) ||
+            (c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
+        );
+    });
+
+    // Load clients once
     onMount(async () => {
         clients = await db.clients.toArray();
-        filteredClients = [...clients];
-
-        // Set initial selected if value exists
+        
         if (value) {
             selectedClient = clients.find(c => c.id === value) || null;
         }
+
+        console.log(`📋 Loaded ${clients.length} clients from Dexie`);
+        console.table(clients.map(c => ({ 
+            id: c.id, 
+            name: c.name, 
+            email: c.email,
+            area: c.areaOfTown 
+        }))); // )=- DEBUG: see exact data + any duplicates
     });
 
-    //Filter as user types
-    $effect(() => {
-        const term = searchTerm.toLowerCase().trim();
-        if (!term) {
-            filteredClients = clients.filter(c =>
-                c.name.toLocaleLowerCase().includes(term) ||
-                (c.email && c.email.toLowerCase().includes(term)) ||
-                (c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
-            );
-        }
-    });
-    
-    //Select client
-    function selectClient(client: client) {
+    function selectClient(client: Client) {
         value = client.id ?? null;
         selectedClient = client;
-        searchTerm = ''; //clear search
+        searchTerm = ''; 
         isOpen = false;
         onSelect(client);
         inputEl?.focus();
@@ -53,7 +59,7 @@
 	function toggleDropdown() {
 		isOpen = !isOpen;
 		if (isOpen) {
-			setTimeout(() => inputEl?.focus(), 10); // small delay so input is ready
+			setTimeout(() => inputEl?.focus(), 10);
 		}
 	}
 
@@ -68,11 +74,10 @@
 		}
 	}
 
-    // Click outside to close
     function handleClickOutside(e: MouseEvent) {
-        if (inputEl && !inputEl.contains(e.target as Node)) {
+        const target = e.target as Node;
+        if (buttonEl && !buttonEl.contains(target)) {
             isOpen = false;
-            //searchTerm = ''; 
         }
     }
 
@@ -86,8 +91,6 @@
 <div class="client-picker" style="position: relative; width: 100%;">
 	<label for={id} class="sr-only">Select client</label>
 
-	<!-- )=- CHANGED: <button> instead of <div> for proper a11y + click handler -->
-	<!-- )=- REMOVED conflicting onkeydown from button -->
 	<button
 		bind:this={buttonEl}
 		type="button"
@@ -121,13 +124,19 @@
 						class="option"
 						class:selected={client.id === value}
 						role="option"
-                        aria-selected={client.id === value}
+						aria-selected={client.id === value}
 						onclick={() => selectClient(client)}
 						tabindex="0"
 						onkeydown={(e) => e.key === 'Enter' && selectClient(client)}
 					>
 						<strong>{client.name}</strong><br>
-						<small>{client.serviceAddressCity}, {client.serviceAddressState} • {client.email}</small>
+						<small>
+							{client.serviceAddressCity}, {client.serviceAddressState} • 
+							{client.email}
+							{#if client.phone}
+								<br>📞 {client.phone}
+							{/if}
+						</small>
 					</div>
 				{/each}
 			{/if}

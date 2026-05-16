@@ -74,18 +74,13 @@ export const BUSINESS_CONFIG = {
 
 	// === Default Billable Item Templates ===
 	commonBillableItems: [
-		{
-			title: 'Full Exterior Window Cleaning',
-			price: 450,
-			quantity: 1,
-			description: 'Standard residential or small commercial'
-		},
-		{ title: 'Interior Window Cleaning', price: 225, quantity: 1 },
-		{ title: 'High Windows / Skylights', price: 125, quantity: 1 },
-		{ title: 'Roof Moss Cleaning', price: 350, quantity: 1 },
-		{ title: 'Siding / Gutter Cleaning', price: 275, quantity: 1 },
-		{ title: 'Glass Restoration', price: 150, quantity: 1 },
-		{ title: 'Spider Treatment', price: 125, quantity: 1 }
+		{ title: 'Full Exterior Window Cleaning', price: null, quantity: 1, description: 'Standard residential or small commercial'},
+		{ title: 'Interior Window Cleaning', price: null, quantity: 1, description: '' },
+		{ title: 'High Windows / Skylights', price: null, quantity: 1, description: '' },
+		{ title: 'Roof Moss Cleaning', price: null, quantity: 1, description: '' },
+		{ title: 'Siding / Gutter Cleaning', price: null, quantity: 1, description: '' },
+		{ title: 'Glass Restoration', price: null, quantity: 1, description: '' },
+		{ title: 'Spider Treatment', price: null, quantity: 1, description: '' }
 	],
 
 	//  NEW: Cancellation reasons (centralized)

@@ -8,8 +8,6 @@
 	<!-- Top Navigation Bar -->
 	<header class="top-nav">
 		<div class="top-nav__brand">
-			<h1>Capital City Windows</h1>
-			<p class="top-nav__subtitle">Scheduler</p>
 		</div>
 
 		<nav class="top-nav__menu">

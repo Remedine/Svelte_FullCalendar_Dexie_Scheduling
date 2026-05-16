@@ -20,7 +20,6 @@
 <div class="page">
     <header class="page-header">
         <h1>Schedule</h1>
-        <p class="page-subtitle">Capital City Windows • Juneau, AK</p>
     </header>
     <div class="calendar-container">
         <Calendar />

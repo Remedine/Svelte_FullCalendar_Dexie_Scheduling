@@ -1,3 +1,4 @@
+<!-- src/routes/+page.svelte (or your main Calendar component) -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Calendar } from '@fullcalendar/core';
@@ -10,11 +11,12 @@
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import type { AreaOfTown } from '$lib/config';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
+	import BillableItemRow from '$lib/components/BillableItemRow.svelte';
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
 
-	//  New Job form state
+	// )=- currentJob with billableItems (unchanged)
 	let showJobForm = $state(false);
 	let currentJob = $state({
 		title: 'Full Exterior Window Cleaning',
@@ -25,10 +27,20 @@
 		areaOfTown: 'thane' as AreaOfTown,
 		notes: '' as string,
 		cancelReason: '' as string,
-		cancelNotes: '' as string
+		cancelNotes: '' as string,
+		billableItems: [{
+			title: 'Full Exterior Window Cleaning',
+			price: 100,
+			quantity: 1,
+			total: 100
+		}] as Array<{
+			title: string;
+			price: number;
+			quantity: number;
+			total: number;
+		}>
 	});
 
-	// Edit mode state
 	let isEditing = $state(false);
 	let editingJobId = $state<number | null>(null);
 
@@ -38,7 +50,12 @@
 		label: value.label
 	}));
 
-	// Convert Date → datetime-local string (YYYY-MM-DDTHH:mm)
+	let subtotal = $derived.by(() => 
+		currentJob.billableItems.reduce((sum, item) => sum + (item.total || 0), 0)
+	);
+	let taxAmount = $derived.by(() => Math.round(subtotal * BUSINESS_CONFIG.defaultTaxRate * 100) / 100);
+	let totalAmount = $derived.by(() => subtotal + taxAmount); 
+
 	function toDatetimeLocal(date: Date): string {
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -47,11 +64,31 @@
 		const minutes = String(date.getMinutes()).padStart(2, '0');
 		return `${year}-${month}-${day}T${hours}:${minutes}`;
 	}
-	// Add Hours Helper
+
 	function addHours(date: Date, hours: number): Date {
 		const result = new Date(date);
 		result.setHours(result.getHours() + hours);
 		return result;
+	}
+
+	function resetJobForm() {
+		currentJob = {
+			title: 'Full Exterior Window Cleaning',
+			start: new Date(),
+			end: new Date(),
+			clientId: null,
+			assignedCrew: ['Mike'],
+			areaOfTown: 'thane',
+			notes: '',
+			cancelReason: '',
+			cancelNotes: '',
+			billableItems: [{
+				title: 'Full Exterior Window Cleaning',
+				price: 100,
+				quantity: 1,
+				total: 100
+			}]
+		};
 	}
 
 	onMount(async () => {
@@ -72,19 +109,13 @@
 			},
 
 			select: (info) => {
-				//reset for new job
 				isEditing = false;
 				editingJobId = null;
+				resetJobForm();
 
 				currentJob.start = info.start;
-				currentJob.end = addHours(info.start, 2);
-				currentJob.title = "Window Cleaning"
-				currentJob.clientId = null;
-				currentJob.assignedCrew = ['Mike'];
-				currentJob.areaOfTown = 'thane';
-				currentJob.notes = '';
-				currentJob.cancelReason = '';
-				currentJob.cancelNotes = '';
+				currentJob.end = addHours(info.start, BUSINESS_CONFIG.defaultJobDurationHours || 4);
+				currentJob.title = "Window Cleaning";
 
 				showJobForm = true;
 			},
@@ -105,7 +136,6 @@
 			eventClick: async (info) => {
 				const job = info.event.extendedProps as any;
 				if (!job?.id) return;
-				
 
 				isEditing = true;
 				editingJobId = job.id;
@@ -119,14 +149,20 @@
 				currentJob.notes = job.notes || '';
 				currentJob.cancelReason = job.cancelReason || '';
 				currentJob.cancelNotes = job.cancelNotes || '';
+				currentJob.billableItems = job.billableItems?.length 
+					? [...job.billableItems] 
+					: [{
+						title: job.title,
+						price: 100,
+						quantity: 1,
+						total: 100
+					}];
 
 				showJobForm = true;
 			},
 
 			events: async (fetchInfo, successCallback) => {
 				const jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
-				console.log(`📅 Loaded ${jobs.length} jobs`);
-
 				const events = jobs.map((job: any) => ({
 					id: job.id?.toString() || '',
 					title: `${job.title} — ${job.assignedCrew.join(', ')}`,
@@ -135,7 +171,6 @@
 					backgroundColor: getEventColor(job.areaOfTown),
 					extendedProps: job
 				}));
-
 				successCallback(events);
 			}
 		});
@@ -147,63 +182,71 @@
 		return BUSINESS_CONFIG.areasOfTown?.[area as keyof typeof BUSINESS_CONFIG.areasOfTown]?.color || '#6b7280';
 	}
 
-	// Save or update job
-	async function saveJob() {
-		if (currentJob.end <= currentJob.start) {
-			alert('End time must be after start time');
-			return;
-		}
-
-		if (!currentJob.clientId) {
-			alert('Please select a client');
-			return;
-		}
-
-		try {
-			if (isEditing && editingJobId) {
-				await updateJob(editingJobId, {
-					title: currentJob.title,
-					start: currentJob.start,
-					end: currentJob.end,
-					clientId: currentJob.clientId,
-					assignedCrew: [...currentJob.assignedCrew],
-					areaOfTown: currentJob.areaOfTown,
-					notes: currentJob.notes || undefined
-				});
-				alert('✅ Job updated successfully!');
-			} else {
-				await createJob({
-					clientId: currentJob.clientId,
-					title: currentJob.title,
-					start: currentJob.start,
-					end: currentJob.end,
-					assignedCrew: [...currentJob.assignedCrew],
-					areaOfTown: currentJob.areaOfTown
-			});
-				alert('✅ Job created successfully!');
-			}
-
-			showJobForm = false;
-			calendarInstance?.refetchEvents();
-		} catch (err) {
-			console.error('Failed to save job', err);
-			alert('❌ Error saving job - check console');
-		}
+	function addBillableItem() {
+		currentJob.billableItems = [
+			...currentJob.billableItems,
+			{ title: '', price: 0, quantity: 1, total: 0 }
+		];
 	}
 
-	//  Cancel confirmation dialog state
+	function removeBillableItem(index: number) {
+		if (currentJob.billableItems.length <= 1) return;
+		currentJob.billableItems = currentJob.billableItems.filter((_, i) => i !== index);
+	}
+
+	async function saveJob() {
+	if (currentJob.end <= currentJob.start) {
+		alert('End time must be after start time');
+		return;
+	}
+	if (!currentJob.clientId) {
+		alert('Please select a client');
+		return;
+	}
+
+	const jobTitle = currentJob.billableItems[0]?.title || currentJob.title;
+
+	try {
+		const jobPayload = {
+			title: jobTitle,
+			start: currentJob.start,
+			end: currentJob.end,
+			clientId: currentJob.clientId,
+			assignedCrew: [...currentJob.assignedCrew],
+			areaOfTown: currentJob.areaOfTown,
+			notes: currentJob.notes || undefined,
+			billableItems: currentJob.billableItems.map(item => ({ ...item })),
+			subtotal,
+			taxRate: BUSINESS_CONFIG.defaultTaxRate,
+			taxAmount,
+			totalAmount
+		};
+
+		if (isEditing && editingJobId) {
+			await updateJob(editingJobId, jobPayload);
+			alert('✅ Job updated successfully!');
+		} else {
+			await createJob(jobPayload);           // )=- Now passes full payload
+			alert('✅ Job created successfully!');
+		}
+
+		showJobForm = false;
+		calendarInstance?.refetchEvents();
+	} catch (err) {
+		console.error('Failed to save job', err);
+		alert('❌ Error saving job - check console');
+	}
+}
+
 	let showCancelConfirm = $state(false);
 	let selectedCancelReason = $state('');
-
 	const cancelReasons = BUSINESS_CONFIG.cancelReasons;
 
-	//  Handle job cancellation
 	async function confirmCancel() {
 		if (!editingJobId || !selectedCancelReason) {
 			alert('Please select a reason');
 			return;
 		}
-
 		try {
 			await cancelJob(editingJobId, selectedCancelReason, currentJob.cancelNotes || undefined);
 			showCancelConfirm = false;
@@ -224,7 +267,7 @@
 	<div bind:this={calendarEl} class="calendar-container"></div>
 </div>
 
-<!-- )=- New Job Modal -->
+<!-- )=- MOBILE-FIRST + CONTAINER-QUERY ENHANCED New Job Modal -->
 {#if showJobForm}
 	<div class="new-job-modal">
 		<div class="new-job-modal__content">
@@ -234,17 +277,16 @@
 
 			<div class="new-job-modal__form">
 				<div class="new-job-modal__field">
-					<label for="job-title" class="new-job-modal__label">Title</label>
+					<label for="job-title" class="new-job-modal__label">Job Title (optional)</label>
 					<input id="job-title" class="new-job-modal__input" bind:value={currentJob.title} />
 				</div>
 
-				<!-- Added client picker component -->
 				<div class="new-job-modal__field">
-					<label for="client-picker" class="new-job-modal__label" >Client</label>
+					<label for="client-picker" class="new-job-modal__label">Client</label>
 					<ClientPicker 
 						bind:value={currentJob.clientId}
 						placeholder="Select client..."
-						/>
+					/>
 				</div>
 
 				<div class="new-job-modal__field-group">
@@ -266,7 +308,7 @@
 							class="new-job-modal__input" 
 							value={toDatetimeLocal(currentJob.end)}
 							oninput={(e) => currentJob.end = new Date((e.target as HTMLInputElement).value)}
-							 />
+						/>
 					</div>
 				</div>
 
@@ -279,7 +321,6 @@
 					</select>
 				</div>
 
-				<!-- )=- Crew section - using fieldset + legend for proper a11y -->
 				<fieldset class="new-job-modal__field">
 					<legend class="new-job-modal__label">Crew</legend>
 					<div class="new-job-modal__crew-grid">
@@ -301,6 +342,45 @@
 						{/each}
 					</div>
 				</fieldset>
+
+				<div class="new-job-modal__field">
+					<label for="job-notes" class="new-job-modal__label">Notes / Special Instructions</label>
+					<textarea
+						id="job-notes"
+						class="new-job-modal__input"
+						rows="3"
+						bind:value={currentJob.notes}
+						placeholder="Gate code, dog in yard, ladder needed, etc..."
+					></textarea>
+				</div>
+
+				<!-- Billable Items Section -->
+				<div class="new-job-modal__field">
+					<label class="new-job-modal__label">Billable Items</label>
+					<div class="billable-items" style="container-type: inline-size; container-name: billable-row;">
+						{#each currentJob.billableItems as item, index (index)}
+							<BillableItemRow
+								bind:item={currentJob.billableItems[index]}
+								onRemove={() => removeBillableItem(index)}
+								autofocusPrice={index === currentJob.billableItems.length - 1}
+							/>
+						{/each}
+ 
+						<button
+							type="button"
+							class="new-job-modal__btn new-job-modal__btn-add"
+							onclick={addBillableItem}
+						>
+							+ Add another item
+						</button>
+					</div>
+				</div>
+
+				<div class="totals-summary">
+					<div>Subtotal: <strong>${subtotal.toFixed(2)}</strong></div>
+					<div>Tax (5%): <strong>${taxAmount.toFixed(2)}</strong></div>
+					<div class="totals-summary__total">Total: <strong>${totalAmount.toFixed(2)}</strong></div>
+				</div>
 			</div>
 
 			<div class="new-job-modal__actions">
@@ -330,7 +410,7 @@
 	</div>
 {/if}
 
-<!-- Cancel Confirmation Dialog -->
+<!-- Cancel Confirmation Dialog (unchanged) -->
 {#if showCancelConfirm}
 	<div class="cancel-confirm-modal">
 		<div class="cancel-confirm-modal__content">
@@ -397,29 +477,33 @@
 		overflow: hidden;
 	}
 
-	/* BEM Modal Styles */
+	/* ======================== MOBILE-FIRST MODAL ======================== */
 	.new-job-modal {
 		position: fixed;
-		top: 0; left: 0; right: 0; bottom: 0;
-		background: rgba(0, 0, 0, 0.6);
+		inset: 0;
+		background: rgba(0, 0, 0, 0.7);
 		display: flex;
-		align-items: center;
+		align-items: flex-end;
 		justify-content: center;
 		z-index: 1000;
 	}
 
 	.new-job-modal__content {
 		background: white;
-		padding: 2rem;
-		border-radius: 12px;
-		min-width: 480px;
-		max-width: 90%;
+		width: 100%;
+		max-width: 560px;
+		border-radius: 16px 16px 0 0;
 		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+		max-height: 95vh;
+		overflow-y: auto;
+		padding: 1.5rem 1rem;
+		container-type: inline-size;
+		container-name: job-modal;
 	}
 
 	.new-job-modal__title {
 		margin: 0 0 1.5rem 0;
-		font-size: 1.5rem;
+		font-size: 1.35rem;
 		font-weight: 600;
 		color: #1e2937;
 	}
@@ -428,7 +512,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
-		margin-bottom: 2rem;
 	}
 
 	.new-job-modal__field {
@@ -439,7 +522,7 @@
 
 	.new-job-modal__field-group {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: 1fr;
 		gap: 1rem;
 	}
 
@@ -470,18 +553,47 @@
 		font-size: 0.95rem;
 	}
 
+	.billable-items {
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 1rem;
+		background: #fafafa;
+	}
+
+	.totals-summary {
+		background: #f8fafc;
+		padding: 1rem;
+		border-radius: 8px;
+		border: 1px solid #e2e8f0;
+		font-size: 1.05rem;
+	}
+
+	.totals-summary__total {
+		font-size: 1.25rem;
+		border-top: 2px solid #e2e8f0;
+		padding-top: 0.75rem;
+		margin-top: 0.75rem;
+	}
+
 	.new-job-modal__actions {
 		display: flex;
-		justify-content: flex-end;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-top: 2rem;
+	}
+
+	.actions-right {
+		display: flex;
 		gap: 1rem;
 	}
 
 	.new-job-modal__btn {
-		padding: 0.75rem 1.5rem;
-		border-radius: 6px;
+		padding: 0.85rem 1.5rem;
+		border-radius: 8px;
 		font-weight: 500;
 		cursor: pointer;
 		border: none;
+		width: 100%;
 	}
 
 	.new-job-modal__btn--cancel {
@@ -494,17 +606,33 @@
 		color: white;
 	}
 
-	.new-job-modal__btn--primary:hover {
-		background: #2563eb;
-	}
-		.new-job-modal__btn--cancel-job {
-		background: transparent;
-		color: #ef4444;
-		border: 1px solid #ef4444;
+	.new-job-modal__btn-add {
+		background: #e0f2fe;
+		color: #0369a1;
+		width: 100%;
+		margin-top: 0.5rem;
 	}
 
-	.new-job-modal__btn--cancel-job:hover {
-		background: #fee2e2;
+	/* Container Queries - much better than media queries for this modal */
+	@container job-modal (min-width: 520px) {
+		.new-job-modal__content {
+			border-radius: 16px;
+			padding: 2rem;
+		}
+
+		.new-job-modal__field-group {
+			grid-template-columns: 1fr 1fr;
+		}
+
+		.new-job-modal__actions {
+			flex-direction: row;
+			justify-content: space-between;
+			align-items: center;
+		}
+
+		.new-job-modal__btn {
+			width: auto;
+		}
 	}
 
 	/* Cancel Confirmation Modal */
@@ -522,51 +650,7 @@
 		background: white;
 		padding: 2rem;
 		border-radius: 12px;
-		min-width: 420px;
-		max-width: 90%;
-	}
-
-	.cancel-confirm-modal__title {
-		margin: 0 0 0.5rem 0;
-		color: #ef4444;
-	}
-
-	.cancel-reasons {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		margin: 1rem 0;
-	}
-	.actions-right {
-		display: flex;
-		gap: 1rem;
-	}
-	.new-job-modal__actions {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: 1rem;
-	}
-	.reason-option {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		cursor: pointer;
-	}
-	.cancel-job-text {
-		background: none;
-		border: none;
-		color: #ef4444;
-		font-size: 0.95rem;
-		cursor: pointer;
-		padding: 0.5rem 0;
-		text-decoration: underline;
-		text-underline-offset: 3px;
-		font-weight: 500;
-	}
-
-	.cancel-job-text:hover {
-		color: #dc2626;
-		text-decoration-thickness: 2px;
+		max-width: 420px;
+		width: 90%;
 	}
 </style>
