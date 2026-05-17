@@ -40,7 +40,7 @@ export const BUSINESS_CONFIG = {
 			sortOrder: 4
 		},
 		'twin-lakes-lemon-creek': {
-			label: 'Twin Lakes / Lemon Creek',
+			label: 'Twin Lakes / Lemon Crk',
 			color: '#2563eb',
 			sortOrder: 5
 		},
@@ -50,12 +50,12 @@ export const BUSINESS_CONFIG = {
 			sortOrder: 6
 		},
 		'back-loop-fritz-cove': {
-			label: 'Back Loop / Fritz Cove Rd',
+			label: 'Back Loop / Fritz Cove',
 			color: '#1e40af',
 			sortOrder: 7
 		},
-		'deharts-and-beyond': {
-			label: "DeHart's and Beyond",
+		'deharts': {
+			label: "DeHart's",
 			color: '#1e3a8a',
 			sortOrder: 8
 		}
