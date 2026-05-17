@@ -130,7 +130,6 @@
 		</select>
 	</div>
 
-	<!-- Area Filter Chips -->
 	<div class="area-filter">
 		<div class="area-filter__chips">
 			{#each Object.entries(BUSINESS_CONFIG.areasOfTown) as [key, area]}
@@ -138,7 +137,7 @@
 					class="area-chip"
 					class:active={selectedAreas.includes(key)}
 					onclick={() => toggleArea(key)}
-					style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
+					style="background-color: {area.color}20; color: {area.color};"
 				>
 					{area.label}
 				</button>
@@ -148,7 +147,8 @@
 
 	<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
-			<li class="client-card">
+			<li class="client-card" 
+				style="border-left: 6px solid {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color || '#64748b'};">
 				<div class="client-card__main">
 					<div class="client-card__header">
 						<h3 class="client-card__name">{client.name}</h3>
@@ -295,6 +295,12 @@
 		padding: 1.35rem;
 		border-radius: 12px;
 		box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+		border-left: 6px solid #64748b; /* fallback */
+		transition: transform 0.2s;
+	}
+
+	.client-card:hover {
+		transform: translateX(4px);
 	}
 
 	.client-card__main { flex: 1; }
