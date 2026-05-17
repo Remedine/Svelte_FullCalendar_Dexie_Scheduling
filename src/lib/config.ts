@@ -61,7 +61,7 @@ export const BUSINESS_CONFIG = {
 		}
 	} as const,
 
-	// === Service Types (from their website) ===
+	// === Service Types ===
 	commonServices: [
 		'Window Cleaning (Residential & Commercial)',
 		'High-Rise Window Cleaning',

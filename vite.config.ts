@@ -24,7 +24,7 @@ export default defineConfig({
 	],
 
 	ssr: {
-		noExternal: ['@fullcalendar/*']
+		noExternal: ['@fullcalendar/*', 'dexie']
 	},
 
 	// )=- Stronger optimization settings to prevent 504 errors
@@ -36,10 +36,12 @@ export default defineConfig({
 			'@fullcalendar/interaction',
 			'@fullcalendar/multimonth',
 			'dexie'
-		],
-		exclude: [
-			// Add any packages that keep causing issues
 		]
+	},
+
+	// )=- Fix for worker_threads / Dexie error
+	define: {
+		'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV)
 	},
 
 	server: {

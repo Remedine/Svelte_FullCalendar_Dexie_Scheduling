@@ -2,6 +2,24 @@
 <script lang="ts">
 	import { db, type Client } from '$lib/db';
 	import { BUSINESS_CONFIG } from '$lib/config';
+	import { z } from 'zod';
+
+	// )=- Zod Schema
+	const ClientSchema = z.object({
+		name: z.string().min(1, 'Full name is required'),
+		email: z.string().email('Please enter a valid email').optional().or(z.literal('')),
+		phone: z.string()
+			.regex(/^[\d\s\-\(\)\.]*$/, 'Phone can only contain numbers and formatting characters')
+			.optional()
+			.or(z.literal('')),
+		serviceAddressStreet: z.string().optional(),
+		serviceAddressCity: z.string().optional(),
+		serviceAddressState: z.string().length(2, 'State must be 2 letters (e.g. WA)'),
+		serviceAddressZip: z.string().optional(),
+		areaOfTown: z.enum(['thane', 'downtown', 'douglas'] as const),
+		preferredBillingMethod: z.enum(['email', 'check', 'invoice'] as const),
+		notes: z.string().optional()
+	});
 
 	let {
 		show = $bindable(false),
@@ -24,7 +42,18 @@
 		notes: ''
 	});
 
-	// )=- Reset / load form data when client changes
+	let errors = $state<Record<string, string>>({});
+
+	// )=- Smart real-time phone formatter
+	function formatPhone(value: string): string {
+		const digits = value.replace(/\D/g, '');
+		if (digits.length === 0) return '';
+		if (digits.length <= 3) return `(${digits}`;
+		if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+	}
+
+	// )=- Reset / load form
 	$effect(() => {
 		if (client) {
 			formData = { ...client };
@@ -42,39 +71,39 @@
 				notes: ''
 			};
 		}
+		errors = {};
 	});
 
-	// )=- Form submit handler
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
+		errors = {};
 
-		if (!formData.name?.trim()) {
-			alert('Client name is required');
-			return;
-		}
-		if (!formData.phone?.trim() && !formData.email?.trim()) {
-			alert('At least one contact method (Phone or Email) is required');
+		const result = ClientSchema.safeParse(formData);
+
+		if (!result.success) {
+			result.error.issues.forEach(issue => {
+				const field = issue.path[0] as string;
+				errors[field] = issue.message;
+			});
 			return;
 		}
 
 		try {
 			const clientPayload = {
-				...formData,
+				...result.data,
 				createdAt: client?.createdAt || new Date(),
 				updatedAt: new Date()
 			} as Client;
 
 			if (isEditing && client?.id) {
 				await db.clients.update(client.id, clientPayload);
-				console.log(`✅ Client ${client.id} updated`);
 			} else {
 				await db.clients.add(clientPayload);
-				console.log('✅ New client created');
 			}
 
 			onSaved();
 		} catch (err) {
-			console.error('Failed to save client', err);
+			console.error(err);
 			alert('❌ Error saving client');
 		}
 	}
@@ -94,17 +123,28 @@
 			<form onsubmit={handleSubmit} class="client-form-modal__form">
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Full Name <span class="required">*</span></label>
-					<input bind:value={formData.name} class="client-form-modal__input" placeholder="John Smith" required />
+					<input bind:value={formData.name} class="client-form-modal__input" />
+					{#if errors.name}<small class="error">{errors.name}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Email</label>
-					<input type="email" bind:value={formData.email} class="client-form-modal__input" placeholder="john@example.com" />
+					<input type="email" bind:value={formData.email} class="client-form-modal__input" />
+					{#if errors.email}<small class="error">{errors.email}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Phone</label>
-					<input type="tel" bind:value={formData.phone} class="client-form-modal__input" placeholder="(360) 555-1234" />
+					<input 
+						type="tel"
+						bind:value={formData.phone}
+						oninput={(e) => {
+							formData.phone = formatPhone((e.target as HTMLInputElement).value);
+						}}
+						placeholder="(503) 555-1234"
+						class="client-form-modal__input"
+					/>
+					{#if errors.phone}<small class="error">{errors.phone}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
@@ -116,10 +156,12 @@
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">City</label>
 						<input bind:value={formData.serviceAddressCity} class="client-form-modal__input" />
+						{#if errors.serviceAddressCity}<small class="error">{errors.serviceAddressCity}</small>{/if}
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">State</label>
-						<input bind:value={formData.serviceAddressState} class="client-form-modal__input" maxlength="2" />
+						<input bind:value={formData.serviceAddressState} maxlength="2" class="client-form-modal__input" />
+						{#if errors.serviceAddressState}<small class="error">{errors.serviceAddressState}</small>{/if}
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">ZIP</label>
@@ -226,7 +268,6 @@
 
 	.required {
 		color: #ef4444;
-		font-size: 0.9rem;
 	}
 
 	.client-form-modal__input {
@@ -234,6 +275,12 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		font-size: 1rem;
+	}
+
+	.error {
+		color: #ef4444;
+		font-size: 0.85rem;
+		margin-top: 4px;
 	}
 
 	.client-form-modal__actions {
