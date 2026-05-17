@@ -16,8 +16,6 @@
     let inputEl = $state<HTMLInputElement>();
     let buttonEl = $state<HTMLButtonElement>();
 
-    // )=- FIXED: Removed old $state declaration for filteredClients (caused "already declared" error)
-    // )=- Now using clean $derived.by (Svelte 5 best practice for computed lists)
     let filteredClients = $derived.by(() => {
         const term = searchTerm.toLowerCase().trim();
         if (!term) {

@@ -25,6 +25,16 @@
     });
 
     $effect(() => {
+        if (autofocusPrice && item.price === 0) {
+            setTimeout(() => {
+                const priceInput = document.querySelector('.billable-item-row__input--price:last-of-type') as HTMLInputElement;
+                priceInput?.focus();
+                priceInput?.select();
+            }, 50);
+        }
+    });
+
+    $effect(() => {
         item.total = (item.price || 0) * (item.quantity || 1);
     });
 
@@ -68,9 +78,14 @@
             {#if showSuggestions && filteredTemplates.length > 0}
                 <div class="billable-item-row__suggestions">
                     {#each filteredTemplates as template}
-                        <div class="billable-item-row__suggestion" onclick={() => selectTemplate(template)}>
+                        <button
+                            type="button"
+                            class="billable-item-row__suggestion"
+                            onclick={() => selectTemplate(template)}
+                            onkeydown={(e) => e.key === 'Enter' && selectTemplate(template)}
+                        >
                             {template.title}
-                        </div>
+                        </button>
                     {/each}
                 </div>
             {/if}
@@ -95,7 +110,7 @@
                     bind:value={item.price}
                     placeholder="0.00"
                     class="billable-item-row__input billable-item-row__input--price"
-                    autofocus={autofocusPrice}
+                    {autofocusPrice}
                     step="0.01"
                 />
             </div>
@@ -253,5 +268,25 @@
         .billable-item-row__total {
             text-align: right;
         }
+    }
+
+    .billable-item-row__suggestion {
+        padding: 0.65rem 0.9rem;
+        cursor: pointer;
+        font-size: 0.95rem;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: none;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .billable-item-row__suggestion:last-child {
+        border-bottom: none;
+    }
+
+    .billable-item-row__suggestion:hover,
+    .billable-item-row__suggestion:focus {
+        background: #f8fafc;
     }
 </style>
