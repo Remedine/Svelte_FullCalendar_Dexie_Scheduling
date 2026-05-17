@@ -4,7 +4,6 @@
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import { z } from 'zod';
 
-	// )=- Zod Schema
 	const ClientSchema = z.object({
 		name: z.string().min(1, 'Full name is required'),
 		email: z.string().email('Please enter a valid email').optional().or(z.literal('')),
@@ -14,7 +13,7 @@
 			.or(z.literal('')),
 		serviceAddressStreet: z.string().optional(),
 		serviceAddressCity: z.string().optional(),
-		serviceAddressState: z.string().length(2, 'State must be 2 letters (e.g. WA)'),
+		serviceAddressState: z.string().length(2, 'State must be 2 letters').optional(),
 		serviceAddressZip: z.string().optional(),
 		areaOfTown: z.enum(['thane', 'downtown', 'douglas'] as const),
 		preferredBillingMethod: z.enum(['email', 'check', 'invoice'] as const),
@@ -44,7 +43,6 @@
 
 	let errors = $state<Record<string, string>>({});
 
-	// )=- Smart real-time phone formatter
 	function formatPhone(value: string): string {
 		const digits = value.replace(/\D/g, '');
 		if (digits.length === 0) return '';
@@ -53,7 +51,6 @@
 		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
 	}
 
-	// )=- Reset / load form
 	$effect(() => {
 		if (client) {
 			formData = { ...client };
@@ -79,7 +76,6 @@
 		errors = {};
 
 		const result = ClientSchema.safeParse(formData);
-
 		if (!result.success) {
 			result.error.issues.forEach(issue => {
 				const field = issue.path[0] as string;
@@ -138,9 +134,7 @@
 					<input 
 						type="tel"
 						bind:value={formData.phone}
-						oninput={(e) => {
-							formData.phone = formatPhone((e.target as HTMLInputElement).value);
-						}}
+						oninput={(e) => formData.phone = formatPhone((e.target as HTMLInputElement).value)}
 						placeholder="(503) 555-1234"
 						class="client-form-modal__input"
 					/>
@@ -152,16 +146,15 @@
 					<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input" />
 				</div>
 
-				<div class="client-form-modal__field-group">
+				<!-- Improved Address Row -->
+				<div class="client-form-modal__address-row">
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">City</label>
 						<input bind:value={formData.serviceAddressCity} class="client-form-modal__input" />
-						{#if errors.serviceAddressCity}<small class="error">{errors.serviceAddressCity}</small>{/if}
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">State</label>
 						<input bind:value={formData.serviceAddressState} maxlength="2" class="client-form-modal__input" />
-						{#if errors.serviceAddressState}<small class="error">{errors.serviceAddressState}</small>{/if}
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">ZIP</label>
@@ -193,17 +186,10 @@
 				</div>
 
 				<div class="client-form-modal__actions">
-					<button 
-						type="button"
-						class="client-form-modal__btn client-form-modal__btn--cancel" 
-						onclick={closeForm}
-					>
+					<button type="button" class="client-form-modal__btn client-form-modal__btn--cancel" onclick={closeForm}>
 						Cancel
 					</button>
-					<button 
-						type="submit"
-						class="client-form-modal__btn client-form-modal__btn--primary"
-					>
+					<button type="submit" class="client-form-modal__btn client-form-modal__btn--primary">
 						{isEditing ? 'Save Changes' : 'Create Client'}
 					</button>
 				</div>
@@ -254,9 +240,10 @@
 		gap: 0.4rem;
 	}
 
-	.client-form-modal__field-group {
+	/* Improved Address Row */
+	.client-form-modal__address-row {
 		display: grid;
-		grid-template-columns: 1fr;
+		grid-template-columns: 2fr 1fr 1fr;
 		gap: 1rem;
 	}
 
@@ -266,15 +253,13 @@
 		font-size: 0.95rem;
 	}
 
-	.required {
-		color: #ef4444;
-	}
-
 	.client-form-modal__input {
 		padding: 0.75rem 1rem;
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		font-size: 1rem;
+		width: 100%;
+		box-sizing: border-box;
 	}
 
 	.error {
@@ -308,13 +293,21 @@
 		color: white;
 	}
 
-	@container client-form (min-width: 520px) {
+	/* Mobile: stack address fields */
+	@container client-form (max-width: 520px) {
+		.client-form-modal__address-row {
+			grid-template-columns: 1fr;
+		}
+		.client-form-modal__content {
+			padding: 1.5rem 1rem;
+		}
+	}
+
+	/* Desktop: nice single line */
+	@container client-form (min-width: 521px) {
 		.client-form-modal__content {
 			border-radius: 16px;
 			padding: 2rem;
-		}
-		.client-form-modal__field-group {
-			grid-template-columns: 1fr 1fr 1fr;
 		}
 	}
 </style>

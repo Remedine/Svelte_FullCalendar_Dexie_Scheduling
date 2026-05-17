@@ -11,15 +11,13 @@
 
 	let searchTerm = $state('');
 	let sortMode = $state<'alpha' | 'recent' | 'upcoming'>('alpha');
-	let timeFilter = $state<'all' | 'nextWeek' | 'nextMonth'>('all');
-	
-	// )=- Area Filter (multi-select)
 	let selectedAreas = $state<string[]>([]);
 
-	let displayedClients = $derived.by(() => {
-		let result = [...clients];
+	let enhancedClients = $state<any[]>([]);
 
-		// Search
+	let displayedClients = $derived.by(() => {
+		let result = [...enhancedClients];
+
 		const term = searchTerm.toLowerCase().trim();
 		if (term) {
 			result = result.filter(c => 
@@ -30,16 +28,12 @@
 			);
 		}
 
-		// Area Filter
 		if (selectedAreas.length > 0) {
 			result = result.filter(c => selectedAreas.includes(c.areaOfTown));
 		}
 
-		// Sorting
 		if (sortMode === 'recent') {
-			result.sort((a, b) => 
-				new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-			);
+			result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 		} else {
 			result.sort((a, b) => a.name.localeCompare(b.name));
 		}
@@ -48,8 +42,39 @@
 	});
 
 	onMount(async () => {
-		clients = await db.clients.orderBy('name').toArray();
+		await loadClientsWithLastJob();
 	});
+
+	async function loadClientsWithLastJob() {
+		const allClients = await db.clients.orderBy('name').toArray();
+		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
+
+		enhancedClients = allClients.map(client => {
+			const clientJobs = allJobs.filter(j => j.clientId === client.id);
+			const lastJob = clientJobs.length > 0 ? clientJobs[0] : null;
+
+			return {
+				...client,
+				lastJobDate: lastJob ? new Date(lastJob.start) : null,
+				totalJobs: clientJobs.length
+			};
+		});
+	}
+
+	function getFullAddress(client: Client): string {
+		const parts = [
+			client.serviceAddressStreet,
+			client.serviceAddressCity,
+			client.serviceAddressState,
+			client.serviceAddressZip
+		].filter(Boolean);
+		return parts.join(', ');
+	}
+
+	function openInMaps(client: Client) {
+		const address = encodeURIComponent(getFullAddress(client));
+		window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
+	}
 
 	function openNewClient() {
 		editingClient = null;
@@ -64,29 +89,21 @@
 	async function handleClientSaved() {
 		showForm = false;
 		editingClient = null;
-		clients = await db.clients.orderBy('name').toArray();
+		await loadClientsWithLastJob();
 	}
 
 	async function deleteClient(id: number) {
 		if (!confirm('Delete this client?')) return;
 		await db.clients.delete(id);
-		clients = await db.clients.orderBy('name').toArray();
+		await loadClientsWithLastJob();
 	}
 
-	// Toggle area in filter
 	function toggleArea(areaKey: string) {
 		if (selectedAreas.includes(areaKey)) {
 			selectedAreas = selectedAreas.filter(a => a !== areaKey);
 		} else {
 			selectedAreas = [...selectedAreas, areaKey];
 		}
-	}
-
-	function clearAllFilters() {
-		searchTerm = '';
-		selectedAreas = [];
-		sortMode = 'alpha';
-		timeFilter = 'all';
 	}
 </script>
 
@@ -111,48 +128,66 @@
 			<option value="recent">Most Recent Added</option>
 			<option value="upcoming">Upcoming Jobs</option>
 		</select>
-
-		<select bind:value={timeFilter} class="clients-page__select">
-			<option value="all">All Clients</option>
-			<option value="nextWeek">Jobs Next Week</option>
-			<option value="nextMonth">Jobs Next Month</option>
-		</select>
 	</div>
 
 	<!-- Area Filter Chips -->
 	<div class="area-filter">
-		<strong class="area-filter__label">Filter by Area:</strong>
 		<div class="area-filter__chips">
 			{#each Object.entries(BUSINESS_CONFIG.areasOfTown) as [key, area]}
 				<button
 					class="area-chip"
 					class:active={selectedAreas.includes(key)}
 					onclick={() => toggleArea(key)}
-					style="background-color: {area.color}20; color: {area.color};"
+					style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
 				>
 					{area.label}
 				</button>
 			{/each}
 		</div>
-		<button onclick={clearAllFilters} class="area-filter__clear">Clear All</button>
 	</div>
 
 	<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
-			<li class="clients-page__list-item">
-				<div class="clients-page__client-info">
-					<strong>{client.name}</strong><br>
-					<span>{client.email || '—'}</span><br>
-					<span class="clients-page__phone">📞 {client.phone || 'No phone'}</span>
+			<li class="client-card">
+				<div class="client-card__main">
+					<div class="client-card__header">
+						<h3 class="client-card__name">{client.name}</h3>
+						<span class="area-badge" 
+							style="background-color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}20; color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}">
+							{BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.label}
+						</span>
+					</div>
+
+					<div class="client-card__contact">
+						{#if client.phone}
+							<a href="tel:{client.phone}" class="contact-link">📞 {client.phone}</a>
+						{/if}
+						{#if client.email}
+							<a href="mailto:{client.email}" class="contact-link">✉️ {client.email}</a>
+						{/if}
+					</div>
+
+					{#if getFullAddress(client)}
+						<div class="client-card__address" onclick={() => openInMaps(client)}>
+							📍 {getFullAddress(client)}
+						</div>
+					{/if}
+
+					<div class="client-card__meta">
+						{#if client.lastJobDate}
+							Last Job: <strong>{client.lastJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+						{:else}
+							<span class="no-jobs">No jobs yet</span>
+						{/if}
+						{#if client.totalJobs > 0}
+							<span> • {client.totalJobs} job{client.totalJobs > 1 ? 's' : ''}</span>
+						{/if}
+					</div>
 				</div>
-				<div class="clients-page__meta">
-					<span class="area-badge" style="background-color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}20; color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}">
-						{BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.label}
-					</span>
-				</div>
-				<div class="clients-page__actions">
-					<button onclick={() => editClient(client)} class="clients-page__btn-edit">Edit</button>
-					<button onclick={() => deleteClient(client.id!)} class="clients-page__btn-delete">Delete</button>
+
+				<div class="client-card__actions">
+					<button onclick={() => editClient(client)} class="client-card__btn client-card__btn--edit">Edit</button>
+					<button onclick={() => deleteClient(client.id!)} class="client-card__btn client-card__btn--delete">Delete</button>
 				</div>
 			</li>
 		{/each}
@@ -172,42 +207,143 @@
 {/if}
 
 <style>
-	.clients-page { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
-	.clients-page__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-	.clients-page__title { font-size: 2rem; font-weight: 700; margin: 0; }
-	.clients-page__btn-add { background: #3b82f6; color: white; border: none; padding: 0.85rem 1.75rem; border-radius: 8px; font-weight: 600; cursor: pointer; }
+	.clients-page {
+		padding: 1.5rem 1rem;
+		max-width: 1200px;
+		margin: 0 auto;
+	}
 
-	.clients-page__filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-	.clients-page__search { flex: 1; min-width: 280px; padding: 0.85rem 1rem; border: 1px solid #cbd5e1; border-radius: 8px; }
-	.clients-page__select { padding: 0.85rem 1rem; border: 1px solid #cbd5e1; border-radius: 8px; min-width: 180px; }
+	.clients-page__header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+	}
 
-	/* Area Filter Chips */
-	.area-filter { margin-bottom: 2rem; }
-	.area-filter__label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
-	.area-filter__chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+	.clients-page__title {
+		font-size: 2rem;
+		font-weight: 700;
+		margin: 0;
+	}
+
+	.clients-page__btn-add {
+		background: #3b82f6;
+		color: white;
+		border: none;
+		padding: 0.85rem 1.75rem;
+		border-radius: 8px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.clients-page__filters {
+		display: flex;
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+		flex-wrap: wrap;
+	}
+
+	.clients-page__search {
+		flex: 1;
+		min-width: 280px;
+		padding: 0.85rem 1rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+	}
+
+	.clients-page__select {
+		padding: 0.85rem 1rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		min-width: 180px;
+	}
+
+	.area-filter__chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 1.5rem;
+	}
+
 	.area-chip {
 		padding: 0.45rem 1rem;
 		border-radius: 9999px;
-		border: 1px solid;
 		font-size: 0.9rem;
 		cursor: pointer;
 		transition: all 0.2s;
-	}
-	.area-chip.active {
-		font-weight: 600;
-		box-shadow: 0 0 0 2px currentColor;
+		border: 1px solid;
 	}
 
-	.clients-page__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
-	.clients-page__list-item { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem; background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-	.area-badge {
-		padding: 0.25rem 0.75rem;
-		border-radius: 9999px;
-		font-size: 0.85rem;
-		font-weight: 500;
+	.area-chip.active {
+		font-weight: 600;
+		box-shadow: 0 0 0 3px currentColor;
 	}
-	.clients-page__actions { display: flex; gap: 0.5rem; }
-	.clients-page__btn-edit { background: #e0f2fe; color: #0369a1; padding: 0.5rem 1rem; border-radius: 6px; border: none; }
-	.clients-page__btn-delete { background: #fee2e2; color: #ef4444; padding: 0.5rem 1rem; border-radius: 6px; border: none; }
-	.clients-page__empty { text-align: center; padding: 4rem; color: #64748b; background: white; border-radius: 10px; }
+
+	.clients-page__list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+	}
+
+	.client-card {
+		display: flex;
+		justify-content: space-between;
+		background: white;
+		padding: 1.35rem;
+		border-radius: 12px;
+		box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+	}
+
+	.client-card__main { flex: 1; }
+	.client-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
+	.client-card__name { margin: 0; font-size: 1.2rem; font-weight: 600; }
+
+	.client-card__contact { margin-bottom: 0.5rem; line-height: 1.5; }
+	.contact-link { color: #0369a1; text-decoration: none; }
+	.contact-link:hover { text-decoration: underline; }
+
+	.client-card__address {
+		color: #1e40af;
+		cursor: pointer;
+		margin-bottom: 0.75rem;
+		text-decoration: underline dotted;
+	}
+	.client-card__address:hover { color: #1e3a8a; text-decoration: underline; }
+
+	.client-card__meta {
+		font-size: 0.95rem;
+		color: #475569;
+	}
+
+	.no-jobs { color: #f59e0b; }
+
+	.client-card__actions {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-left: 1rem;
+	}
+
+	.client-card__btn {
+		padding: 0.55rem 1.1rem;
+		border-radius: 6px;
+		border: none;
+		cursor: pointer;
+		font-size: 0.9rem;
+		white-space: nowrap;
+	}
+
+	.client-card__btn--edit { background: #e0f2fe; color: #0369a1; }
+	.client-card__btn--delete { background: #fee2e2; color: #ef4444; }
+
+	.clients-page__empty {
+		text-align: center;
+		padding: 4rem 1rem;
+		color: #64748b;
+		background: white;
+		border-radius: 12px;
+	}
 </style>
