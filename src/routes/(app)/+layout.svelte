@@ -1,23 +1,42 @@
+<!-- src/routes/(app)/+layout.svelte -->
 <script lang="ts">
 	import { page } from '$app/stores';
 
-    let { children } = $props();
+	let { children } = $props();
+
+	// )=- Added for better active link detection
+	let currentPath = $derived($page.url.pathname);
 </script>
 
 <div class="app-layout">
 	<!-- Top Navigation Bar -->
 	<header class="top-nav">
 		<div class="top-nav__brand">
+			<h1>Capital City Windows</h1>
+			<!-- )=- Optional subtitle -->
+			<!-- <p class="top-nav__subtitle">Scheduling System</p> -->
 		</div>
 
 		<nav class="top-nav__menu">
-			<a href="/calendar" class="top-nav__link {$page.url.pathname === '/calendar' ? 'active' : ''}">
+			<a 
+				href="/calendar" 
+				class="top-nav__link"
+				class:active={currentPath === '/calendar' || currentPath === '/'}
+			>
 				📅 Schedule
 			</a>
-			<a href="/clients" class="top-nav__link {$page.url.pathname.startsWith('/clients') ? 'active' : ''}">
+			<a 
+				href="/clients" 
+				class="top-nav__link"
+				class:active={currentPath.startsWith('/clients')}
+			>
 				👥 Clients
 			</a>
-			<a href="/jobs" class="top-nav__link">
+			<a 
+				href="/jobs" 
+				class="top-nav__link"
+				class:active={currentPath.startsWith('/jobs')}
+			>
 				📋 Jobs
 			</a>
 		</nav>
@@ -58,12 +77,6 @@
 		font-size: 1.4rem;
 		font-weight: 700;
 		color: #0f172a;
-	}
-
-	.top-nav__subtitle {
-		margin: 0;
-		font-size: 0.8rem;
-		color: #64748b;
 	}
 
 	.top-nav__menu {
