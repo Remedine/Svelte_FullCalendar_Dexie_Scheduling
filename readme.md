@@ -11,12 +11,13 @@ A custom, offline-first CRM, scheduling, and invoicing system built for CapitalC
 - Complete client history and notes
 - Local-first data storage with sync capabilities
 - Mobile-optimized for field use
+- Crew and admin views for team specific calendars
 
 ## Tech Stack
 
-- **Frontend**: SvelteKit 2 + Svelte 5 (Runes)
+- **Frontend**: SvelteKit 2 + Svelte 5
 - **Local Database**: Dexie.js
-- **Calendar**: FullCalendar v7
+- **Calendar**: FullCalendar v6
 - **Styling**: Custom CSS with BEM methodology
 - **PWA**: vite-plugin-pwa
 
