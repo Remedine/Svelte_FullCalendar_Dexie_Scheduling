@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
+import * as bcrypt from 'bcryptjs';
 
 export interface Client {
 	id?: number;
@@ -45,14 +46,27 @@ export interface Job {
 	updatedAt: Date;
 }
 
+export interface User {
+	id?: number;
+	name: string;
+	pinHash: string; // hashed 4-digit PIN
+	role: 'admin' | 'crew';
+	photo?: string; // base64 string
+	active: boolean;
+	forcePhotoUpdate: boolean;
+	createdAt: Date;
+	updatedAt: Date;
+}
+
 const db = new Dexie('CapitalCityWindows') as Dexie & {
 	clients: EntityTable<Client, 'id'>;
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(2).stores({
+db.version(3).stores({
 	clients: '++id, name, areaOfTown, email',
-	jobs: '++id, clientId, start, end, status, areaOfTown'
+	jobs: '++id, clientId, start, end, status, areaOfTown',
+	users: '++id, name, role, active'
 });
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
@@ -144,6 +158,6 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 }
 
 export { db };
-export type { Client, Job };
+export type { Client, Job, User };
 export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;
 
