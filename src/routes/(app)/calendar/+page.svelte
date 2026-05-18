@@ -47,12 +47,6 @@
 		color: #0f172a;
 	}
 
-	.page-subtitle {
-		margin: 0.25rem 0 0;
-		color: #64748b;
-		font-size: 0.95rem;
-	}
-
 	.calendar-container {
 		flex: 1;
 		overflow: hidden;
