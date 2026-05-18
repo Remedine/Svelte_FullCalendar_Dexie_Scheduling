@@ -1,59 +1,70 @@
 <script lang="ts">
-    import { goto } from '$app/navigation';
-    import { currentUser, login } from '$lib/stores/auth';
-    import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
-    let username = $state('');
-    let pin = $state('');
-    let errror = $state('');
-    let isLoading = $state(false);
+	let username = $state('');
+	let pin = $state('');
+	let error = $state('');
+	let isLoading = $state(false);
 
-    async function handleLogin() {
-        if (!username || pin.length !== 4) {
-            error = 'Please enter name and 4-digit PIN';
-            return;
-        }
+	// Dynamic import auth to avoid any shared module issues
+	let auth: any = null;
 
-        isLoading = true;
-        error = '';
+	onMount(async () => {
+		const authModule = await import('$lib/stores/auth.svelte');
+		auth = authModule;
 
-        const result = await login(username, pin);
+		if (auth.currentUser.value) {
+			goto('/calendar');
+		}
+	});
 
-        if (result.success) {
-            goto('/calendar')
-        } else {
-            error = result.message || 'Login failed';
-            pin = '';
-        }
+	async function handleLogin() {
+		if (!auth) return;
 
-        isLoading = false;
-    }
+		if (!username || pin.length !== 4) {
+			error = 'Please enter name and 4-digit PIN';
+			return;
+		}
 
-    onMount(() => {
-        if (currentUser.value) {
-            goto('/calendar');
-        }
-    });
+		isLoading = true;
+		error = '';
+
+		const result = await auth.login(username, pin);
+
+		if (result.success) {
+			goto('/calendar');
+		} else {
+			error = result.message || 'Login failed';
+			pin = '';
+		}
+
+		isLoading = false;
+	}
 </script>
+
+<!-- Rest of your template stays exactly the same -->
 
 <div class="login-page">
 	<div class="login-card">
-		<h1 class="login-card__title">Capital City Windows</h1>
+		<h1 class="login-card__title">CapitalCity Windows</h1>
 		<p class="login-card__subtitle">Crew Login</p>
 
-		<form onsubmit|preventDefault={handleLogin} class="login-form">
+		<form 
+			onsubmit={(e) => { e.preventDefault(); handleLogin(); }} 
+			class="login-form"
+		>
 			<div class="login-form__field">
 				<label class="login-form__label">Name</label>
-				<input
-                    type="text"
-                    class="login-form__input"
-                    bind:value={username}
-                    placeholder="e.g. Douglas Seward"
-                    autocomplete="username"
-                />
-            </div>
+				<input 
+					type="text" 
+					class="login-form__input"
+					bind:value={username}
+					placeholder="e.g. Mike Thompson"
+				/>
+			</div>
 
-            <div class="login-form__field">
+			<div class="login-form__field">
 				<label class="login-form__label">4-Digit PIN</label>
 				<input 
 					type="password" 
@@ -61,7 +72,6 @@
 					bind:value={pin}
 					maxlength="4"
 					inputmode="numeric"
-					pattern="[0-9]*"
 					placeholder="••••"
 				/>
 			</div>
@@ -84,6 +94,7 @@
 </div>
 
 <style>
+	/* (your existing styles can stay the same) */
 	.login-page {
 		min-height: 100dvh;
 		display: flex;
@@ -152,6 +163,7 @@
 		color: #ef4444;
 		font-size: 0.95rem;
 		margin: 0.75rem 0;
+		text-align: center;
 	}
 
 	.login-card__help {

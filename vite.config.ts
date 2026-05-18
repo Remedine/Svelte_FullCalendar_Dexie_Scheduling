@@ -24,7 +24,14 @@ export default defineConfig({
 	],
 
 	ssr: {
-		noExternal: ['@fullcalendar/*', 'dexie']
+		noExternal: [
+			'@fullcalendar/core',
+			'@fullcalendar/daygrid',
+			'@fullcalendar/timegrid',
+			'@fullcalendar/interaction',
+			'@fullcalendar/multimonth',
+			'dexie'
+		]
 	},
 
 	// )=- Stronger optimization settings to prevent 504 errors
