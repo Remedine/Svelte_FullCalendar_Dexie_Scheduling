@@ -43,6 +43,23 @@
 
 	let isEditing = $state(false);
 	let editingJobId = $state<number | null>(null);
+	
+	// Escape key support for both modals
+	$effect(() => {
+		if (showJobForm || showCancelConfirm) {
+			const handleEscape = (e: KeyboardEvent) => {
+				if (e.key === 'Escape') {
+					if (showCancelConfirm) {
+						showCancelConfirm = false;
+					} else {
+						showJobForm = false;
+					}
+				}
+			};
+			document.addEventListener('keydown', handleEscape);
+			return () => document.removeEventListener('keydown', handleEscape);
+		}
+	})
 
 	const crewOptions = BUSINESS_CONFIG.crewMembers;
 	const areaOptions = Object.entries(BUSINESS_CONFIG.areasOfTown).map(([key, value]) => ({
@@ -447,7 +464,7 @@
 				></textarea>
 			</div>
 
-			<div class="cancel-confirm-modal__actions">
+			<div class="cancel-confirm-modal__footer">
 				<button 
 					class="new-job-modal__btn new-job-modal__btn--cancel"
 					onclick={() => showCancelConfirm = false}
@@ -669,6 +686,18 @@
 		gap: 0.75rem;
 		justify-content: space-between;
 		align-items: center;
+		z-index: 10;
+		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+	}
+	.cancel-confirm-modal__footer {
+		position: sticky;
+		bottom: 0;
+		background: white;
+		padding: 1rem 1.25rem;
+		border-top: 1px solid #e5e7eb;
+		display: flex;
+		gap: 0.75rem;
+		justify-content: flex-end;
 		z-index: 10;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 	}
