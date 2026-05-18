@@ -269,8 +269,14 @@
 
 <!-- )=- MOBILE-FIRST + CONTAINER-QUERY ENHANCED New Job Modal -->
 {#if showJobForm}
-	<div class="new-job-modal">
-		<div class="new-job-modal__content">
+	<div 
+		class="new-job-modal"
+		onclick={() => showJobForm = false}
+	>
+		<div 
+			class="new-job-modal__content"
+			onclick={(e) => e.stopPropagation()}
+		>
 			<h2 class="new-job-modal__title">
 				{isEditing ? 'Edit Job' : 'Create New Job'}
 			</h2>
@@ -383,7 +389,7 @@
 				</div>
 			</div>
 
-			<div class="new-job-modal__actions">
+			<div class="new-job-modal__footer">
 				{#if isEditing}
 					<button 
 						class="cancel-job-text"
@@ -652,5 +658,18 @@
 		border-radius: 12px;
 		max-width: 420px;
 		width: 90%;
+	}
+	.new-job-modal__footer {
+		position: sticky;
+		bottom: 0;
+		background: white;
+		padding: 1rem 1.25rem;
+		border-top: 1px solid #e5e7eb;
+		display: flex;
+		gap: 0.75rem;
+		justify-content: space-between;
+		align-items: center;
+		z-index: 10;
+		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 	}
 </style>

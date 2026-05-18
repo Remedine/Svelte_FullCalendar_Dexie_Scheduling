@@ -1,0 +1,6 @@
+# .gitattributes
+* text=auto
+*.svelte text eol=lf
+*.ts text eol=lf
+*.js text eol=lf
+pnpm-lock.yaml text eol=lf

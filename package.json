@@ -44,10 +44,5 @@
 		"docx": "^9.6.1",
 		"file-saver": "^2.0.5",
 		"zod": "^4.4.3"
-	},
-	"pnpm": {
-		"overrides": {
-			"cookie": "0.7.0"
-		}
 	}
 }
