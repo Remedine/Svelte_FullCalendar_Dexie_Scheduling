@@ -2,11 +2,19 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth.svelte.ts';
+	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
 	let { children } = $props();
 
-	// )=- Added for better active link detection
 	let currentPath = $derived($page.url.pathname);
+
+	// )=- Reliable auth guard
+	$effect(() => {
+		if (auth.isReady && !auth.currentUser) {
+			goto('/login', { replaceState: true });
+		}
+	});
 </script>
 
 <div class="app-layout">
@@ -64,7 +72,11 @@
 
 	<!-- Main Content Area -->
 	<main class="main-content">
-		{@render children()}
+		{#if !auth.isReady}
+			<div class="loading-screen">Loading...</div>
+		{:else}
+			{@render children()}
+		{/if}
 	</main>
 </div>
 
@@ -158,5 +170,13 @@
 
 	.top-nav__logout-btn:hover {
 		background: #dc2626;
+	}
+		.loading-screen {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+		font-size: 1.1rem;
+		color: #64748b;
 	}
 </style>

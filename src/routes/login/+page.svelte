@@ -12,9 +12,10 @@
 	onMount(async () => {
 		authModule = await import('$lib/stores/auth.svelte.ts');
 
-		// )=- Access via wrapped object
+		// )=- Redirect if already logged in (new protection)
 		if (authModule.auth.currentUser) {
 			goto('/calendar');
+			return;
 		}
 	});
 
