@@ -7,20 +7,22 @@
 	let error = $state('');
 	let isLoading = $state(false);
 
-	// Dynamic import auth to avoid any shared module issues
-	let auth: any = null;
+	let authModule: any = null;
 
 	onMount(async () => {
-		const authModule = await import('$lib/stores/auth.svelte');
-		auth = authModule;
+		authModule = await import('$lib/stores/auth.svelte.ts');
 
-		if (auth.currentUser.value) {
+		// )=- Access via wrapped object
+		if (authModule.auth.currentUser) {
 			goto('/calendar');
 		}
 	});
 
 	async function handleLogin() {
-		if (!auth) return;
+		if (!authModule) {
+			error = 'Auth module not loaded yet';
+			return;
+		}
 
 		if (!username || pin.length !== 4) {
 			error = 'Please enter name and 4-digit PIN';
@@ -30,7 +32,7 @@
 		isLoading = true;
 		error = '';
 
-		const result = await auth.login(username, pin);
+		const result = await authModule.login(username, pin);
 
 		if (result.success) {
 			goto('/calendar');
