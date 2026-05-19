@@ -1,6 +1,7 @@
 <!-- src/routes/(app)/+layout.svelte -->
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { auth } from '$lib/stores/auth.svelte.ts';
 
 	let { children } = $props();
 
@@ -42,8 +43,22 @@
 		</nav>
 
 		<div class="top-nav__user">
-			<span>Brick Engstrom</span>
-			<!-- Later: User avatar / logout -->
+			{#if auth.currentUser}
+				<span class="top-nav__user-info">
+					Logged in as <strong>{auth.currentUser.name}</strong>
+				</span>
+				<button 
+					onclick={async () => {
+						await import('$lib/stores/auth.svelte.ts').then(m => m.logout());
+						window.location.href = '/login';
+					}}
+					class="top-nav__logout-btn"
+				>
+					Logout
+				</button>
+			{:else}
+				<span>Not logged in</span>
+			{/if}
 		</div>
 	</header>
 
@@ -117,5 +132,31 @@
 			gap: 1rem;
 			font-size: 0.95rem;
 		}
+	}
+	/*  User section styling */
+	.top-nav__user {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.top-nav__user-info {
+		font-size: 0.95rem;
+		color: #475569;
+	}
+
+	.top-nav__logout-btn {
+		background: #ef4444;
+		color: white;
+		border: none;
+		padding: 0.4rem 0.9rem;
+		border-radius: 6px;
+		font-size: 0.9rem;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+
+	.top-nav__logout-btn:hover {
+		background: #dc2626;
 	}
 </style>
