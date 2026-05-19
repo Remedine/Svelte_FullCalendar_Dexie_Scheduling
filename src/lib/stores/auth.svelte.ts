@@ -2,13 +2,12 @@ import { browser } from '$app/environment';
 import { db, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
-// )=- Svelte 5 exported state must be wrapped in an object
+// )=- Wrapped in object so we can safely export and mutate (Svelte 5 rule)
 export const auth = $state({
 	currentUser: null as User | null,
-	isReady: false // new flag
+	isReady: false
 });
 
-// All functions and code go AFTER the $state block is closed
 export async function login(
 	name: string,
 	pin: string
@@ -24,7 +23,6 @@ export async function login(
 		return { success: false, message: 'Incorrect PIN' };
 	}
 
-	// )=- Mutate the property only (this line must be OUTSIDE the $state({}))
 	auth.currentUser = user;
 	localStorage.setItem('currentUserId', user.id!.toString());
 
@@ -36,7 +34,7 @@ export async function logout() {
 	localStorage.removeItem('currentUserId');
 }
 
-// Auto-login from localStorage (client-only)
+// Auto-restore session
 if (browser) {
 	const savedId = localStorage.getItem('currentUserId');
 	if (savedId) {
@@ -44,7 +42,6 @@ if (browser) {
 			if (user && user.active) {
 				auth.currentUser = user;
 			}
-			// )=- Mark as ready after check
 			auth.isReady = true;
 		});
 	} else {
@@ -52,8 +49,4 @@ if (browser) {
 	}
 } else {
 	auth.isReady = true;
-}
-
-export function getCurrentUser() {
-	return auth.currentUser;
 }
