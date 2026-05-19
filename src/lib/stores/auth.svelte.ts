@@ -4,7 +4,8 @@ import * as bcrypt from 'bcryptjs';
 
 // )=- Svelte 5 exported state must be wrapped in an object
 export const auth = $state({
-	currentUser: null as User | null
+	currentUser: null as User | null,
+	isReady: false // new flag
 });
 
 // All functions and code go AFTER the $state block is closed
@@ -43,8 +44,14 @@ if (browser) {
 			if (user && user.active) {
 				auth.currentUser = user;
 			}
+			// )=- Mark as ready after check
+			auth.isReady = true;
 		});
+	} else {
+		auth.isReady = true;
 	}
+} else {
+	auth.isReady = true;
 }
 
 export function getCurrentUser() {
