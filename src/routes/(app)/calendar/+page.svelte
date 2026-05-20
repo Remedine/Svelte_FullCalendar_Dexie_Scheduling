@@ -5,7 +5,7 @@
 	import { seedSampleData } from '$lib/db/seed';
 	import { getUpcomingJobs } from '$lib/db';
 
-	// )=- Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
+	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
 	let CalendarComponent: any = $state(null);
 	let jobs: any[] = $state([]);
 
