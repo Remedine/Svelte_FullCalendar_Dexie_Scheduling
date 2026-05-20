@@ -171,6 +171,20 @@
 				}
 			},
 
+			eventResize: async (info) => {
+				const jobId = parseInt(info.event.id);
+				if (!jobId) return;
+
+				try {
+					await updateJobDates(jobId, info.event.start!, info.event.end!);
+					console.log(`✅ Job ${jobId} resized successfully`);
+				} catch (err) {
+					console.error('❌ Resize failed', err);
+					info.revert();
+				}
+			},
+			
+
 			eventClick: async (info) => {
 				const job = info.event.extendedProps as any;
 				if (!job?.id) return;
