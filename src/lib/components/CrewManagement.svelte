@@ -65,12 +65,18 @@
     await loadUsers();
   }
 
-  async function toggleActive(user: User) {
+ async function toggleActive(user: User) {
     if (!isAdmin) return;
 
     const adminCount = allUsers.filter(u => u.role === 'admin' && u.active).length;
+
     if (user.role === 'admin' && !user.active && adminCount === 0) {
       alert('Must keep at least one active admin.');
+      return; 
+    }
+
+    if (user.role === 'admin' && user.active && adminCount <= 1) {
+      alert('Cannot deactivate the last active admin.');
       return;
     }
 
