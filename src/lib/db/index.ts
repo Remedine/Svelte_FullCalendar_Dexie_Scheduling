@@ -63,7 +63,7 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(3).stores({
+db.version(4).stores({
 	clients: '++id, name, areaOfTown, email',
 	jobs: '++id, clientId, start, end, status, areaOfTown',
 	users: '++id, name, role, active'

@@ -13,12 +13,12 @@
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
 	import BillableItemRow from '$lib/components/BillableItemRow.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
-	
+	import { db } from '$lib/db';	
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
 
-	// )=- currentJob with billableItems (unchanged)
+	// currentJob with billableItems (unchanged)
 	let showJobForm = $state(false);
 	let currentJob = $state({
 		title: 'Full Exterior Window Cleaning',
@@ -65,7 +65,24 @@
 
 
 
-	const crewOptions = BUSINESS_CONFIG.crewMembers;
+	let crewOptions = $state<string[]>([]);
+
+	//load active crew members
+	$effect(() => {
+		db.users
+			.toArray()
+			.then(users => {
+				crewOptions = users
+					.filter(u => u.active === true)
+					.map(u => u.name)
+					.sort();
+			})
+			.catch(err => {
+				console.error('Failed to load crew:', err);
+				crewOptions = [];
+			});
+	});
+
 	const areaOptions = Object.entries(BUSINESS_CONFIG.areasOfTown).map(([key, value]) => ({
 		value: key,
 		label: value.label
@@ -309,7 +326,7 @@
 	
 </div>
 
-<!-- )=- MOBILE-FIRST + CONTAINER-QUERY ENHANCED New Job Modal -->
+<!--  MOBILE-FIRST + CONTAINER-QUERY ENHANCED New Job Modal -->
 {#if showJobForm}
 	<div 
 		class="new-job-modal"
@@ -370,7 +387,7 @@
 				</div>
 
 				<fieldset class="new-job-modal__field">
-					<legend class="new-job-modal__label">Crew</legend>
+					<legend class="new-job-modal__label">Crew / Assigned Staff</legend>
 					<div class="new-job-modal__crew-grid">
 						{#each crewOptions as crew (crew)}
 							<label class="new-job-modal__crew-option">
