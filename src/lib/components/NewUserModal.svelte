@@ -54,13 +54,13 @@
         <option value="admin">Admin</option>
       </select>
 
-      <label class="modal__label">Initial 4-digit PIN (optional)</label>
+      <label class="modal__label">Initial 4-digit PIN* </label>
       <input 
         type="password" 
         bind:value={initialPin} 
         maxlength="4" 
         class="modal__input" 
-        placeholder="1234 (optional)" 
+        placeholder="e.g. 4424" 
       />
 
       <div class="modal__placeholder">

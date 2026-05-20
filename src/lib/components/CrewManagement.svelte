@@ -120,7 +120,6 @@
     <button onclick={openNewUser} class="user-management__add-btn">+ Add New User</button>
   </header>
 
-    <!-- )=- Updated: Pills on same line as name + strict grid -->
   <div class="user-management__grid">
     {#each allUsers as user (user.id)}
       <div class="user-management__row">
@@ -135,22 +134,26 @@
           </div>
         </div>
 
-        <!-- Name + Pills (same line) -->
-        <div class="user-management__info-col">
-          <div class="user-management__name-row">
-            <span class="user-management__name">{user.name}</span>
-            <div class="user-management__badges">
-              <span class="user-management__role-badge user-management__role-badge--{user.role}">
-                {user.role}
-              </span>
-              <span class="user-management__status-badge user-management__status-badge--{user.active ? 'active' : 'inactive'}">
-                {user.active ? '✅ Active' : '⛔ Inactive'}
-              </span>
-            </div>
-          </div>
+        <!-- Name -->
+        <div class="user-management__name-col">
+          <span class="user-management__name">{user.name}</span>
         </div>
 
-        <!-- Actions (View Jobs + Edit only) -->
+        <!-- Role Token -->
+        <div class="user-management__role-col">
+          <span class="user-management__role-badge user-management__role-badge--{user.role}">
+            {user.role}
+          </span>
+        </div>
+
+        <!-- Status Token -->
+        <div class="user-management__status-col">
+          <span class="user-management__status-badge user-management__status-badge--{user.active ? 'active' : 'inactive'}">
+            {user.active ? '✅ Active' : '⛔ Inactive'}
+          </span>
+        </div>
+
+        <!-- Actions -->
         <div class="user-management__actions-col">
           <button onclick={() => openJobs(user)} class="user-management__btn user-management__btn--jobs">View Jobs</button>
           <button onclick={() => openEdit(user)} class="user-management__btn user-management__btn--edit">Edit</button>
@@ -159,24 +162,20 @@
     {/each}
   </div>
 
-  <!-- Modals -->
+  <!-- Modals (unchanged) -->
   {#if showNewModal}
     <NewUserModal onClose={(success) => { showNewModal = false; if (success) loadUsers(); }} />
   {/if}
 
   {#if showJobsModal && selectedUser}
-    <UserJobsModal 
-      userId={selectedUser.id!} 
-      userName={selectedUser.name} 
-      onClose={() => showJobsModal = false} 
-    />
+    <UserJobsModal userId={selectedUser.id!} userName={selectedUser.name} onClose={() => showJobsModal = false} />
   {/if}
 
   {#if showEditModal && selectedUser}
     <div class="modal-overlay" onclick={() => { showEditModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
         <h2 class="modal__title">Edit {selectedUser.name}</h2>
-
+        <!-- form content unchanged -->
         <div class="modal__form">
           <label class="modal__label">Name</label>
           <input type="text" bind:value={editName} class="modal__input" />
@@ -212,9 +211,9 @@
 </div>
 
 <style>
-  /* BEM - Clean fixed columns */
+  /* BEM - Fixed 5-column grid */
   .user-management {
-    max-width: 1200px;
+    max-width: 1350px;
     margin: 0 auto;
     padding: 2rem;
   }
@@ -226,10 +225,7 @@
     margin-bottom: 2rem;
   }
 
-  .user-management__title {
-    font-size: 1.8rem;
-    margin: 0;
-  }
+  .user-management__title { font-size: 1.8rem; margin: 0; }
 
   .user-management__add-btn {
     background: #4caf50;
@@ -241,7 +237,6 @@
     cursor: pointer;
   }
 
-  Clean grid + mobile button equality */
   .user-management__grid {
     display: flex;
     flex-direction: column;
@@ -250,26 +245,34 @@
 
   .user-management__row {
     display: grid;
-    grid-template-columns: 64px 1fr auto;
+    grid-template-columns: 64px 220px 60px 160px auto;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
+    gap: 16px;
+    padding: 1rem 1.5rem;
     background: white;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
 
-  .user-management__name-row {
+  .user-management__avatar-col { flex-shrink: 0; }
+  .user-management__avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #e0e0e0;
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    justify-content: center;
+    overflow: hidden;
   }
+  .user-management__avatar-img { width: 100%; height: 100%; object-fit: cover; }
+  .user-management__avatar-placeholder { font-size: 1.8rem; font-weight: bold; color: #555; }
 
-  .user-management__badges {
-    display: flex;
-    gap: 0.5rem;
-  }
+  .user-management__name-col { width: 220px; flex-shrink: 0; }
+  .user-management__name { font-size: 1.1rem; font-weight: 600; }
+
+  .user-management__role-col { width: 140px; flex-shrink: 0; }
+  .user-management__status-col { width: 160px; flex-shrink: 0; }
 
   .user-management__role-badge,
   .user-management__status-badge {
@@ -288,81 +291,44 @@
   .user-management__actions-col {
     display: flex;
     gap: 0.75rem;
+    justify-content: flex-end;
   }
 
   .user-management__btn {
-    padding: 0.6rem 1.25rem;
+    padding: 0.65rem 1.4rem;
     border: none;
     border-radius: 6px;
     font-weight: 600;
     cursor: pointer;
-    font-size: 0.9rem;
-    min-width: 110px; /* )=- Ensures equal width on mobile */
   }
 
-  /* Mobile responsiveness */
+  .user-management__btn--jobs { background: #673ab7; color: white; }
+  .user-management__btn--edit  { background: #2196f3; color: white; }
+
+  /* Mobile */
   @media (max-width: 768px) {
     .user-management__row {
       grid-template-columns: 56px 1fr;
-      gap: 1rem;
     }
-
     .user-management__actions-col {
       grid-column: 1 / -1;
       justify-content: stretch;
     }
+    .user-management__btn { flex: 1; }
+  }
 
-    .user-management__btn {
-      flex: 1; /* )=- Equal width when stacked */
-      min-width: auto;
-    }
-  }
-  /* Modal styles (shared) */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  .modal-content {
-    background: white;
-    border-radius: 8px;
-    width: 90%;
-    max-width: 420px;
-    padding: 2rem;
-  }
+  /* Modal styles (unchanged) */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .modal-content { background: white; border-radius: 8px; width: 90%; max-width: 420px; padding: 2rem; }
   .modal__title { margin: 0 0 1.5rem 0; font-size: 1.5rem; }
   .modal__form { display: flex; flex-direction: column; gap: 1rem; }
   .modal__label { font-weight: 600; margin-bottom: 0.25rem; display: block; }
-  .modal__input,
-  .modal__select {
-    padding: 0.75rem;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 1rem;
-  }
-  .modal__checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.95rem;
-  }
-  .modal__actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-    margin-top: 2rem;
-  }
-  .modal__btn {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
+  .modal__input, .modal__select { padding: 0.75rem; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+  .modal__checkbox-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; }
+  .modal__actions { display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem; }
+  .modal__btn { padding: 0.75rem 1.5rem; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
   .modal__btn--cancel { background: #9e9e9e; color: white; }
   .modal__btn--save { background: #4caf50; color: white; }
+  .modal__btn--toggle { background: #ff9800; color: white; }
+  .modal__btn--delete { background: #f44336; color: white; }
 </style>
