@@ -1,5 +1,6 @@
 <script lang="ts">
     import { auth } from '$lib/stores/auth.svelte';
+	import { db } from '$lib/db';
 
     interface Props {
         onSuccess: () => void;
@@ -12,34 +13,55 @@
     let isSubmitting = $state(false);
 
     async function handleSubmit() {
-      if (newPin.length !== 4 || confirmPin.length !== 4) {
-        error = 'PIN must be exactly 4 digits';
-        return;
-      }
-      if (newPin !== confirmPin) {
-        error = 'PINs do not match';
-        return;
-      }
+		if (newPin.length !== 4 || confirmPin.length !== 4) {
+			error = 'PIN must be exactly 4 digits';
+			return;
+		}
+		if (newPin !== confirmPin) {
+			error = 'PINs do not match';
+			return;
+		}
 
-      isSubmitting = true;
-      error = '';
+		isSubmitting = true;
+		error = '';
 
-      try {
-        // )=- Use auth store function instead of CrewManagement
-        await auth.setInitialPin(auth.currentUser!.id!, newPin);
-        onSuccess();
-      } catch (e) {
-        error = 'Failed to set PIN. Please try again.';
-      } finally {
-        isSubmitting = false;
-      }
+		try {
+			console.log('Starting setInitialPin...');
+			const bcrypt = await import('bcryptjs');
+			console.log('bcrypt imported');
+			
+			const hashed = await bcrypt.hash(newPin, 10);
+			console.log('PIN hashed successfully');
+			
+			await db.users.update(auth.currentUser!.id!, {
+				pinHash: hashed,
+				forcePinUpdate: false,
+				updatedAt: new Date()
+			});
+			console.log('Database updated');
+			
+			// Refresh current user
+			const updatedUser = await db.users.get(auth.currentUser!.id!);
+			if (updatedUser) {
+				auth.currentUser = updatedUser;
+			}
+			console.log('User refreshed');
+			
+			onSuccess();
+		} catch (e) {
+			console.error('ERROR in setInitialPin:', e);
+			error = 'Failed to set PIN. Please try again.';
+		} finally {
+			isSubmitting = false;
+			console.log('Finally block executed');
+		}
 	}
 </script>
 
-<div class="modal-overlay" onclick={onSuccess}>
+<div class="modal-overlay" onclick={() => {}}>
   <div class="modal-content" onclick={e => e.stopPropagation()}>
     <h2 class="modal__title">Set Your New PIN</h2>
-    <p class="modal__subtitle">This is required for first-time login or forced reset.</p>
+    <p class="modal__subtitle">Required for first-time login or forced reset.</p>
 
     <div class="modal__form">
       <label class="modal__label">New 4-digit PIN</label>
@@ -67,13 +89,20 @@
       {/if}
     </div>
 
-    <div class="modal__actions">
-      <button onclick={onSuccess} class="modal__btn modal__btn--cancel" disabled={isSubmitting}>
-        Cancel
-      </button>
-      <button onclick={handleSubmit} class="modal__btn modal__btn--save" disabled={isSubmitting || newPin.length !== 4 || confirmPin.length !== 4}>
-        {isSubmitting ? 'Setting PIN...' : 'Set PIN'}
-      </button>
+      <div class="modal__actions">
+        <button 
+          onclick={() => { auth.logout(); window.location.href = '/login'; }} 
+          class="modal__btn modal__btn--cancel"
+        >
+          Cancel & Logout
+        </button>
+        <button 
+          onclick={handleSubmit} 
+          class="modal__btn modal__btn--save" 
+          disabled={isSubmitting || newPin.length !== 4 || confirmPin.length !== 4}
+        >
+          {isSubmitting ? 'Setting PIN...' : 'Set PIN'}
+        </button>
     </div>
   </div>
 </div>

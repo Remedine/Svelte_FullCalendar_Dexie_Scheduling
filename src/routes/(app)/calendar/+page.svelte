@@ -4,13 +4,19 @@
 	import { browser } from '$app/environment';
 	import { seedSampleData } from '$lib/db/seed';
 	import { getUpcomingJobs } from '$lib/db';
+	import PinResetModal from '$lib/components/PinResetModal.svelte';
 
+	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
 	let CalendarComponent: any = $state(null);
 	let jobs: any[] = $state([]);
 
 	onMount(async () => {
 		await seedSampleData();
+
+		if (auth.currentUser?.forcePinUpdate) {
+			showPinReset = true;
+		}
 
 		jobs = await getUpcomingJobs(30);
 
@@ -19,6 +25,12 @@
 			CalendarComponent = module.default;
 		}
 	});
+
+	function handlePinResetSuccess() {
+		showPinReset = false;
+		// Optionally reload to refresh user data
+		window.location.reload();
+	}
 </script>
 
 <div class="page">
@@ -36,6 +48,10 @@
 		{/if}
 	</div>
 </div>
+<!-- )=- Forced PIN Reset Modal -->
+{#if showPinReset}
+	<PinResetModal onSuccess={handlePinResetSuccess} />
+{/if}
 
 <style>
 	.page {

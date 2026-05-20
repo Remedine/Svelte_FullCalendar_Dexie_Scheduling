@@ -48,6 +48,13 @@
 			>
 				📋 Jobs
 			</a>
+			<a 
+				href="admin/crew" 
+				class="top-nav__link"
+				class:active={currentPath.startsWith('/admin/crew')}
+			>
+				Crew
+			</a>
 		</nav>
 
 		<div class="top-nav__user">
