@@ -53,6 +53,7 @@ export interface User {
 	role: 'admin' | 'crew';
 	photo?: string; // base64 string
 	active: boolean;
+	forcePinUpdate: boolean;
 	forcePhotoUpdate: boolean;
 	createdAt: Date;
 	updatedAt: Date;
@@ -63,10 +64,10 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(4).stores({
+db.version(6).stores({
 	clients: '++id, name, areaOfTown, email',
 	jobs: '++id, clientId, start, end, status, areaOfTown',
-	users: '++id, name, role, active'
+	users: '++id, name, role, active, forcePhotoUpdate, forcePinUpdate'
 });
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
