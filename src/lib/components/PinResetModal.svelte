@@ -1,6 +1,4 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import { db } from '$lib/db';
     import { auth } from '$lib/stores/auth.svelte';
 
     interface Props {
@@ -14,27 +12,28 @@
     let isSubmitting = $state(false);
 
     async function handleSubmit() {
-        if (newPin.length !== 4 || confirmPin.length !== 4) {
-            error = 'Pin must be exactly 4 digits';
-            return;
-        }
-        if (newPin !== confirmPin) {
-            error = 'PINs do not match';
-            return;
-        }
+      if (newPin.length !== 4 || confirmPin.length !== 4) {
+        error = 'PIN must be exactly 4 digits';
+        return;
+      }
+      if (newPin !== confirmPin) {
+        error = 'PINs do not match';
+        return;
+      }
 
-        isSubmitting = true;
-        error = '';
+      isSubmitting = true;
+      error = '';
 
-        try {
-            await auth.setInitialPin(auth.currentUser!.id!, newPin);
-            onSuccess();
-        } catch (e) {
-            error = 'Failed to set PIN. Please try again.';
-        } finally {
-            isSubmitting = false;
-        }
-    }
+      try {
+        // )=- Use auth store function instead of CrewManagement
+        await auth.setInitialPin(auth.currentUser!.id!, newPin);
+        onSuccess();
+      } catch (e) {
+        error = 'Failed to set PIN. Please try again.';
+      } finally {
+        isSubmitting = false;
+      }
+	}
 </script>
 
 <div class="modal-overlay" onclick={onSuccess}>
