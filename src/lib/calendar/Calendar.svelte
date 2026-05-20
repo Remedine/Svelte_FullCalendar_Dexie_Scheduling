@@ -12,6 +12,8 @@
 	import type { AreaOfTown } from '$lib/config';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
 	import BillableItemRow from '$lib/components/BillableItemRow.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
+	
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
@@ -60,6 +62,8 @@
 			return () => document.removeEventListener('keydown', handleEscape);
 		}
 	})
+
+
 
 	const crewOptions = BUSINESS_CONFIG.crewMembers;
 	const areaOptions = Object.entries(BUSINESS_CONFIG.areasOfTown).map(([key, value]) => ({
@@ -179,7 +183,17 @@
 			},
 
 			events: async (fetchInfo, successCallback) => {
-				const jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
+				let jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
+
+				// )=- Role-based filtering (Crew sees only their jobs, Admin sees all)
+				if (auth.currentUser?.role === 'crew') {
+					jobs = jobs.filter((job: any) => 
+						job.assignedCrew?.some((crewName: string) => 
+							crewName === auth.currentUser!.name
+						)
+					);
+				}
+
 				const events = jobs.map((job: any) => ({
 					id: job.id?.toString() || '',
 					title: `${job.title} — ${job.assignedCrew.join(', ')}`,
@@ -188,6 +202,7 @@
 					backgroundColor: getEventColor(job.areaOfTown),
 					extendedProps: job
 				}));
+
 				successCallback(events);
 			}
 		});
@@ -281,7 +296,17 @@
 </script>
 
 <div class="calendar-wrapper">
-	<div bind:this={calendarEl} class="calendar-container"></div>
+	<!-- )=- Role indicator -->
+		<div class="calendar-header__role">
+			{#if auth.currentUser}
+				<span class="calendar-header__role-badge {auth.currentUser.role}">
+					{auth.currentUser.role === 'admin' ? '👑 Admin - All Jobs' : `👷 Crew View - ${auth.currentUser.name}`}
+				</span>
+			{/if}
+		</div>
+
+		<div bind:this={calendarEl} class="calendar-container"></div>
+	
 </div>
 
 <!-- )=- MOBILE-FIRST + CONTAINER-QUERY ENHANCED New Job Modal -->
@@ -700,5 +725,30 @@
 		justify-content: flex-end;
 		z-index: 10;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+	}
+			/* )=- Role badge (BEM) */
+	.calendar-header__role {
+		padding: 0.75rem 1rem;
+		text-align: right;
+		background: white;
+		border-bottom: 1px solid #e2e8f0;
+	}
+
+	.calendar-header__role-badge {
+		display: inline-block;
+		padding: 0.4rem 1rem;
+		border-radius: 9999px;
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+
+	.calendar-header__role-badge.admin {
+		background: #1e40af;
+		color: white;
+	}
+
+	.calendar-header__role-badge.crew {
+		background: #166534;
+		color: white;
 	}
 </style>
