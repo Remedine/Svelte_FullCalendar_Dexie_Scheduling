@@ -50,3 +50,21 @@ if (browser) {
 } else {
 	auth.isReady = true;
 }
+
+// )=- Add this function for PIN reset modal
+export async function setInitialPin(userId: number, newPin: string) {
+  const bcrypt = await import('bcryptjs');
+  const hashed = await bcrypt.hash(newPin, 10);
+  
+  await db.users.update(userId, {
+    pinHash: hashed,
+    forcePinUpdate: false,
+    updatedAt: new Date()
+  });
+
+  // Refresh current user
+  const updatedUser = await db.users.get(userId);
+  if (updatedUser) {
+    auth.currentUser = updatedUser;
+  }
+}
