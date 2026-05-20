@@ -120,41 +120,40 @@
     <button onclick={openNewUser} class="user-management__add-btn">+ Add New User</button>
   </header>
 
+    <!-- )=- Updated: Pills on same line as name + strict grid -->
   <div class="user-management__grid">
     {#each allUsers as user (user.id)}
       <div class="user-management__row">
-        <!-- Avatar Column -->
+        <!-- Avatar -->
         <div class="user-management__avatar-col">
           <div class="user-management__avatar">
             {#if user.photo}
               <img src={user.photo} alt={user.name} class="user-management__avatar-img" />
             {:else}
-              <span class="user-management__avatar-placeholder">
-                {user.name.slice(0, 1).toUpperCase()}
-              </span>
+              <span class="user-management__avatar-placeholder">{user.name.slice(0,1).toUpperCase()}</span>
             {/if}
           </div>
         </div>
 
-        <!-- Info Column -->
+        <!-- Name + Pills (same line) -->
         <div class="user-management__info-col">
-          <span class="user-management__name">{user.name}</span>
-          <span class="user-management__role user-management__role--{user.role}">
-            {user.role}
-          </span>
-          <span class="user-management__status user-management__status--{user.active ? 'active' : 'inactive'}">
-            {user.active ? '✅ Active' : '⛔ Inactive'}
-          </span>
+          <div class="user-management__name-row">
+            <span class="user-management__name">{user.name}</span>
+            <div class="user-management__badges">
+              <span class="user-management__role-badge user-management__role-badge--{user.role}">
+                {user.role}
+              </span>
+              <span class="user-management__status-badge user-management__status-badge--{user.active ? 'active' : 'inactive'}">
+                {user.active ? '✅ Active' : '⛔ Inactive'}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <!-- Actions Column -->
+        <!-- Actions (View Jobs + Edit only) -->
         <div class="user-management__actions-col">
           <button onclick={() => openJobs(user)} class="user-management__btn user-management__btn--jobs">View Jobs</button>
           <button onclick={() => openEdit(user)} class="user-management__btn user-management__btn--edit">Edit</button>
-          <button onclick={() => toggleActive(user)} class="user-management__btn user-management__btn--toggle">
-            {user.active ? 'Deactivate' : 'Activate'}
-          </button>
-          <button onclick={() => deleteUser(user.id!)} class="user-management__btn user-management__btn--delete">Delete</button>
         </div>
       </div>
     {/each}
@@ -176,7 +175,7 @@
   {#if showEditModal && selectedUser}
     <div class="modal-overlay" onclick={() => { showEditModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
-        <h2 class="modal__title">Edit User</h2>
+        <h2 class="modal__title">Edit {selectedUser.name}</h2>
 
         <div class="modal__form">
           <label class="modal__label">Name</label>
@@ -200,6 +199,10 @@
         </div>
 
         <div class="modal__actions">
+          <button onclick={() => toggleActive(selectedUser!)} class="modal__btn modal__btn--toggle">
+            {selectedUser.active ? 'Deactivate User' : 'Activate User'}
+          </button>
+          <button onclick={() => deleteUser(selectedUser!.id!)} class="modal__btn modal__btn--delete">Delete User</button>
           <button onclick={() => { showEditModal = false; selectedUser = null; }} class="modal__btn modal__btn--cancel">Cancel</button>
           <button onclick={saveEdit} class="modal__btn modal__btn--save">Save Changes</button>
         </div>
@@ -238,6 +241,7 @@
     cursor: pointer;
   }
 
+  Clean grid + mobile button equality */
   .user-management__grid {
     display: flex;
     flex-direction: column;
@@ -246,81 +250,73 @@
 
   .user-management__row {
     display: grid;
-    grid-template-columns: 70px 1fr auto;
+    grid-template-columns: 64px 1fr auto;
     align-items: center;
-    gap: 1.5rem;
-    padding: 1.25rem;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
     background: white;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
 
-  .user-management__avatar-col { flex-shrink: 0; }
-  .user-management__avatar {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: #e0e0e0;
+  .user-management__name-row {
     display: flex;
     align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-  .user-management__avatar-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .user-management__avatar-placeholder {
-    font-size: 1.8rem;
-    font-weight: bold;
-    color: #555;
-  }
-
-  .user-management__info-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .user-management__name {
-    font-size: 1.25rem;
-    font-weight: 600;
-  }
-
-  .user-management__role,
-  .user-management__status {
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    display: inline-block;
-  }
-
-  .user-management__role--admin { background: #9c27b0; color: white; }
-  .user-management__role--crew { background: #2196f3; color: white; }
-  .user-management__status--active { background: #4caf50; color: white; }
-  .user-management__status--inactive { background: #f44336; color: white; }
-
-  .user-management__actions-col {
-    display: flex;
-    gap: 0.5rem;
+    gap: 1rem;
     flex-wrap: wrap;
   }
 
+  .user-management__badges {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .user-management__role-badge,
+  .user-management__status-badge {
+    padding: 0.35rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .user-management__role-badge--admin { background: #9c27b0; color: white; }
+  .user-management__role-badge--crew  { background: #2196f3; color: white; }
+  .user-management__status-badge--active   { background: #4caf50; color: white; }
+  .user-management__status-badge--inactive { background: #f44336; color: white; }
+
+  .user-management__actions-col {
+    display: flex;
+    gap: 0.75rem;
+  }
+
   .user-management__btn {
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1.25rem;
     border: none;
     border-radius: 6px;
     font-weight: 600;
     cursor: pointer;
+    font-size: 0.9rem;
+    min-width: 110px; /* )=- Ensures equal width on mobile */
   }
 
-  .user-management__btn--jobs { background: #673ab7; color: white; }
-  .user-management__btn--edit { background: #2196f3; color: white; }
-  .user-management__btn--toggle { background: #ff9800; color: white; }
-  .user-management__btn--delete { background: #f44336; color: white; }
+  /* Mobile responsiveness */
+  @media (max-width: 768px) {
+    .user-management__row {
+      grid-template-columns: 56px 1fr;
+      gap: 1rem;
+    }
 
+    .user-management__actions-col {
+      grid-column: 1 / -1;
+      justify-content: stretch;
+    }
+
+    .user-management__btn {
+      flex: 1; /* )=- Equal width when stacked */
+      min-width: auto;
+    }
+  }
   /* Modal styles (shared) */
   .modal-overlay {
     position: fixed;
