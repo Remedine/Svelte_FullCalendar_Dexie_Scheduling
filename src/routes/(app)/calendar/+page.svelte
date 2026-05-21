@@ -6,6 +6,22 @@
 	import { getUpcomingJobs } from '$lib/db';
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import SyncStatus from '$lib/components/SyncStatus.svelte';
+  	import { isAuthenticated, pullJobsFromServer, pb } from '$lib/pb';
+
+	$effect(() => {
+		if (!isAuthenticated()) return;
+		
+		const unsubscribe = pb.collection('jobs').subscribe('*', async () => {
+			console.log('🔔 Realtime update from another device');
+			await pullJobsFromServer();
+			// Refresh your jobs store / calendar here if needed
+		});
+
+		return () => unsubscribe();
+	});
+
+	
 
 	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
@@ -38,6 +54,7 @@
 <div class="page">
 	<header class="page-header">
 		<h1>Schedule</h1>
+		<SyncStatus />
 	</header>
 	<div class="calendar-container">
 		{#if CalendarComponent}
