@@ -51,6 +51,7 @@ export interface User {
 	id?: number;
 	name: string;
 	pinHash: string; // hashed 4-digit PIN
+	email?: string;
 	role: 'admin' | 'crew';
 	photo?: string; // base64 string
 	active: boolean;
@@ -65,10 +66,10 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(6).stores({
+db.version(7).stores({
 	clients: '++id, name, areaOfTown, email',
 	jobs: '++id, clientId, start, end, status, areaOfTown',
-	users: '++id, name, role, active, forcePhotoUpdate, forcePinUpdate'
+	users: '++id, name, email, role, active, forcePhotoUpdate, forcePinUpdate'
 });
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
@@ -88,11 +89,9 @@ export async function updateJob(jobId: number, updates: Partial<Job>) {
 
 	//Sync changes to multi server
 	const updatedJob = await db.jobs.get(jobId);
-	if (updatedJob) {
-		await syncJobToServer(updatedJob);
-	}
+	if (updatedJob) await syncJobToServer(updatedJob);
 
-	console.log(`✅ Job ${jobId} updated and synced to server`);
+	console.log(`✅ Job ${jobId} updated and synced`);
 }
 
 // Cancel Job
@@ -166,8 +165,9 @@ export async function createJob(jobData: any): Promise<number> {
 	};
 
 	const id = await db.jobs.add(newJob);
-	//Sync to server for multi device
-	await syncJobToServer({ ...newJob, id: Number(id) });
+	//Push to server for multi-device sync
+	await syncJobToServer({ ...newJob, id: Number(id) } as Job);
+
 	console.log(`✅ New job created with ID: ${id}`);
 	return id;
 }

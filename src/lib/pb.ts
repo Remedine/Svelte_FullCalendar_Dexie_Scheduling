@@ -16,25 +16,28 @@ export function isAuthenticated(): boolean {
 //Email + Password login
 export async function loginWithEmail(email: string, password: string) {
 	try {
-		const authData = await pb
-			.collection('users')
-			.authWithPassword(email, password);
+		const authData = await pb.collection('users').authWithPassword(email, password);
 
-		// Cache user + pinHash to Dexie for offline PIN login
+		// )=- FIXED: Properly declare and populate localUser
 		const pbUser = authData.record;
-		const localuser: User = {
-			name: pbUser.pinHash || '',
-			role: pbUser.role,
+		const localUser: User = {
+			name: pbUser.name || email.split('@')[0] || 'Admin', // or fallback to seeded Admin
+			pinHash: pbUser.pinHash || '',
+			role: pbUser.role || 'admin',
 			photo: pbUser.photo ? pbUser.photo : undefined,
 			active: pbUser.active ?? true,
 			forcePinUpdate: pbUser.forcePinUpdate ?? false,
 			forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
-			createdAt: new Date(pbUser.createdAt),
-			updatedAt: new Date(pbUser.updatedAt)
+			createdAt: new Date(pbUser.created || pbUser.createdAt),
+			updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
 		};
 
-		await db.users.put(localUser); // upsert into Dexie
-		console.log('✅ Email login successful & cached to Dexie:', pbUser.name);
+		await db.users.put(localUser);
+		console.log('✅ PB super admin cached to Dexie:', localUser.name);
+		
+		//  Pull jobs immediately so Dexie has fresh data
+		await pullJobsFromServer();
+
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
@@ -121,7 +124,7 @@ export async function syncJobToServer(job: any) {
 			client: job.clientId,
 			title: job.title,
 			start: job.start.toISOString(),
-			end: job.end.toIsoString(),
+			end: job.end.toISOString(),
 			assignedCrew: job.assignedCrew,
 			status: job.status,
 			billableItems: job.billableItems,
@@ -131,7 +134,7 @@ export async function syncJobToServer(job: any) {
 			totalAmount: job.totalAmount,
 			areaOfTown: job.areaOfTown,
 			notes: job.notes,
-			upddatedAt: new Date().toISOString()
+			updatedAt: new Date().toISOString()
 		};
 		if (job.id) {
 			await pb.collection('jobs').update(String(job.id), data);
