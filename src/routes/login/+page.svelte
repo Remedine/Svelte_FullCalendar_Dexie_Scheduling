@@ -3,6 +3,7 @@
   import { loginWithEmail, loginWithPin, isAuthenticated } from '$lib/pb';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { db } from '$lib/db';   
 
   let activeTab = $state<'pin' | 'email'>('pin');
   let email = $state('');
@@ -43,29 +44,25 @@
 
     try {
       if (activeTab === 'email') {
-        // )=- NEW: Email + Password path (caches to Dexie automatically)
         await loginWithEmail(email, password);
-        goto('/calendar', { replaceState: true });
-      } else {
-        // )=- Keep your original PIN flow unchanged
-        if (!authModule) {
-          error = 'Auth module not loaded yet';
-          return;
-        }
-        if (!username || pin.length !== 4) {
-          error = 'Please enter name and 4-digit PIN';
-          return;
+
+        const userNameGuess = email.split('@')[0]; // "Tim"
+        let cachedUser = await db.users.where('name').equalsIgnoreCase(userNameGuess).first();
+
+        if (!cachedUser) {
+          // fallback to the seeded Admin (PIN 1234) so you get full admin rights
+          cachedUser = await db.users.where('name').equalsIgnoreCase('admin').first();
         }
 
-        const result = await authModule.login(username, pin);
-
-        if (result.success && result.user) {
-          goto('/calendar', { replaceState: true });
-        } else {
+        if (cachedUser && authModule?.setCurrentUser) {
+          authModule.setCurrentUser(cachedUser);
+          console.log('✅ Dexie admin session activated for super admin login');
+			  }
+			    goto('/calendar', { replaceState: true });
+		  } else {
           error = result.message || 'Login failed';
           pin = '';
         }
-      }
     } catch (err: any) {
       error = err.message || 'Login failed';
     } finally {

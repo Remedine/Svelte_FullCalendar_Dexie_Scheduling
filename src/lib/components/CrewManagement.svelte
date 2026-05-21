@@ -1,23 +1,28 @@
 <!-- src/lib/components/CrewManagement.svelte -->
 <script lang="ts">
-  // )=- Clean column layout + modals (Svelte 5 only)
+  // Line 1
   import { onMount } from 'svelte';
   import { db, type User } from '$lib/db';
   import { auth } from '$lib/stores/auth.svelte';
   import NewUserModal from './NewUserModal.svelte';
   import UserJobsModal from './UserJobsModal.svelte';
 
+  // )=- NEW: Email linking support for PocketBase sync
+  import { loginWithEmail } from '$lib/pb';
+
   let allUsers = $state<User[]>([]);
 
   let showNewModal = $state(false);
   let showJobsModal = $state(false);
   let showEditModal = $state(false);
+  let showEmailModal = $state(false); // )=- NEW
 
   let selectedUser = $state<User | null>(null);
   let editName = $state('');
   let editRole = $state<'admin' | 'crew'>('crew');
   let editForcePin = $state(false);
   let editForcePhoto = $state(false);
+  let editEmail = $state(''); // )=- NEW
 
   let isAdmin = $derived(auth.currentUser?.role === 'admin');
 
@@ -43,6 +48,13 @@
     showEditModal = true;
   }
 
+  // )=- NEW: Open email linking modal
+  function openEmailLink(user: User) {
+    selectedUser = user;
+    editEmail = user.email || '';
+    showEmailModal = true;
+  }
+
   async function saveEdit() {
     if (!selectedUser || !editName.trim() || !isAdmin) return;
 
@@ -65,7 +77,22 @@
     await loadUsers();
   }
 
- async function toggleActive(user: User) {
+  // )=- NEW: Save email link
+  async function saveEmailLink() {
+    if (!selectedUser || !editEmail.trim()) return;
+
+    await db.users.update(selectedUser.id!, { 
+      email: editEmail.trim(),
+      updatedAt: new Date()
+    });
+
+    console.log(`✅ Email linked for ${selectedUser.name}`);
+    showEmailModal = false;
+    selectedUser = null;
+    await loadUsers();
+  }
+
+  async function toggleActive(user: User) {
     if (!isAdmin) return;
 
     const adminCount = allUsers.filter(u => u.role === 'admin' && u.active).length;
@@ -145,14 +172,21 @@
           <span class="user-management__name">{user.name}</span>
         </div>
 
-        <!-- Role Token -->
+        <!-- Email -->
+        <div class="user-management__email-col">
+          <span class="user-management__email">
+            {user.email || '— no email —'}
+          </span>
+        </div>
+
+        <!-- Role -->
         <div class="user-management__role-col">
           <span class="user-management__role-badge user-management__role-badge--{user.role}">
             {user.role}
           </span>
         </div>
 
-        <!-- Status Token -->
+        <!-- Status -->
         <div class="user-management__status-col">
           <span class="user-management__status-badge user-management__status-badge--{user.active ? 'active' : 'inactive'}">
             {user.active ? '✅ Active' : '⛔ Inactive'}
@@ -163,12 +197,15 @@
         <div class="user-management__actions-col">
           <button onclick={() => openJobs(user)} class="user-management__btn user-management__btn--jobs">View Jobs</button>
           <button onclick={() => openEdit(user)} class="user-management__btn user-management__btn--edit">Edit</button>
+          <button onclick={() => openEmailLink(user)} class="user-management__btn user-management__btn--email">
+            {user.email ? 'Change Email' : 'Link Email'}
+          </button>
         </div>
       </div>
     {/each}
   </div>
 
-  <!-- Modals (unchanged) -->
+  <!-- Existing Modals -->
   {#if showNewModal}
     <NewUserModal onClose={(success) => { showNewModal = false; if (success) loadUsers(); }} />
   {/if}
@@ -178,10 +215,10 @@
   {/if}
 
   {#if showEditModal && selectedUser}
+    <!-- Your existing edit modal stays unchanged -->
     <div class="modal-overlay" onclick={() => { showEditModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
         <h2 class="modal__title">Edit {selectedUser.name}</h2>
-        <!-- form content unchanged -->
         <div class="modal__form">
           <label class="modal__label">Name</label>
           <input type="text" bind:value={editName} class="modal__input" />
@@ -214,10 +251,32 @@
       </div>
     </div>
   {/if}
+
+  <!-- )=- NEW: Email Link Modal -->
+  {#if showEmailModal && selectedUser}
+    <div class="modal-overlay" onclick={() => { showEmailModal = false; selectedUser = null; }}>
+      <div class="modal-content" onclick={e => e.stopPropagation()}>
+        <h2 class="modal__title">Link Email for {selectedUser.name}</h2>
+        <div class="modal__form">
+          <label class="modal__label">Email Address</label>
+          <input 
+            type="email" 
+            bind:value={editEmail} 
+            class="modal__input" 
+            placeholder="user@capitalcitywindows.com" 
+          />
+        </div>
+        <div class="modal__actions">
+          <button onclick={() => { showEmailModal = false; selectedUser = null; }} class="modal__btn modal__btn--cancel">Cancel</button>
+          <button onclick={saveEmailLink} class="modal__btn modal__btn--save">Save & Link Email</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  /* BEM - Fixed 5-column grid */
+  /* BEM styles - updated grid for email column */
   .user-management {
     max-width: 1350px;
     margin: 0 auto;
@@ -251,7 +310,7 @@
 
   .user-management__row {
     display: grid;
-    grid-template-columns: 64px 220px 60px 160px auto;
+    grid-template-columns: 64px 220px 180px 100px 160px auto; /* )=- added email column */
     align-items: center;
     gap: 16px;
     padding: 1rem 1.5rem;
@@ -275,9 +334,11 @@
   .user-management__avatar-placeholder { font-size: 1.8rem; font-weight: bold; color: #555; }
 
   .user-management__name-col { width: 220px; flex-shrink: 0; }
+  .user-management__email-col { width: 180px; flex-shrink: 0; }
   .user-management__name { font-size: 1.1rem; font-weight: 600; }
+  .user-management__email { font-size: 0.95rem; color: #64748b; }
 
-  .user-management__role-col { width: 140px; flex-shrink: 0; }
+  .user-management__role-col { width: 100px; flex-shrink: 0; }
   .user-management__status-col { width: 160px; flex-shrink: 0; }
 
   .user-management__role-badge,
@@ -296,34 +357,24 @@
 
   .user-management__actions-col {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.5rem;
     justify-content: flex-end;
   }
 
   .user-management__btn {
-    padding: 0.65rem 1.4rem;
+    padding: 0.5rem 1rem;
     border: none;
     border-radius: 6px;
     font-weight: 600;
     cursor: pointer;
+    font-size: 0.85rem;
   }
 
   .user-management__btn--jobs { background: #673ab7; color: white; }
   .user-management__btn--edit  { background: #2196f3; color: white; }
+  .user-management__btn--email { background: #f59e0b; color: white; }
 
-  /* Mobile */
-  @media (max-width: 768px) {
-    .user-management__row {
-      grid-template-columns: 56px 1fr;
-    }
-    .user-management__actions-col {
-      grid-column: 1 / -1;
-      justify-content: stretch;
-    }
-    .user-management__btn { flex: 1; }
-  }
-
-  /* Modal styles (unchanged) */
+  /* Modal styles */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
   .modal-content { background: white; border-radius: 8px; width: 90%; max-width: 420px; padding: 2rem; }
   .modal__title { margin: 0 0 1.5rem 0; font-size: 1.5rem; }

@@ -34,6 +34,16 @@ export async function logout() {
 	localStorage.removeItem('currentUserId');
 }
 
+//Re-usable setter so email login (or future pocketbase flowws) can set Dexie currentUser
+export function setCurrentUser(user: user | null) {
+	auth.currentUser = user;
+	if (user?.id) {
+		localStorage.setItem('currentUserId', user.id.toString());
+	} else {
+		localStorage.removeItem('currentUserId');
+	}
+}
+
 // Auto-restore session
 if (browser) {
 	const savedId = localStorage.getItem('currentUserId');

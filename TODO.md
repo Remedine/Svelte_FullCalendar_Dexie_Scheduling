@@ -27,3 +27,7 @@
 
 ## Nice to Have / Backlog
 [] Darkmode
+[] Calendar Now Indicator to see current time
+[] business hours on calendar
+[] Event Popovers(cards?)
+[] List

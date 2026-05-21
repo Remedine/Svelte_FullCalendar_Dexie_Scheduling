@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { pb } from '$lib/pb';
 
 	let { children } = $props();
 
@@ -11,10 +12,15 @@
 
 	// )=- Reliable auth guard
 	$effect(() => {
-		if (auth.isReady && !auth.currentUser) {
+    	if (!auth.isReady) return;
+
+		const hasPocketBaseAuth = pb.authStore.isValid;
+		const hasLocalAuth = !!auth.currentUser;
+
+		if (!hasPocketBaseAuth && !hasLocalAuth) {
 			goto('/login', { replaceState: true });
 		}
-	});
+  });
 </script>
 
 <div class="app-layout">
