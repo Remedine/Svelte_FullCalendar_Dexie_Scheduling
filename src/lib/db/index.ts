@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
 import * as bcrypt from 'bcryptjs';
-import { pb, syncJobToServer, pullJobsFromServer } from '$lib/pb';
+import { pb, syncJobToServer, syncClientToServer, pullJobsFromServer } from '$lib/pb';
 
 export interface Client {
 	id?: number;
@@ -180,6 +180,37 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 	.and(job => job.status !== 'cancelled')
 	.limit(limit)
 	.toArray();
+}
+
+// )=- NEW: Create client + push to PocketBase
+export async function createClient(clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
+	const newClient = {
+		...clientData,
+		createdAt: new Date(),
+		updatedAt: new Date()
+	};
+
+	const id = await db.clients.add(newClient);
+	const savedClient = await db.clients.get(id);
+	if (savedClient) {
+		await syncClientToServer(savedClient);
+	}
+	console.log(`✅ Client created with ID: ${id} and synced to PocketBase`);
+	return id;
+}
+
+// )=- NEW: Update client + push to PocketBase
+export async function updateClient(clientId: number, updates: Partial<Client>) {
+	await db.clients.update(clientId, {
+		...updates,
+		updatedAt: new Date()
+	});
+
+	const updatedClient = await db.clients.get(clientId);
+	if (updatedClient) {
+		await syncClientToServer(updatedClient);
+	}
+	console.log(`✅ Client ${clientId} updated and synced to PocketBase`);
 }
 
 export { db };

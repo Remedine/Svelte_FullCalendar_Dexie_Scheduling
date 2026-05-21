@@ -44,6 +44,19 @@ export async function loginWithEmail(email: string, password: string) {
 		console.log('✅ PB super admin synced to Dexie (no duplicate):', localUser.name);
 
 		await pullJobsFromServer();
+
+		// )=- NEW: push any local-only jobs/clients to PB on login
+		const localJobs = await db.jobs.toArray();
+		for (const job of localJobs) {
+			await syncJobToServer(job);
+		}
+
+		const localClients = await db.clients.toArray();
+		for (const client of localClients) {
+			await syncClientToServer(client);
+		}
+
+		console.log('✅ Initial Dexie → PocketBase sync complete');
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
@@ -123,7 +136,12 @@ export async function pullJobsFromServer() {
 }
 //push local changes to PocketBase
 export async function syncJobToServer(job: any) {
-	if (!pb.authStore.isValid) return;
+	if (!pb.authStore.isValid) {
+		console.warn('⚠️ Cannot sync job — not authenticated with PocketBase');
+		return;
+	}
+
+	console.log('🔄 Attempting to push job to PocketBase:', job);
 	
 	try {
 		const data = {
@@ -142,17 +160,54 @@ export async function syncJobToServer(job: any) {
 			notes: job.notes,
 			updatedAt: new Date().toISOString()
 		};
+
+		console.log('📤 Data being sent to PB jobs collection:', data);
+
 		if (job.id) {
 			await pb.collection('jobs').update(String(job.id), data);
+			console.log('✅ Job UPDATED in PocketBase:', job.id);
 		} else {
 			const record = await pb.collection('jobs').create(data);
 			//update local dexie with server generated ID
 			await db.jobs.update(job.id || record.id, { id: Number(record.id) });
+			console.log('✅ Job CREATED in PocketBase with new id:', record.id);
 		}
 		console.log('✅ Job synced to server');
-  		} catch (err) {
-    	console.warn('⚠️ Sync to server failed (offline ok)', err);
-  }
+	} catch (err: any) {
+		console.error('❌ Job sync to PocketBase FAILED:', err);
+		console.error('   Job data that failed:', job);
+	}
+}
+
+export async function syncClientToServer(client: any) {
+	if (!pb.authStore.isValid) return;
+
+	try {
+		const data = {
+			name: client.name,
+			serviceAddressStreet: client.serviceAddressStreet,
+			serviceAddressCity: client.serviceAddressCity,
+			serviceAddressState: client.serviceAddressState,
+			serviceAddressZip: client.serviceAddressZip,
+			areaOfTown: client.areaOfTown,
+			preferredBillingMethod: client.preferredBillingMethod,
+			phone: client.phone,
+			email: client.email,
+			notes: client.notes || '',
+			updatedAt: new Date().toISOString()
+		};
+
+		if (client.id) {
+			await pb.collection('clients').update(String(client.id), data);
+			console.log('✅ Client synced to PocketBase:', client.id);
+		} else {
+			const record = await pb.collection('clients').create(data);
+			await db.clients.update(client.id || record.id, { id: Number(record.id) });
+			console.log('✅ New client created in PocketBase:', record.id);
+		}
+	} catch (err) {
+		console.error('❌ Client sync failed:', err);
+	}
 }
 
 export function logout() {
