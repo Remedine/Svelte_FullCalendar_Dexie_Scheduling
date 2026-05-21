@@ -23,6 +23,9 @@ importers:
       file-saver:
         specifier: ^2.0.5
         version: 2.0.5
+      pocketbase:
+        specifier: ^0.26.9
+        version: 0.26.9
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2061,6 +2064,9 @@ packages:
   picomatch@4.0.4:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
+
+  pocketbase@0.26.9:
+    resolution: {integrity: sha512-Tiv1/hNuUzRdvT0d8hF03dfzuefQ1WdSRp1A1q3wzFC/WYhQcbU/Qlaubl/3ZDo6xvFXBS8JAgBS/L+ms7nkVQ==}
 
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
@@ -4680,6 +4686,8 @@ snapshots:
   picocolors@1.1.1: {}
 
   picomatch@4.0.4: {}
+
+  pocketbase@0.26.9: {}
 
   possible-typed-array-names@1.1.0: {}
 

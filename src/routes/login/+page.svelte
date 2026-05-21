@@ -9,10 +9,10 @@
 
 	let authModule: any = null;
 
-		onMount(async () => {
+	onMount(async () => {
 		authModule = await import('$lib/stores/auth.svelte.ts');
 
-		//  Wait for auth to be ready, then redirect if already logged in
+		// )=- Wait for auth to be ready, then redirect if already logged in
 		const checkAuth = () => {
 			if (authModule.auth?.isReady) {
 				if (authModule.auth.currentUser) {
@@ -43,7 +43,6 @@
 		const result = await authModule.login(username, pin);
 
 		if (result.success && result.user) {
-			//  Always go to calendar (PIN reset modal will show there if needed)
 			goto('/calendar', { replaceState: true });
 		} else {
 			error = result.message || 'Login failed';

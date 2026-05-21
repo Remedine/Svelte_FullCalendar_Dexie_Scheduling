@@ -12,6 +12,7 @@ A custom, offline-first CRM, scheduling, and invoicing system built for CapitalC
 - Local-first data storage with sync capabilities
 - Mobile-optimized for field use
 - Crew and admin views for team specific calendars
+- Use Pocketbase for data sync
 
 ## Tech Stack
 
