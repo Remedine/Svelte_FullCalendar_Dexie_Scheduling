@@ -17,12 +17,13 @@
 [] Jobs
     [] Admin View
     [] Crew View
+[] Calendar
+    [] List View
 
 ## UI/UX & Styling
 
-## Testing & Quality
+## Testing & Quality/Debugs
+[] On Client View - restrict deteling clients if client has jobs (archive only)
 
 ## Nice to Have / Backlog
 [] Darkmode
-
-## Completed
