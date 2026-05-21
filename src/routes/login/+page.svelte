@@ -1,106 +1,172 @@
+<!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+  import { loginWithEmail, loginWithPin, isAuthenticated } from '$lib/pb';
+  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
 
-	let username = $state('');
-	let pin = $state('');
-	let error = $state('');
-	let isLoading = $state(false);
+  let activeTab = $state<'pin' | 'email'>('pin');
+  let email = $state('');
+  let password = $state('');
+  let username = $state('');
+  let pin = $state('');
+  let isLoading = $state(false);
+  let error = $state('');
+  let authModule: any = null;
 
-	let authModule: any = null;
+  // Line 22
+  onMount(async () => {
+    // )=- Keep your original auth module loading
+    authModule = await import('$lib/stores/auth.svelte.ts');
 
-	onMount(async () => {
-		authModule = await import('$lib/stores/auth.svelte.ts');
+    const checkAuth = () => {
+      if (authModule.auth?.isReady) {
+        if (authModule.auth.currentUser) {
+          goto('/calendar', { replaceState: true });
+        }
+      } else {
+        setTimeout(checkAuth, 50);
+      }
+    };
 
-		// )=- Wait for auth to be ready, then redirect if already logged in
-		const checkAuth = () => {
-			if (authModule.auth?.isReady) {
-				if (authModule.auth.currentUser) {
-					goto('/calendar', { replaceState: true });
-				}
-			} else {
-				setTimeout(checkAuth, 50);
-			}
-		};
+    checkAuth();
 
-		checkAuth();
-	});
+    // )=- NEW: Also check PocketBase (for email login)
+    if (isAuthenticated()) {
+      goto('/calendar', { replaceState: true });
+    }
+  });
 
-	async function handleLogin() {
-		if (!authModule) {
-			error = 'Auth module not loaded yet';
-			return;
-		}
+  // Line 45
+  async function handleLogin() {
+    isLoading = true;
+    error = '';
 
-		if (!username || pin.length !== 4) {
-			error = 'Please enter name and 4-digit PIN';
-			return;
-		}
+    try {
+      if (activeTab === 'email') {
+        // )=- NEW: Email + Password path (caches to Dexie automatically)
+        await loginWithEmail(email, password);
+        goto('/calendar', { replaceState: true });
+      } else {
+        // )=- Keep your original PIN flow unchanged
+        if (!authModule) {
+          error = 'Auth module not loaded yet';
+          return;
+        }
+        if (!username || pin.length !== 4) {
+          error = 'Please enter name and 4-digit PIN';
+          return;
+        }
 
-		isLoading = true;
-		error = '';
+        const result = await authModule.login(username, pin);
 
-		const result = await authModule.login(username, pin);
-
-		if (result.success && result.user) {
-			goto('/calendar', { replaceState: true });
-		} else {
-			error = result.message || 'Login failed';
-			pin = '';
-		}
-
-		isLoading = false;
-	}
+        if (result.success && result.user) {
+          goto('/calendar', { replaceState: true });
+        } else {
+          error = result.message || 'Login failed';
+          pin = '';
+        }
+      }
+    } catch (err: any) {
+      error = err.message || 'Login failed';
+    } finally {
+      isLoading = false;
+    }
+  }
 </script>
 
-<!-- Rest of your template stays exactly the same -->
+
 
 <div class="login-page">
-	<div class="login-card">
-		<h1 class="login-card__title">CapitalCity Windows</h1>
-		<p class="login-card__subtitle">Crew Login</p>
+  <div class="login-card">
+    <h1 class="login-card__title">CapitalCity Windows</h1>
+    <p class="login-card__subtitle">Crew Login</p>
 
-		<form 
-			onsubmit={(e) => { e.preventDefault(); handleLogin(); }} 
-			class="login-form"
-		>
-			<div class="login-form__field">
-				<label class="login-form__label">Name</label>
-				<input 
-					type="text" 
-					class="login-form__input"
-					bind:value={username}
-					placeholder="e.g. Mike Thompson"
-				/>
-			</div>
+    <!-- )=- NEW: Tab selector - Lines 87-100 -->
+    <div class="login-card__tabs">
+      <button 
+        class="login-card__tab {activeTab === 'pin' ? 'login-card__tab--active' : ''}"
+        onclick={() => { activeTab = 'pin'; error = ''; }}>
+        PIN Login
+      </button>
+      <button 
+        class="login-card__tab {activeTab === 'email' ? 'login-card__tab--active' : ''}"
+        onclick={() => { activeTab = 'email'; error = ''; }}>
+        Email Login
+      </button>
+    </div>
 
-			<div class="login-form__field">
-				<label class="login-form__label">4-Digit PIN</label>
-				<input 
-					type="password" 
-					class="login-form__input"
-					bind:value={pin}
-					maxlength="4"
-					inputmode="numeric"
-					placeholder="••••"
-				/>
-			</div>
+    <form 
+      onsubmit={(e) => { e.preventDefault(); handleLogin(); }} 
+      class="login-form"
+    >
+      {#if activeTab === 'pin'}
+        <!-- Your original PIN fields - unchanged -->
+        <div class="login-form__field">
+          <label class="login-form__label">Name</label>
+          <input 
+            type="text" 
+            class="login-form__input"
+            bind:value={username}
+            placeholder="e.g. Mike Thompson"
+          />
+        </div>
 
-			{#if error}
-				<p class="login-form__error">{error}</p>
-			{/if}
+        <div class="login-form__field">
+          <label class="login-form__label">4-Digit PIN</label>
+          <input 
+            type="password" 
+            class="login-form__input"
+            bind:value={pin}
+            maxlength="4"
+            inputmode="numeric"
+            placeholder="••••"
+          />
+        </div>
+      {:else}
+        <!-- )=- NEW: Email fields - Lines 125-145 -->
+        <div class="login-form__field">
+          <label class="login-form__label">Email</label>
+          <input 
+            type="email" 
+            class="login-form__input"
+            bind:value={email}
+            placeholder="you@company.com"
+            required
+          />
+        </div>
 
-			<button 
-				type="submit"
-				class="login-form__btn"
-				disabled={isLoading || !username || pin.length !== 4}
-			>
-				{isLoading ? 'Logging in...' : 'Login'}
-			</button>
-		</form>
+        <div class="login-form__field">
+          <label class="login-form__label">Password</label>
+          <input 
+            type="password" 
+            class="login-form__input"
+            bind:value={password}
+            placeholder="••••••••"
+            required
+          />
+        </div>
+      {/if}
 
-		<p class="login-card__help">Ask admin for your PIN</p>
-	</div>
+      {#if error}
+        <p class="login-form__error">{error}</p>
+      {/if}
+
+      <button 
+        type="submit"
+        class="login-form__btn"
+        disabled={isLoading}>
+        {isLoading ? 'Logging in...' : 'Login'}
+      </button>
+    </form>
+
+    <p class="login-card__help">
+      {#if activeTab === 'pin'}
+        Ask admin for your PIN
+      {:else}
+        First-time setup or password reset
+      {/if}
+    </p>
+  </div>
 </div>
 
 <style>
@@ -181,4 +247,25 @@
 		color: #64748b;
 		font-size: 0.9rem;
 	}
+	/*  Tab styles */
+  .login-card__tabs {
+    display: flex;
+    margin: 1.5rem 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .login-card__tab {
+    flex: 1;
+    padding: 0.75rem;
+    background: none;
+    border: none;
+    font-weight: 500;
+    color: #64748b;
+    cursor: pointer;
+  }
+
+  .login-card__tab--active {
+    color: #3b82f6;
+    border-bottom: 3px solid #3b82f6;
+  }
 </style>

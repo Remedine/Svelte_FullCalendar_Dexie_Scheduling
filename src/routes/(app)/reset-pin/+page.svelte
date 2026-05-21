@@ -8,16 +8,34 @@
 	let showModal = $state(true);
 
 	onMount(() => {
-		// Security: only allow if user is logged in and needs reset
-		if (!auth.currentUser || !auth.currentUser.forcePinUpdate) {
-			goto('/calendar', { replaceState: true });
+		// )=- Security guard: prevent bypassing forced reset
+		if (!auth.currentUser) {
+			goto('/login', { replaceState: true });
+			return;
 		}
-	});
+		
+		if (!auth.currentUser.forcePinUpdate) {
+			goto('/calendar', { replaceState: true });
+			return;
+		}
 
-	function handleSuccess() {
-		showModal = false;
-		goto('/calendar', { replaceState: true });
-	}
+		// Prevent back button bypass
+		const handlePopState = () => {
+			if (auth.currentUser?.forcePinUpdate) {
+				// Push current state again to block back navigation
+				history.pushState(null, '', '/reset-pin');
+			}
+		};
+
+		window.addEventListener('popstate', handlePopState);
+		
+		// Push initial state
+		history.pushState(null, '', '/reset-pin');
+
+		return () => {
+			window.removeEventListener('popstate', handlePopState);
+		};
+	});
 </script>
 
 <div class="reset-page">
