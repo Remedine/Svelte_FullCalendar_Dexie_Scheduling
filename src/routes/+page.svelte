@@ -1,1 +1,2 @@
+// routes/+page.svelte
 <h1>Welcome to the Calendar APP</h1>
