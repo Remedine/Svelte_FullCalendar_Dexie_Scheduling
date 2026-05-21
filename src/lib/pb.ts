@@ -18,10 +18,11 @@ export async function loginWithEmail(email: string, password: string) {
 	try {
 		const authData = await pb.collection('users').authWithPassword(email, password);
 
-		// )=- FIXED: Properly declare and populate localUser
 		const pbUser = authData.record;
+
+		// )=- Build the user object we want in Dexie
 		const localUser: User = {
-			name: pbUser.name || email.split('@')[0] || 'Admin', // or fallback to seeded Admin
+			name: pbUser.name || email.split('@')[0] || 'Admin',
 			pinHash: pbUser.pinHash || '',
 			role: pbUser.role || 'admin',
 			photo: pbUser.photo ? pbUser.photo : undefined,
@@ -32,12 +33,17 @@ export async function loginWithEmail(email: string, password: string) {
 			updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
 		};
 
-		await db.users.put(localUser);
-		console.log('✅ PB super admin cached to Dexie:', localUser.name);
-		
-		//  Pull jobs immediately so Dexie has fresh data
-		await pullJobsFromServer();
+		// )=- CRITICAL: find existing user by name (case-insensitive) so we UPDATE instead of INSERT
+		const existing = await db.users.where('name').equalsIgnoreCase(localUser.name).first();
 
+		if (existing?.id) {
+			localUser.id = existing.id; // reuse the seeded Admin id
+		}
+
+		await db.users.put(localUser); // now safely updates or inserts once
+		console.log('✅ PB super admin synced to Dexie (no duplicate):', localUser.name);
+
+		await pullJobsFromServer();
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
