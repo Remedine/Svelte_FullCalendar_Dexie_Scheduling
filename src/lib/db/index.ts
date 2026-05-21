@@ -21,6 +21,7 @@ export interface Client {
 
 export interface Job {
 	id?: number;
+	pbId?: string;
 	clientId: number;
 	title: string;
 	start: Date;
@@ -66,7 +67,7 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(7).stores({
+db.version(8).stores({
 	clients: '++id, name, areaOfTown, email',
 	jobs: '++id, clientId, start, end, status, areaOfTown',
 	users: '++id, name, email, role, active, forcePhotoUpdate, forcePinUpdate'
@@ -166,7 +167,7 @@ export async function createJob(jobData: any): Promise<number> {
 
 	const id = await db.jobs.add(newJob);
 	//Push to server for multi-device sync
-	await syncJobToServer({ ...newJob, id: Number(id) } as Job);
+	await syncJobToServer(newJob as Job);
 
 	console.log(`✅ New job created with ID: ${id}`);
 	return id;

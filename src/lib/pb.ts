@@ -145,37 +145,55 @@ export async function syncJobToServer(job: any) {
 	
 	try {
 		const data = {
-			client: job.clientId,
+			client: String(job.clientId),
 			title: job.title,
 			start: job.start.toISOString(),
 			end: job.end.toISOString(),
-			assignedCrew: job.assignedCrew,
+			assignedCrew: job.assignedCrew || [],
 			status: job.status,
-			billableItems: job.billableItems,
-			subtotal: job.subtotal,
-			taxRate: job.taxRate,
-			taxAmount: job.taxAmount,
-			totalAmount: job.totalAmount,
+			billableItems: job.billableItems || [],
+			subtotal: job.subtotal || 0,
+			taxRate: job.taxRate || 0.08,
+			taxAmount: job.taxAmount || 0,
+			totalAmount: job.totalAmount || 0,
 			areaOfTown: job.areaOfTown,
-			notes: job.notes,
+			notes: job.notes || '',
 			updatedAt: new Date().toISOString()
 		};
 
 		console.log('📤 Data being sent to PB jobs collection:', data);
 
 		if (job.id) {
-			await pb.collection('jobs').update(String(job.id), data);
-			console.log('✅ Job UPDATED in PocketBase:', job.id);
+			try {
+				// )=- Try update first (for jobs that came from PB)
+				await pb.collection('jobs').update(String(job.id), data);
+				console.log('✅ Job UPDATED in PocketBase:', job.id);
+			} catch (updateErr: any) {
+				// )=- If record doesn't exist in PB yet (404), create it instead
+				if (updateErr.status === 404 || updateErr.message?.includes('not found')) {
+					const record = await pb.collection('jobs').create(data);
+					// Replace local Dexie id with the real PB id
+					await db.jobs.update(job.id, { id: Number(record.id) });
+					console.log('✅ Job CREATED in PocketBase (fallback after 404):', record.id);
+				} else {
+					throw updateErr; // re-throw other errors
+				}
+			}
 		} else {
 			const record = await pb.collection('jobs').create(data);
-			//update local dexie with server generated ID
 			await db.jobs.update(job.id || record.id, { id: Number(record.id) });
-			console.log('✅ Job CREATED in PocketBase with new id:', record.id);
+			console.log('✅ Job CREATED in PocketBase:', record.id);
 		}
-		console.log('✅ Job synced to server');
 	} catch (err: any) {
-		console.error('❌ Job sync to PocketBase FAILED:', err);
-		console.error('   Job data that failed:', job);
+		if (updateErr.status === 404 || updateErr.message?.includes('not found')) {
+			const record = await pb.collection('jobs').create(data);
+			// )=- DO NOT change the local Dexie id (it breaks the primary key)
+			// Just store the real PB id for future updates
+			await db.jobs.update(job.id, { pbId: record.id });
+			console.log('✅ Job CREATED in PocketBase (fallback):', record.id);
+		} else {
+			throw updateErr;
+		}
 	}
 }
 
