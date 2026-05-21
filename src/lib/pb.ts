@@ -80,12 +80,70 @@ export async function pullJobsFromServer() {
 			expand: 'client'
 		});
 
-		// TODO: Convert records to Job type and upsert into Dexie
-		console.log(`✅ Pulled ${records.length} jobs from server`);
-		// Expand this with full mapping 
+		for (const rec of records) {
+			const job = {
+				id: Number(rec.id),
+				clientId: Number(rec.client),
+				title: rec.title,
+				start: new Date(rec.start),
+				end: new Date(rec.end),
+				assignedCrew: rec.assignedCrew || [],
+				status: rec.status,
+				billableItems: rec.billableItems || [],
+				subtotal: rec.subtotal || 0,
+				taxRate: rec.taxRate || 0.08,
+				taxAmount: rec.taxAmount || 0,
+				totalAmount: rec.totalAmount || 0,
+				areaOfTown: rec.areaOfTown,
+				notes: rec.notes,
+				cancelReason: rec.cancelReason,
+				cancelNotes: rec.cancelNotes,
+				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+				cancelledBy: rec.cancelledBy,
+				createdAt: new Date(rec.created),
+				updatedAt: new Date(rec.updated)
+			};
+
+			await db.jobs.put(job); // upsert into dexie
+			}
+
+			console.log(`✅ Pulled and cached ${records.length} jobs from PocketBase`);
 	} catch (err) {
 		console.error('Pull failed', err);
 	}
+}
+//push local changes to PocketBase
+export async function syncJobToServer(job: any) {
+	if (!pb.authStore.isValid) return;
+	
+	try {
+		const data = {
+			client: job.clientId,
+			title: job.title,
+			start: job.start.toISOString(),
+			end: job.end.toIsoString(),
+			assignedCrew: job.assignedCrew,
+			status: job.status,
+			billableItems: job.billableItems,
+			subtotal: job.subtotal,
+			taxRate: job.taxRate,
+			taxAmount: job.taxAmount,
+			totalAmount: job.totalAmount,
+			areaOfTown: job.areaOfTown,
+			notes: job.notes,
+			upddatedAt: new Date().toISOString()
+		};
+		if (job.id) {
+			await pb.collection('jobs').update(String(job.id), data);
+		} else {
+			const record = await pb.collection('jobs').create(data);
+			//update local dexie with server generated ID
+			await db.jobs.update(job.id || record.id, { id: Number(record.id) });
+		}
+		console.log('✅ Job synced to server');
+  		} catch (err) {
+    	console.warn('⚠️ Sync to server failed (offline ok)', err);
+  }
 }
 
 export function logout() {

@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
 import * as bcrypt from 'bcryptjs';
+import { pb, syncJobToServer, pullJobsFromServer } from '$lib/pb';
 
 export interface Client {
 	id?: number;
@@ -84,7 +85,14 @@ export async function updateJob(jobId: number, updates: Partial<Job>) {
 		...updates,
 		updatedAt: new Date()
 	});
-	console.log(`✅ Job ${jobId} updated`);
+
+	//Sync changes to multi server
+	const updatedJob = await db.jobs.get(jobId);
+	if (updatedJob) {
+		await syncJobToServer(updatedJob);
+	}
+
+	console.log(`✅ Job ${jobId} updated and synced to server`);
 }
 
 // Cancel Job
@@ -95,9 +103,16 @@ export async function cancelJob(jobId: number, cancelReason: string, notes?: str
 		cancelledAt: new Date(),
 		cancelledBy: 'User', // TODO: replace with real user later
 		notes: notes || undefined,
-		updatedAt: new Date() 
+		updatedAt: new Date()
 	});
 	console.log(`❌ Job ${jobId} cancelled with reason: ${cancelReason}`);
+	// Sync cancellation to other devices
+	const updatedJob = await db.jobs.get(jobId);
+	if (updatedJob) {
+		await syncJobToServer(updatedJob);
+	}
+
+	console.log(`✅ Job ${jobId} cancelled and synced`);
 }
 
 // Used by drag & drop
@@ -108,6 +123,13 @@ export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date
 		updatedAt: new Date()
 	});
 	console.log(`✅ Job ${jobId} rescheduled`);
+
+	//  Sync to PocketBase for multi-device sync
+	const updatedJob = await db.jobs.get(jobId);
+	if (updatedJob) {
+		await syncJobToServer(updatedJob);
+	}
+	console.log(`✅ Job ${jobId} dates updated and synced`);
 }
 
 // )=- NEW: Create new job 
@@ -144,6 +166,8 @@ export async function createJob(jobData: any): Promise<number> {
 	};
 
 	const id = await db.jobs.add(newJob);
+	//Sync to server for multi device
+	await syncJobToServer({ ...newJob, id: Number(id) });
 	console.log(`✅ New job created with ID: ${id}`);
 	return id;
 }
