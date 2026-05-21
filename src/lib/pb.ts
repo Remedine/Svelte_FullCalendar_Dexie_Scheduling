@@ -70,6 +70,24 @@ export async function loginWithPin(name: string, pin: string) {
 	}
 }
 
+//pull latest jobs from PocketBase into Dexie
+export async function pullJobsFromServer() {
+	if (!pb.authStore.isValid) return;
+
+	try {
+		const records = await pb.collection('jobs').getFullList({
+			sort: '-updatedAt',
+			expand: 'client'
+		});
+
+		// TODO: Convert records to Job type and upsert into Dexie
+		console.log(`✅ Pulled ${records.length} jobs from server`);
+		// Expand this with full mapping 
+	} catch (err) {
+		console.error('Pull failed', err);
+	}
+}
+
 export function logout() {
     pb.authStore.clear();
     console.log('👋 Logged out');
