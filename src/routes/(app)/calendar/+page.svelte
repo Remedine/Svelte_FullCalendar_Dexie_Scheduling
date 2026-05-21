@@ -5,6 +5,7 @@
 	import { seedSampleData } from '$lib/db/seed';
 	import { getUpcomingJobs } from '$lib/db';
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
@@ -14,6 +15,7 @@
 	onMount(async () => {
 		await seedSampleData();
 
+		// )=- Check for forced PIN reset
 		if (auth.currentUser?.forcePinUpdate) {
 			showPinReset = true;
 		}

@@ -117,3 +117,13 @@ dexie-cloud-credentials.json
 # ========================
 test-results/
 playwright-report/
+
+# src/lib/pb.ts
+
+# PocketBase local development data - NEVER commit this
+pb_data/
+pb_data/**
+
+# PocketBase binary (optional but recommended)
+pocketbase
+pocketbase.exe
