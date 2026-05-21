@@ -74,7 +74,7 @@
 			.then(users => {
 				crewOptions = users
 					.filter(u => u.active === true)
-					.map(u => u.name)
+					.map(u => u.name)   
 					.sort();
 			})
 			.catch(err => {
