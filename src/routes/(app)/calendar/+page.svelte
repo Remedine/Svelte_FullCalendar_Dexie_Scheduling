@@ -7,21 +7,35 @@
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
-  	import { isAuthenticated, pullJobsFromServer, pb } from '$lib/pb';
-
+  	import { pb, pullJobsFromServer, isAuthenticated } from '$lib/pb';
+/**
 	$effect(() => {
-		if (!isAuthenticated()) return;
-		
-		const unsubscribe = pb.collection('jobs').subscribe('*', async () => {
-			console.log('🔔 Realtime update from another device');
-			await pullJobsFromServer();
-			// Refresh your jobs store / calendar here if needed
-		});
+    if (!pb.authStore.isValid) return;
 
-		return () => unsubscribe();
-	});
+    let subscription: any = null;
 
-	
+    try {
+      subscription = pb.collection('jobs').subscribe('*', async (e) => {
+        console.log('🔔 Realtime change from another device:', e.action);
+        await pullJobsFromServer();
+      });
+    } catch (err) {
+      console.error('Failed to subscribe:', err);
+    }
+
+    // Cleanup function
+    return () => {
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        try {
+          subscription.unsubscribe();
+        } catch (e) {
+          console.warn('Cleanup warning:', e);
+        }
+      }
+    };
+  });
+
+	**/
 
 	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
