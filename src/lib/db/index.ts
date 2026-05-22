@@ -61,77 +61,32 @@ export interface User {
 	createdAt: Date;
 	updatedAt: Date;
 }
+// Simple sync queue for offline-first
+export interface SyncQueueItem {
+	id?: string;
+	type: 'create' | 'update' | 'delete';
+	collection: 'job' | 'clients' | 'users';
+	recordId: string;
+	data?: any;
+	createdAt: Date;
+}
 
 const db = new Dexie('CapitalCityWindows') as Dexie & {
 	clients: EntityTable<Client, 'id'>;
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(10).stores({
+db.version(11).stores({
 	clients: 'id, name, areaOfTown, email',
 	jobs: 'id, clientId, start, end, status, areaOfTown',
 	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate'
 });
 
-export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
-	return await db.jobs
-		.where('start')
-		.between(start, end, true, true)
-		.and(job => job.status !== 'cancelled')
-		.toArray();
-}
+/**********************************************************************************
+* Job Functions: (Create, Update, Cancel, Update Job Dates, Get Job Range)
+**********************************************************************************/
 
-// Update Jobs on change
-export async function updateJob(jobId: string, updates: Partial<Job>) {
-	await db.jobs.update(jobId, {
-		...updates,
-		updatedAt: new Date()
-	});
-
-	const updatedJob = await db.jobs.get(jobId);
-	if (updatedJob) {
-		await syncJobToServer(updatedJob);
-	}
-
-	console.log(`✅ Job ${jobId} updated and synced`);
-}
-
-// Cancel Job
-export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
-	await db.jobs.update(jobId, {
-		status: 'cancelled',
-		cancelReason,
-		cancelledAt: new Date(),
-		cancelledBy: 'User',
-		notes: notes || undefined,
-		updatedAt: new Date()
-	});
-
-	const updatedJob = await db.jobs.get(jobId);
-	if (updatedJob) {
-		await syncJobToServer(updatedJob);
-	}
-
-	console.log(`✅ Job ${jobId} cancelled and synced`);
-}
-
-// Used by drag & drop
-export async function updateJobDates(jobId: string, newStart: Date, newEnd: Date) {
-	await db.jobs.update(jobId, {
-		start: newStart,
-		end: newEnd,
-		updatedAt: new Date()
-	});
-
-	const updatedJob = await db.jobs.get(jobId);
-	if (updatedJob) {
-		await syncJobToServer(updatedJob);
-	}
-
-	console.log(`✅ Job ${jobId} dates updated and synced`);
-}
-
-// )=- NEW: Create new job 
+//Optimistic createJob with background sync queue
 export async function createJob(jobData: any): Promise<string> {
 	const billableItems = jobData.billableItems?.length
 		? jobData.billableItems.map((item: any) => ({ ...item }))
@@ -145,7 +100,7 @@ export async function createJob(jobData: any): Promise<string> {
 			];
 
 	const newJob = {
-		clientId: String(jobData.clientId), 
+		clientId: String(jobData.clientId),
 		title: String(jobData.title),
 		start: new Date(jobData.start),
 		end: new Date(jobData.end),
@@ -156,20 +111,110 @@ export async function createJob(jobData: any): Promise<string> {
 		createdAt: new Date(),
 		updatedAt: new Date(),
 		billableItems,
-		subtotal:
-			jobData.subtotal ||
-			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
+		subtotal: jobData.subtotal || billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
 		taxRate: BUSINESS_CONFIG.defaultTaxRate,
 		taxAmount: jobData.taxAmount || 0,
 		totalAmount: jobData.totalAmount || 0
 	};
 
-	const id = await db.jobs.add(newJob); 
-	await syncJobToServer({ ...newJob, id: String(id) });
+	// 1. Save to Dexie IMMEDIATELY (optimistic)
+	const id = await db.jobs.add(newJob);
+	console.log(`✅ Job created locally (optimistic): ${id}`);
 
-	console.log(`✅ New job created with ID: ${id}`);
+	// 2. Add to sync queue for background push
+	await addToSyncQueue({
+		type: 'create',
+		collection: 'jobs',
+		recordId: String(id),
+		data: newJob
+	});
+
+	// 3. Try to push immediately if online (non-blocking)
+	if (navigator.onLine) {
+		processSyncQueue(); // fire and forget
+	}
+
 	return id;
 }
+
+// Optimistic Update Job Function 
+export function updateJob(jobId: string, updates: Partial<Job>){
+	//1. Update Dexie immediately (optimistic)
+	await db.jobs.update(jobId, {
+		...updates,
+		updatedAt: new Date()
+	})
+
+	//2. Add to sync queue
+	const updateJob = await db.jobs.get(jobId);
+	if (updateJob) {
+		await addToSyncQueue({
+			type: 'update',
+			collection: 'jobs',
+			recordId: jobId,
+			data:updates
+		});
+	}
+
+	//3. Tyr to sync in background
+	if (navigator.onLine) processSyncQueue();
+
+	console.log(`✅ Job ${jobId} updated locally (optimistic)`);
+}
+
+// Optimistic Cancel Job Function
+export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
+	const updates = {
+		status: 'cancelled' as const,
+		cancelReason,
+		cancelledAt: new Date(),
+		cancelledBy: 'User', //TODO: update to pull current user instead of static string
+		notes: notes || undefined,
+		updatedAt: new Date()
+	}
+
+	//1. Update Dexie Immediately
+	await db.jobs.update(jobId, updates);
+
+	//2. Add to sync queue
+	await addToSyncQueue({
+		type: 'update',
+		collection: 'jobs',
+		recordId: jobId,
+		data: updates
+	})
+
+	//3. Try background sync
+	if (navigator.onLine) processSyncQueue();
+
+	console.log(`✅ Job ${jobId} cancelled locally (optimistic)`);
+}
+
+// Update Job Dates
+export async function updateJobDates(jobId: string, newStart: Date, newEnd: Date) {
+	const updates = {
+		start: newStart,
+		end: newEnd,
+		updatedAt: new Date()
+	};
+
+	//1 Updated Dexie Immediately
+	await db.jobs.update(jobId, updates);
+
+	//2. Add to sync queue
+	await addToSyncQueue({
+		type: 'update',
+		collection: 'jobs',
+		recordId: jobId,
+		data:updates
+	})
+
+	//3. Try background sync
+	if (navigator.onLine) processSyncQueue();
+
+	console.log(`✅ Job ${jobId} dates updated locally (optimistic)`);
+}
+
 
 // Added back for your +page.svelte
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
@@ -180,6 +225,18 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 		.limit(limit)
 		.toArray();
 }
+
+export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
+	return await db.jobs
+		.where('start')
+		.between(start, end, true, true)
+		.and(job => job.status !== 'cancelled')
+		.toArray();
+}
+
+/**********************************************************************************
+* Client Functions: (Create, Update, Delete/Archive)
+**********************************************************************************/
 
 // )=- NEW: Create client + push to PocketBase
 export async function createClient(
@@ -212,6 +269,41 @@ export async function updateClient(clientId: string, updates: Partial<Client>) {
 		await syncClientToServer(updatedClient);
 	}
 	console.log(`✅ Client ${clientId} updated and synced to PocketBase`);
+}
+
+//Add item to Sync Queue
+export async function addToSyncQueue(item: Omit<SyncQueueItem>, 'id' | 'createdAt') {
+	await db.syncQueue.add({
+		...item,
+		createdAt: new Date()
+	});
+}
+
+// Process sync queue (call this when online)
+export async function processSyncQueue() {
+	const items = await db.syncQueue.orderBy('createdAt').toArray();
+	
+	for (const item of items) {
+		try {
+			if (item.collection === 'jobs') {
+				if (item.type === 'create') {
+					await pb.collection('jobs').create(item.data);
+				} else if (item.type === 'update') {
+					await pb.collection('jobs').update(item.recordId, item.data);
+				} else if (item.type === 'delete') {
+					await pb.collection('jobs').update(item.recordId);
+				}
+			}
+			
+			// TODO: Add similiar logic for client and users 
+
+			await db.syncQueue.delete(item.id!);
+			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
+		} catch (err) {
+			console.error(`Failed to sync queue item ${item.id}`, err);
+			// Keep in queue for retry
+		}
+	}
 }
 
 export { db };
