@@ -92,7 +92,7 @@
 		await loadClientsWithLastJob();
 	}
 
-	async function deleteClient(id: number) {
+	async function deleteClient(id: string) {
 		if (!confirm('Delete this client?')) return;
 		await db.clients.delete(id);
 		await loadClientsWithLastJob();
@@ -186,8 +186,12 @@
 				</div>
 
 				<div class="client-card__actions">
-					<button onclick={() => editClient(client)} class="client-card__btn client-card__btn--edit">Edit</button>
-					<button onclick={() => deleteClient(client.id!)} class="client-card__btn client-card__btn--delete">Delete</button>
+					<button onclick={() => editClient(client)} class="client-card__btn client-card__btn--edit">
+						Edit
+					</button>
+					<button onclick={() => deleteClient(client.id!)} class="client-card__btn client-card__btn--delete">
+						Delete
+					</button>
 				</div>
 			</li>
 		{/each}

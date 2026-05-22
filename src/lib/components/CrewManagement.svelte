@@ -1,13 +1,10 @@
 <!-- src/lib/components/CrewManagement.svelte -->
 <script lang="ts">
-  // Line 1
   import { onMount } from 'svelte';
   import { db, type User } from '$lib/db';
   import { auth } from '$lib/stores/auth.svelte';
   import NewUserModal from './NewUserModal.svelte';
   import UserJobsModal from './UserJobsModal.svelte';
-
-  // )=- NEW: Email linking support for PocketBase sync
   import { loginWithEmail } from '$lib/pb';
 
   let allUsers = $state<User[]>([]);
@@ -15,14 +12,14 @@
   let showNewModal = $state(false);
   let showJobsModal = $state(false);
   let showEditModal = $state(false);
-  let showEmailModal = $state(false); // )=- NEW
+  let showEmailModal = $state(false);
 
   let selectedUser = $state<User | null>(null);
   let editName = $state('');
   let editRole = $state<'admin' | 'crew'>('crew');
   let editForcePin = $state(false);
   let editForcePhoto = $state(false);
-  let editEmail = $state(''); // )=- NEW
+  let editEmail = $state('');
 
   let isAdmin = $derived(auth.currentUser?.role === 'admin');
 
@@ -48,7 +45,6 @@
     showEditModal = true;
   }
 
-  // )=- NEW: Open email linking modal
   function openEmailLink(user: User) {
     selectedUser = user;
     editEmail = user.email || '';
@@ -77,7 +73,6 @@
     await loadUsers();
   }
 
-  // )=- NEW: Save email link
   async function saveEmailLink() {
     if (!selectedUser || !editEmail.trim()) return;
 
@@ -99,7 +94,7 @@
 
     if (user.role === 'admin' && !user.active && adminCount === 0) {
       alert('Must keep at least one active admin.');
-      return; 
+      return;
     }
 
     if (user.role === 'admin' && user.active && adminCount <= 1) {
@@ -114,7 +109,7 @@
     await loadUsers();
   }
 
-  async function deleteUser(id: number) {
+  async function deleteUser(id: string) { 
     if (!isAdmin) return;
 
     const userToDelete = allUsers.find(u => u.id === id);
@@ -132,7 +127,7 @@
     }
   }
 
-  export async function setInitialPin(userId: number, newPin: string) {
+  export async function setInitialPin(userId: string, newPin: string) {
     const bcrypt = await import('bcryptjs');
     const hashed = await bcrypt.hash(newPin, 10);
     await db.users.update(userId, {
@@ -205,7 +200,7 @@
     {/each}
   </div>
 
-  <!-- Existing Modals -->
+  <!-- Modals -->
   {#if showNewModal}
     <NewUserModal onClose={(success) => { showNewModal = false; if (success) loadUsers(); }} />
   {/if}
@@ -215,7 +210,6 @@
   {/if}
 
   {#if showEditModal && selectedUser}
-    <!-- Your existing edit modal stays unchanged -->
     <div class="modal-overlay" onclick={() => { showEditModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
         <h2 class="modal__title">Edit {selectedUser.name}</h2>
@@ -252,7 +246,6 @@
     </div>
   {/if}
 
-  <!-- )=- NEW: Email Link Modal -->
   {#if showEmailModal && selectedUser}
     <div class="modal-overlay" onclick={() => { showEmailModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
@@ -276,7 +269,7 @@
 </div>
 
 <style>
-  /* BEM styles - updated grid for email column */
+ 
   .user-management {
     max-width: 1350px;
     margin: 0 auto;
@@ -310,7 +303,7 @@
 
   .user-management__row {
     display: grid;
-    grid-template-columns: 64px 220px 180px 100px 160px auto; /* )=- added email column */
+    grid-template-columns: 64px 220px 180px 100px 160px auto;
     align-items: center;
     gap: 16px;
     padding: 1rem 1.5rem;
@@ -374,7 +367,6 @@
   .user-management__btn--edit  { background: #2196f3; color: white; }
   .user-management__btn--email { background: #f59e0b; color: white; }
 
-  /* Modal styles */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
   .modal-content { background: white; border-radius: 8px; width: 90%; max-width: 420px; padding: 2rem; }
   .modal__title { margin: 0 0 1.5rem 0; font-size: 1.5rem; }

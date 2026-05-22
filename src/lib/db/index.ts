@@ -182,7 +182,9 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 }
 
 // )=- NEW: Create client + push to PocketBase
-export async function createClient(clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
+export async function createClient(
+	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
 	const newClient = {
 		...clientData,
 		createdAt: new Date(),
@@ -198,8 +200,8 @@ export async function createClient(clientData: Omit<Client, 'id' | 'createdAt' |
 	return id;
 }
 
-// )=- NEW: Update client + push to PocketBase
-export async function updateClient(clientId: number, updates: Partial<Client>) {
+//  Update client + push to PocketBase
+export async function updateClient(clientId: string, updates: Partial<Client>) {
 	await db.clients.update(clientId, {
 		...updates,
 		updatedAt: new Date()
