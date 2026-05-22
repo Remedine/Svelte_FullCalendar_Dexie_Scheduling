@@ -5,10 +5,25 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { pb } from '$lib/pb';
+	import { processSyncQueue } from '$lib/db';
 
 	let { children } = $props();
 
 	let currentPath = $derived($page.url.pathname);
+
+	onMount(() => {
+		const handleOnline = async () => {
+			console.log('🌐 Back online - processing sync queue');
+			await processSyncQueue();
+		};
+
+		window.addEventListener('online', handleOnline);
+
+		// Cleanup
+		return () => {
+			window.removeEventListener('online', handleOnline);
+		};
+	});
 
 	// )=- Reliable auth guard
 	$effect(() => {
