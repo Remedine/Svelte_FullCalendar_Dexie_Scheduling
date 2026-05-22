@@ -74,7 +74,7 @@
 			.then(users => {
 				crewOptions = users
 					.filter(u => u.active === true)
-					.map(u => u.name)   
+					.map(u => u.name)
 					.sort();
 			})
 			.catch(err => {
@@ -159,7 +159,7 @@
 			},
 
 			eventDrop: async (info) => {
-				const jobId = parseInt(info.event.id);
+				const jobId = info.event.id;
 				if (!jobId) return;
 
 				try {
@@ -172,7 +172,7 @@
 			},
 
 			eventResize: async (info) => {
-				const jobId = parseInt(info.event.id);
+				const jobId = info.event.id;
 				if (!jobId) return;
 
 				try {
@@ -191,7 +191,6 @@
 
 				isEditing = true;
 				editingJobId = job.id;
-
 				currentJob.title = job.title;
 				currentJob.start = new Date(job.start);
 				currentJob.end = new Date(job.end);
@@ -216,7 +215,6 @@
 			events: async (fetchInfo, successCallback) => {
 				let jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
 
-				// )=- Role-based filtering (Crew sees only their jobs, Admin sees all)
 				if (auth.currentUser?.role === 'crew') {
 					jobs = jobs.filter((job: any) => 
 						job.assignedCrew?.some((crewName: string) => 
@@ -226,7 +224,7 @@
 				}
 
 				const events = jobs.map((job: any) => ({
-					id: job.id?.toString() || '',
+					id: job.id,                    // )=- Now string ID (was Number)
 					title: `${job.title} — ${job.assignedCrew.join(', ')}`,
 					start: job.start,
 					end: job.end,

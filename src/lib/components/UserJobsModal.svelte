@@ -4,7 +4,7 @@
   import { db } from '$lib/db';
 
   interface Props {
-    userId: number;
+    userId: string;
     userName: string;
     onClose: () => void;
   }
@@ -20,7 +20,7 @@
   async function loadJobs() {
     jobs = await db.jobs
       .where('assignedCrew')
-      .equals(userId.toString())
+      .equals(userId)
       .toArray();
   }
 

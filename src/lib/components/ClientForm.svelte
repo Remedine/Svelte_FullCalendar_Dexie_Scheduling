@@ -92,7 +92,7 @@
 			} as Client;
 
 			if (isEditing && client?.id) {
-				await db.clients.update(client.id, clientPayload);
+    			await db.clients.update(client.id, clientPayload);
 			} else {
 				await db.clients.add(clientPayload);
 			}
