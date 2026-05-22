@@ -1,6 +1,6 @@
 // src/lib/pb.ts
 import PocketBase from 'pocketbase';
-import { db, type User } from '$lib/db';
+import { db, processSyncQueue, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
 // PocketBase client singleton (single source of truth for auth + sync)
@@ -11,12 +11,10 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
-//Email + Password login (with initial sync)
+//Email + Password login 
 export async function loginWithEmail(email: string, password: string) {
 	try {
-		const authData = await pb
-			.collection('users')
-			.authWithPassword(email, password);
+		const authData = await pb.collection('users').authWithPassword(email, password);
 
 		const pbUser = authData.record;
 
@@ -38,22 +36,12 @@ export async function loginWithEmail(email: string, password: string) {
 
 		await pullJobsFromServer();
 
-		// Push any local-only data to PB (will be less needed after seed removal)
-		const localJobs = await db.jobs.toArray();
-		for (const job of localJobs) {
-			if (!job.id) { 
-				await syncJobToServer(job);
-			}
+		// Process any pending offline changes
+		if (navigator.onLine) {
+			await processSyncQueue();
 		}
 
-		const localClients = await db.clients.toArray();
-		for (const client of localClients) {
-			if (!client.id) {
-				await syncClientToServer(client);
-			}
-		}
-
-		console.log('✅ Initial sync complete');
+		console.log('✅ Login complete + sync queue processed');
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
@@ -80,7 +68,16 @@ export async function loginWithPin(name: string, pin: string) {
 			throw new Error('Account is inactive');
 		}
 
-		console.log('✅ PIN login successful (offline):', name);
+		// )=- Set current user in auth store
+		auth.currentUser = user;
+		localStorage.setItem('currentUserId', user.id!);
+
+		// )=- NEW: Process any pending offline changes on PIN login too
+		if (navigator.onLine) {
+			await processSyncQueue();
+		}
+
+		console.log('✅ PIN login successful (offline + sync queue processed):', name);
 		return { record: user };
 	} catch (err) {
 		console.error('PIN login failed:', err);
