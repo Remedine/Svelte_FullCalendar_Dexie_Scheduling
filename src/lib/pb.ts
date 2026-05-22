@@ -4,23 +4,20 @@ import { db, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
 // PocketBase client singleton (single source of truth for auth + sync)
-export const pb = new PocketBase(
-    import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090'
-);
+export const pb = new PocketBase(import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090');
 
 // Check if user is Authenticated Helper
 export function isAuthenticated(): boolean {
-    return pb.authStore.isValid;
+	return pb.authStore.isValid;
 }
 
-//Email + Password login
+//Email + Password login (with initial sync)
 export async function loginWithEmail(email: string, password: string) {
 	try {
 		const authData = await pb.collection('users').authWithPassword(email, password);
 
 		const pbUser = authData.record;
 
-		// )=- Build the user object we want in Dexie
 		const localUser: User = {
 			name: pbUser.name || email.split('@')[0] || 'Admin',
 			pinHash: pbUser.pinHash || '',
@@ -33,19 +30,18 @@ export async function loginWithEmail(email: string, password: string) {
 			updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
 		};
 
-		// )=- CRITICAL: find existing user by name (case-insensitive) so we UPDATE instead of INSERT
 		const existing = await db.users.where('name').equalsIgnoreCase(localUser.name).first();
 
 		if (existing?.id) {
-			localUser.id = existing.id; // reuse the seeded Admin id
+			localUser.id = existing.id;
 		}
 
-		await db.users.put(localUser); // now safely updates or inserts once
+		await db.users.put(localUser);
 		console.log('✅ PB super admin synced to Dexie (no duplicate):', localUser.name);
 
 		await pullJobsFromServer();
 
-		// )=- NEW: push any local-only jobs/clients to PB on login
+		// Initial push of any local data
 		const localJobs = await db.jobs.toArray();
 		for (const job of localJobs) {
 			await syncJobToServer(job);
@@ -64,10 +60,9 @@ export async function loginWithEmail(email: string, password: string) {
 	}
 }
 
-//Pin Login (local/offline fallback - checks Dexie first)
+//Pin Login (local/offline fallback)
 export async function loginWithPin(name: string, pin: string) {
 	try {
-		// First try local Dexie (works offline)
 		const localUsers = await db.users.where('name').equals(name).toArray();
 		const user = localUsers[0];
 
@@ -85,7 +80,7 @@ export async function loginWithPin(name: string, pin: string) {
 		}
 
 		console.log('✅ PIN login successful (offline):', name);
-		return { record: user }; // mimic PocketBase shape for consistency
+		return { record: user };
 	} catch (err) {
 		console.error('PIN login failed:', err);
 		throw err;
@@ -104,8 +99,9 @@ export async function pullJobsFromServer() {
 
 		for (const rec of records) {
 			const job = {
-				id: Number(rec.id),
-				clientId: Number(rec.client),
+				pbId: rec.id,
+				id: Number(rec.id) || Date.now(),
+				clientId: Number(rec.expand?.client?.id || rec.client),
 				title: rec.title,
 				start: new Date(rec.start),
 				end: new Date(rec.end),
@@ -126,23 +122,24 @@ export async function pullJobsFromServer() {
 				updatedAt: new Date(rec.updated)
 			};
 
-			await db.jobs.put(job); // upsert into dexie
-			}
+			await db.jobs.put(job);
+		}
 
-			console.log(`✅ Pulled and cached ${records.length} jobs from PocketBase`);
+		console.log(`✅ Pulled and cached ${records.length} jobs from PocketBase`);
 	} catch (err) {
 		console.error('Pull failed', err);
 	}
 }
-//push local changes to PocketBase
+
+//push local changes to PocketBase (jobs)
 export async function syncJobToServer(job: any) {
 	if (!pb.authStore.isValid) {
-		console.warn('⚠️ Cannot sync job — not authenticated with PocketBase');
+		console.warn('⚠️ Cannot sync job — not authenticated');
 		return;
 	}
 
-	console.log('🔄 Attempting to push job to PocketBase:', job);
-	
+	console.log('🔄 Attempting to push job to PocketBase. pbId present?', !!job.pbId);
+
 	try {
 		const data = {
 			client: String(job.clientId),
@@ -152,53 +149,40 @@ export async function syncJobToServer(job: any) {
 			assignedCrew: job.assignedCrew || [],
 			status: job.status,
 			billableItems: job.billableItems || [],
-			subtotal: job.subtotal || 0,
+			subtotal: Number(job.subtotal) || 0,
 			taxRate: job.taxRate || 0.08,
-			taxAmount: job.taxAmount || 0,
-			totalAmount: job.totalAmount || 0,
+			taxAmount: Number(job.taxAmount) || 0,
+			totalAmount: Number(job.totalAmount) || 0,
 			areaOfTown: job.areaOfTown,
 			notes: job.notes || '',
 			updatedAt: new Date().toISOString()
 		};
 
-		console.log('📤 Data being sent to PB jobs collection:', data);
-
-		if (job.id) {
-			try {
-				// )=- Try update first (for jobs that came from PB)
-				await pb.collection('jobs').update(String(job.id), data);
-				console.log('✅ Job UPDATED in PocketBase:', job.id);
-			} catch (updateErr: any) {
-				// )=- If record doesn't exist in PB yet (404), create it instead
-				if (updateErr.status === 404 || updateErr.message?.includes('not found')) {
-					const record = await pb.collection('jobs').create(data);
-					// Replace local Dexie id with the real PB id
-					await db.jobs.update(job.id, { id: Number(record.id) });
-					console.log('✅ Job CREATED in PocketBase (fallback after 404):', record.id);
-				} else {
-					throw updateErr; // re-throw other errors
-				}
-			}
+		if (job.pbId) {
+			// Safe update path
+			await pb.collection('jobs').update(job.pbId, data);
+			console.log('✅ Job UPDATED in PocketBase:', job.pbId);
 		} else {
+			// Create path - use put() to guarantee pbId is saved
 			const record = await pb.collection('jobs').create(data);
-			await db.jobs.update(job.id || record.id, { id: Number(record.id) });
-			console.log('✅ Job CREATED in PocketBase:', record.id);
+			const jobWithPbId = { ...job, pbId: record.id };
+			await db.jobs.put(jobWithPbId);           // )=- More reliable than update()
+			console.log('✅ Job CREATED in PocketBase with pbId:', record.id);
 		}
 	} catch (err: any) {
-		if (updateErr.status === 404 || updateErr.message?.includes('not found')) {
-			const record = await pb.collection('jobs').create(data);
-			// )=- DO NOT change the local Dexie id (it breaks the primary key)
-			// Just store the real PB id for future updates
-			await db.jobs.update(job.id, { pbId: record.id });
-			console.log('✅ Job CREATED in PocketBase (fallback):', record.id);
-		} else {
-			throw updateErr;
+		console.error('❌ Job sync to PocketBase FAILED:', err);
+		if (err.response?.data) {
+			console.error('📋 PocketBase validation errors:', err.response.data);
 		}
 	}
 }
 
+// NEW: Dexie clients → PocketBase
 export async function syncClientToServer(client: any) {
-	if (!pb.authStore.isValid) return;
+	if (!pb.authStore.isValid) {
+		console.warn('⚠️ Cannot sync client — not authenticated');
+		return;
+	}
 
 	try {
 		const data = {
@@ -210,30 +194,30 @@ export async function syncClientToServer(client: any) {
 			areaOfTown: client.areaOfTown,
 			preferredBillingMethod: client.preferredBillingMethod,
 			phone: client.phone,
-			email: client.email,
+			email: client.email || '',
 			notes: client.notes || '',
 			updatedAt: new Date().toISOString()
 		};
 
-		if (client.id) {
-			await pb.collection('clients').update(String(client.id), data);
-			console.log('✅ Client synced to PocketBase:', client.id);
+		if (client.pbId) {
+			await pb.collection('clients').update(client.pbId, data);
+			console.log('✅ Client UPDATED in PocketBase:', client.pbId);
 		} else {
 			const record = await pb.collection('clients').create(data);
-			await db.clients.update(client.id || record.id, { id: Number(record.id) });
-			console.log('✅ New client created in PocketBase:', record.id);
+			await db.clients.update(client.id, { pbId: record.id });
+			console.log('✅ Client CREATED in PocketBase:', record.id);
 		}
-	} catch (err) {
-		console.error('❌ Client sync failed:', err);
+	} catch (err: any) {
+		console.error('❌ Client sync to PocketBase FAILED:', err);
 	}
 }
 
 export function logout() {
-    pb.authStore.clear();
-    console.log('👋 Logged out');
+	pb.authStore.clear();
+	console.log('👋 Logged out');
 }
 
 //Get current logged-in user record
 export function getCurrentUser() {
-    return pb.authStore.model;
+	return pb.authStore.model;
 }

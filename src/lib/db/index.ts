@@ -4,7 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { pb, syncJobToServer, syncClientToServer, pullJobsFromServer } from '$lib/pb';
 
 export interface Client {
-	id?: number;
+	id?: string;
 	name: string;
 	serviceAddressStreet: string;
 	serviceAddressCity: string;
@@ -20,9 +20,9 @@ export interface Client {
 }
 
 export interface Job {
-	id?: number;
+	id?: string;
 	pbId?: string;
-	clientId: number;
+	clientId: string;
 	title: string;
 	start: Date;
 	end: Date;
@@ -49,7 +49,7 @@ export interface Job {
 }
 
 export interface User {
-	id?: number;
+	id?: string;
 	name: string;
 	pinHash: string; // hashed 4-digit PIN
 	email?: string;
@@ -67,10 +67,10 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 };
 
-db.version(8).stores({
-	clients: '++id, name, areaOfTown, email',
-	jobs: '++id, clientId, start, end, status, areaOfTown',
-	users: '++id, name, email, role, active, forcePhotoUpdate, forcePinUpdate'
+db.version(10).stores({
+	clients: 'id, name, areaOfTown, email',
+	jobs: 'id, clientId, start, end, status, areaOfTown',
+	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate'
 });
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
