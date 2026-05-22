@@ -96,7 +96,7 @@ export async function pullJobsFromServer() {
 		});
 
 		for (const rec of records) {
-			const job = {
+			const serverJob = {
 				id: rec.id,
 				clientId: rec.expand?.client?.id || rec.client,
 				title: rec.title,
@@ -119,10 +119,22 @@ export async function pullJobsFromServer() {
 				updatedAt: new Date(rec.updated)
 			};
 
-			await db.jobs.put(job); 
+			// )=- CONFLICT RESOLUTION: Last-write-wins
+			const localJob = await db.jobs.get(rec.id);
+
+			if (localJob) {
+				// If local version is newer, skip this record
+				if (localJob.updatedAt > serverJob.updatedAt) {
+					console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
+					continue;
+				}
+			}
+
+			// Otherwise, update local with server version
+			await db.jobs.put(serverJob);
 		}
 
-		console.log(`✅ Pulled and cached ${records.length} jobs from PocketBase`);
+		console.log(`✅ Pulled and merged ${records.length} jobs from PocketBase`);
 	} catch (err) {
 		console.error('Pull failed', err);
 	}
