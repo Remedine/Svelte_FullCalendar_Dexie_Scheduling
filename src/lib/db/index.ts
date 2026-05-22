@@ -75,38 +75,38 @@ db.version(10).stores({
 
 export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
 	return await db.jobs
-	.where('start')
-	.between(start, end, true, true)
-	.and(job => job.status !== 'cancelled')
-	.toArray();
+		.where('start')
+		.between(start, end, true, true)
+		.and(job => job.status !== 'cancelled')
+		.toArray();
 }
 
-// Helper Editing and cancelling jobs
-export async function updateJob(jobId: number, updates: Partial<Job>) {
+// Update Jobs on change
+export async function updateJob(jobId: string, updates: Partial<Job>) {
 	await db.jobs.update(jobId, {
 		...updates,
 		updatedAt: new Date()
 	});
 
-	//Sync changes to multi server
 	const updatedJob = await db.jobs.get(jobId);
-	if (updatedJob) await syncJobToServer(updatedJob);
+	if (updatedJob) {
+		await syncJobToServer(updatedJob);
+	}
 
 	console.log(`✅ Job ${jobId} updated and synced`);
 }
 
 // Cancel Job
-export async function cancelJob(jobId: number, cancelReason: string, notes?: string) {
+export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
 	await db.jobs.update(jobId, {
 		status: 'cancelled',
 		cancelReason,
 		cancelledAt: new Date(),
-		cancelledBy: 'User', // TODO: replace with real user later
+		cancelledBy: 'User',
 		notes: notes || undefined,
 		updatedAt: new Date()
 	});
-	console.log(`❌ Job ${jobId} cancelled with reason: ${cancelReason}`);
-	// Sync cancellation to other devices
+
 	const updatedJob = await db.jobs.get(jobId);
 	if (updatedJob) {
 		await syncJobToServer(updatedJob);
@@ -116,24 +116,23 @@ export async function cancelJob(jobId: number, cancelReason: string, notes?: str
 }
 
 // Used by drag & drop
-export async function updateJobDates(jobId: number, newStart: Date, newEnd: Date) {
+export async function updateJobDates(jobId: string, newStart: Date, newEnd: Date) {
 	await db.jobs.update(jobId, {
 		start: newStart,
 		end: newEnd,
 		updatedAt: new Date()
 	});
-	console.log(`✅ Job ${jobId} rescheduled`);
 
-	//  Sync to PocketBase for multi-device sync
 	const updatedJob = await db.jobs.get(jobId);
 	if (updatedJob) {
 		await syncJobToServer(updatedJob);
 	}
+
 	console.log(`✅ Job ${jobId} dates updated and synced`);
 }
 
 // )=- NEW: Create new job 
-export async function createJob(jobData: any): Promise<number> {
+export async function createJob(jobData: any): Promise<string> {
 	const billableItems = jobData.billableItems?.length
 		? jobData.billableItems.map((item: any) => ({ ...item }))
 		: [
@@ -146,7 +145,7 @@ export async function createJob(jobData: any): Promise<number> {
 			];
 
 	const newJob = {
-		clientId: Number(jobData.clientId),
+		clientId: String(jobData.clientId), 
 		title: String(jobData.title),
 		start: new Date(jobData.start),
 		end: new Date(jobData.end),
@@ -165,9 +164,8 @@ export async function createJob(jobData: any): Promise<number> {
 		totalAmount: jobData.totalAmount || 0
 	};
 
-	const id = await db.jobs.add(newJob);
-	//Push to server for multi-device sync
-	await syncJobToServer(newJob as Job);
+	const id = await db.jobs.add(newJob); 
+	await syncJobToServer({ ...newJob, id: String(id) });
 
 	console.log(`✅ New job created with ID: ${id}`);
 	return id;
@@ -177,10 +175,10 @@ export async function createJob(jobData: any): Promise<number> {
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 	const now = new Date();
 	return await db.jobs
-	.where('start').aboveOrEqual(now)
-	.and(job => job.status !== 'cancelled')
-	.limit(limit)
-	.toArray();
+		.where('start').aboveOrEqual(now)
+		.and(job => job.status !== 'cancelled')
+		.limit(limit)
+		.toArray();
 }
 
 // )=- NEW: Create client + push to PocketBase

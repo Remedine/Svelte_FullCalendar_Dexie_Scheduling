@@ -14,11 +14,14 @@ export function isAuthenticated(): boolean {
 //Email + Password login (with initial sync)
 export async function loginWithEmail(email: string, password: string) {
 	try {
-		const authData = await pb.collection('users').authWithPassword(email, password);
+		const authData = await pb
+			.collection('users')
+			.authWithPassword(email, password);
 
 		const pbUser = authData.record;
 
 		const localUser: User = {
+			id: pbUser.id,
 			name: pbUser.name || email.split('@')[0] || 'Admin',
 			pinHash: pbUser.pinHash || '',
 			role: pbUser.role || 'admin',
@@ -30,29 +33,27 @@ export async function loginWithEmail(email: string, password: string) {
 			updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
 		};
 
-		const existing = await db.users.where('name').equalsIgnoreCase(localUser.name).first();
-
-		if (existing?.id) {
-			localUser.id = existing.id;
-		}
-
 		await db.users.put(localUser);
-		console.log('✅ PB super admin synced to Dexie (no duplicate):', localUser.name);
+		console.log('✅ PB super admin synced to Dexie:', localUser.name);
 
 		await pullJobsFromServer();
 
-		// Initial push of any local data
+		// Push any local-only data to PB (will be less needed after seed removal)
 		const localJobs = await db.jobs.toArray();
 		for (const job of localJobs) {
-			await syncJobToServer(job);
+			if (!job.id) { 
+				await syncJobToServer(job);
+			}
 		}
 
 		const localClients = await db.clients.toArray();
 		for (const client of localClients) {
-			await syncClientToServer(client);
+			if (!client.id) {
+				await syncClientToServer(client);
+			}
 		}
 
-		console.log('✅ Initial Dexie → PocketBase sync complete');
+		console.log('✅ Initial sync complete');
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
@@ -99,9 +100,8 @@ export async function pullJobsFromServer() {
 
 		for (const rec of records) {
 			const job = {
-				pbId: rec.id,
-				id: Number(rec.id) || Date.now(),
-				clientId: Number(rec.expand?.client?.id || rec.client),
+				id: rec.id,
+				clientId: rec.expand?.client?.id || rec.client,
 				title: rec.title,
 				start: new Date(rec.start),
 				end: new Date(rec.end),
@@ -122,7 +122,7 @@ export async function pullJobsFromServer() {
 				updatedAt: new Date(rec.updated)
 			};
 
-			await db.jobs.put(job);
+			await db.jobs.put(job); 
 		}
 
 		console.log(`✅ Pulled and cached ${records.length} jobs from PocketBase`);
@@ -138,11 +138,11 @@ export async function syncJobToServer(job: any) {
 		return;
 	}
 
-	console.log('🔄 Attempting to push job to PocketBase. pbId present?', !!job.pbId);
+	console.log('🔄 Attempting to push job to PocketBase. Has ID?', !!job.id);
 
 	try {
 		const data = {
-			client: String(job.clientId),
+			client: job.clientId,               
 			title: job.title,
 			start: job.start.toISOString(),
 			end: job.end.toISOString(),
@@ -158,16 +158,15 @@ export async function syncJobToServer(job: any) {
 			updatedAt: new Date().toISOString()
 		};
 
-		if (job.pbId) {
-			// Safe update path
-			await pb.collection('jobs').update(job.pbId, data);
-			console.log('✅ Job UPDATED in PocketBase:', job.pbId);
+		if (job.id) {
+			//  Always update if we have an ID (string)
+			await pb.collection('jobs').update(job.id, data);
+			console.log('✅ Job UPDATED in PocketBase:', job.id);
 		} else {
-			// Create path - use put() to guarantee pbId is saved
 			const record = await pb.collection('jobs').create(data);
-			const jobWithPbId = { ...job, pbId: record.id };
-			await db.jobs.put(jobWithPbId);           // )=- More reliable than update()
-			console.log('✅ Job CREATED in PocketBase with pbId:', record.id);
+			// Update local record with the new PB ID
+			await db.jobs.put({ ...job, id: record.id });
+			console.log('✅ Job CREATED in PocketBase:', record.id);
 		}
 	} catch (err: any) {
 		console.error('❌ Job sync to PocketBase FAILED:', err);
@@ -199,12 +198,12 @@ export async function syncClientToServer(client: any) {
 			updatedAt: new Date().toISOString()
 		};
 
-		if (client.pbId) {
-			await pb.collection('clients').update(client.pbId, data);
-			console.log('✅ Client UPDATED in PocketBase:', client.pbId);
+		if (client.id) {
+			await pb.collection('clients').update(client.id, data);
+			console.log('✅ Client UPDATED in PocketBase:', client.id);
 		} else {
 			const record = await pb.collection('clients').create(data);
-			await db.clients.update(client.id, { pbId: record.id });
+			await db.clients.put({ ...client, id: record.id });
 			console.log('✅ Client CREATED in PocketBase:', record.id);
 		}
 	} catch (err: any) {
