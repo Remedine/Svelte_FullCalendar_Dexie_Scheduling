@@ -2,7 +2,7 @@
 import { db } from './index';
 import * as bcrypt from 'bcryptjs';
 
-export async function seedSampleData(force = false) {
+export async function seedSampleData() {
 
 	const adminExists = await db.users.where('role').equals('admin').first();
 
@@ -10,7 +10,7 @@ export async function seedSampleData(force = false) {
 		const hashedPin = await bcrypt.hash('1234', 10); // Default admin PIN
 
 		await db.users.add({
-			id: 'admin-default', //- Temporary string ID
+			id: 'admin-default',
 			name: 'Admin',
 			pinHash: hashedPin,
 			role: 'admin',

@@ -8,34 +8,6 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
   	import { pb, pullJobsFromServer, isAuthenticated } from '$lib/pb';
-/**
-	$effect(() => {
-    if (!pb.authStore.isValid) return;
-
-    let subscription: any = null;
-
-    try {
-      subscription = pb.collection('jobs').subscribe('*', async (e) => {
-        console.log('🔔 Realtime change from another device:', e.action);
-        await pullJobsFromServer();
-      });
-    } catch (err) {
-      console.error('Failed to subscribe:', err);
-    }
-
-    // Cleanup function
-    return () => {
-      if (subscription && typeof subscription.unsubscribe === 'function') {
-        try {
-          subscription.unsubscribe();
-        } catch (e) {
-          console.warn('Cleanup warning:', e);
-        }
-      }
-    };
-  });
-
-	**/
 
 	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
@@ -43,9 +15,7 @@
 	let jobs: any[] = $state([]);
 
 	onMount(async () => {
-		await seedSampleData();
-
-		// )=- Check for forced PIN reset
+		//  Check for forced PIN reset
 		if (auth.currentUser?.forcePinUpdate) {
 			showPinReset = true;
 		}
