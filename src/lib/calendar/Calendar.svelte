@@ -7,7 +7,6 @@
 	import interactionPlugin from '@fullcalendar/interaction';
 	import multiMonthPlugin from '@fullcalendar/multimonth';
 	import { getJobsForRange, updateJobDates, createJob, updateJob, cancelJob } from '$lib/db/index';
-	import { seedSampleData } from '$lib/db/seed';
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import type { AreaOfTown } from '$lib/config';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
@@ -130,8 +129,6 @@
 	}
 
 	onMount(async () => {
-		await seedSampleData(false);
-
 		calendarInstance = new Calendar(calendarEl, {
 			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin],
 			initialView: 'timeGridWeek',
@@ -144,7 +141,7 @@
 				left: 'prev,next today',
 				center: 'title',
 				right: 'dayGridMonth,timeGridWeek,timeGridDay'
-			},
+		},
 
 			select: (info) => {
 				isEditing = false;
