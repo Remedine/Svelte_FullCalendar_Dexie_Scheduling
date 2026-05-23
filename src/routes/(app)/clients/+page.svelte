@@ -46,9 +46,11 @@
 	});
 
 	async function loadClientsWithLastJob() {
+		// Fetch all clients and jobs from Dexie
 		const allClients = await db.clients.orderBy('name').toArray();
 		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
 
+		// Map over clients and attach last job info
 		enhancedClients = allClients.map(client => {
 			const clientJobs = allJobs.filter(j => j.clientId === client.id);
 			const lastJob = clientJobs.length > 0 ? clientJobs[0] : null;
@@ -92,7 +94,7 @@
 		await loadClientsWithLastJob();
 	}
 
-	async function deleteClient(id: string) {
+	async function deleteClient(id: string | undefined) {
 		if (!confirm('Delete this client?')) return;
 		await db.clients.delete(id);
 		await loadClientsWithLastJob();
