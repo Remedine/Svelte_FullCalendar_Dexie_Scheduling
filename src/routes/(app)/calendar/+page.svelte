@@ -2,7 +2,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { seedSampleData } from '$lib/db/seed';
 	import { getUpcomingJobs } from '$lib/db';
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -15,18 +14,17 @@
 	let jobs: any[] = $state([]);
 
 	onMount(async () => {
-		//  Check for forced PIN reset
-		if (auth.currentUser?.forcePinUpdate) {
-			showPinReset = true;
-		}
+	if (auth.currentUser?.forcePinUpdate) {
+		showPinReset = true;
+	}
 
-		jobs = await getUpcomingJobs(30);
+	jobs = await getUpcomingJobs(30);
 
-		if (browser) {
-			const module = await import('$lib/calendar/Calendar.svelte');
-			CalendarComponent = module.default;
-		}
-	});
+	if (browser) {
+		const module = await import('$lib/calendar/Calendar.svelte');
+		CalendarComponent = module.default;
+	}
+});
 
 	function handlePinResetSuccess() {
 		showPinReset = false;

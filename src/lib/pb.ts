@@ -3,15 +3,14 @@ import PocketBase from 'pocketbase';
 import { db, processSyncQueue, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
-// PocketBase client singleton (single source of truth for auth + sync)
+// PocketBase client singleton
 export const pb = new PocketBase(import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090');
 
-// Check if user is Authenticated Helper
 export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
-//Email + Password login 
+// Email Login (updated)
 export async function loginWithEmail(email: string, password: string) {
 	try {
 		const authData = await pb.collection('users').authWithPassword(email, password);
@@ -36,7 +35,6 @@ export async function loginWithEmail(email: string, password: string) {
 
 		await pullJobsFromServer();
 
-		// Process any pending offline changes
 		if (navigator.onLine) {
 			await processSyncQueue();
 		}
@@ -49,7 +47,7 @@ export async function loginWithEmail(email: string, password: string) {
 	}
 }
 
-//Pin Login (local/offline fallback)
+// Pin Login (updated)
 export async function loginWithPin(name: string, pin: string) {
 	try {
 		const localUsers = await db.users.where('name').equals(name).toArray();
@@ -68,11 +66,9 @@ export async function loginWithPin(name: string, pin: string) {
 			throw new Error('Account is inactive');
 		}
 
-		// )=- Set current user in auth store
 		auth.currentUser = user;
 		localStorage.setItem('currentUserId', user.id!);
 
-		// )=- NEW: Process any pending offline changes on PIN login too
 		if (navigator.onLine) {
 			await processSyncQueue();
 		}
@@ -85,7 +81,7 @@ export async function loginWithPin(name: string, pin: string) {
 	}
 }
 
-//pull latest jobs from PocketBase into Dexie
+// Pull jobs from PocketBase (with conflict resolution)
 export async function pullJobsFromServer() {
 	if (!pb.authStore.isValid) return;
 
@@ -119,18 +115,13 @@ export async function pullJobsFromServer() {
 				updatedAt: new Date(rec.updated)
 			};
 
-			// )=- CONFLICT RESOLUTION: Last-write-wins
 			const localJob = await db.jobs.get(rec.id);
 
-			if (localJob) {
-				// If local version is newer, skip this record
-				if (localJob.updatedAt > serverJob.updatedAt) {
-					console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
-					continue;
-				}
+			if (localJob && localJob.updatedAt > serverJob.updatedAt) {
+				console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
+				continue;
 			}
 
-			// Otherwise, update local with server version
 			await db.jobs.put(serverJob);
 		}
 
@@ -140,92 +131,11 @@ export async function pullJobsFromServer() {
 	}
 }
 
-//push local changes to PocketBase (jobs)
-export async function syncJobToServer(job: any) {
-	if (!pb.authStore.isValid) {
-		console.warn('⚠️ Cannot sync job — not authenticated');
-		return;
-	}
-
-	console.log('🔄 Attempting to push job to PocketBase. Has ID?', !!job.id);
-
-	try {
-		const data = {
-			client: job.clientId,               
-			title: job.title,
-			start: job.start.toISOString(),
-			end: job.end.toISOString(),
-			assignedCrew: job.assignedCrew || [],
-			status: job.status,
-			billableItems: job.billableItems || [],
-			subtotal: Number(job.subtotal) || 0,
-			taxRate: job.taxRate || 0.08,
-			taxAmount: Number(job.taxAmount) || 0,
-			totalAmount: Number(job.totalAmount) || 0,
-			areaOfTown: job.areaOfTown,
-			notes: job.notes || '',
-			updatedAt: new Date().toISOString()
-		};
-
-		if (job.id) {
-			//  Always update if we have an ID (string)
-			await pb.collection('jobs').update(job.id, data);
-			console.log('✅ Job UPDATED in PocketBase:', job.id);
-		} else {
-			const record = await pb.collection('jobs').create(data);
-			// Update local record with the new PB ID
-			await db.jobs.put({ ...job, id: record.id });
-			console.log('✅ Job CREATED in PocketBase:', record.id);
-		}
-	} catch (err: any) {
-		console.error('❌ Job sync to PocketBase FAILED:', err);
-		if (err.response?.data) {
-			console.error('📋 PocketBase validation errors:', err.response.data);
-		}
-	}
-}
-
-// NEW: Dexie clients → PocketBase
-export async function syncClientToServer(client: any) {
-	if (!pb.authStore.isValid) {
-		console.warn('⚠️ Cannot sync client — not authenticated');
-		return;
-	}
-
-	try {
-		const data = {
-			name: client.name,
-			serviceAddressStreet: client.serviceAddressStreet,
-			serviceAddressCity: client.serviceAddressCity,
-			serviceAddressState: client.serviceAddressState,
-			serviceAddressZip: client.serviceAddressZip,
-			areaOfTown: client.areaOfTown,
-			preferredBillingMethod: client.preferredBillingMethod,
-			phone: client.phone,
-			email: client.email || '',
-			notes: client.notes || '',
-			updatedAt: new Date().toISOString()
-		};
-
-		if (client.id) {
-			await pb.collection('clients').update(client.id, data);
-			console.log('✅ Client UPDATED in PocketBase:', client.id);
-		} else {
-			const record = await pb.collection('clients').create(data);
-			await db.clients.put({ ...client, id: record.id });
-			console.log('✅ Client CREATED in PocketBase:', record.id);
-		}
-	} catch (err: any) {
-		console.error('❌ Client sync to PocketBase FAILED:', err);
-	}
-}
-
 export function logout() {
 	pb.authStore.clear();
 	console.log('👋 Logged out');
 }
 
-//Get current logged-in user record
 export function getCurrentUser() {
 	return pb.authStore.model;
 }
