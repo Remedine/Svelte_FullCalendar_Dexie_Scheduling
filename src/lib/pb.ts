@@ -10,7 +10,7 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
-// Email Login (updated)
+// Email Login
 export async function loginWithEmail(email: string, password: string) {
 	try {
 		const authData = await pb.collection('users').authWithPassword(email, password);
@@ -33,8 +33,11 @@ export async function loginWithEmail(email: string, password: string) {
 		await db.users.put(localUser);
 		console.log('✅ PB super admin synced to Dexie:', localUser.name);
 
+		// Pull latest data from server first
 		await pullJobsFromServer();
+		await pullClientsFromServer();
 
+		// Then push any pending local changes
 		if (navigator.onLine) {
 			await processSyncQueue();
 		}
@@ -47,7 +50,7 @@ export async function loginWithEmail(email: string, password: string) {
 	}
 }
 
-// Pin Login (updated)
+// Pin Login
 export async function loginWithPin(name: string, pin: string) {
 	try {
 		const localUsers = await db.users.where('name').equals(name).toArray();
@@ -69,6 +72,11 @@ export async function loginWithPin(name: string, pin: string) {
 		auth.currentUser = user;
 		localStorage.setItem('currentUserId', user.id!);
 
+		// Pull latest data from server
+		await pullClientsFromServer();
+		await pullJobsFromServer();
+
+		// Then push any pending local changes
 		if (navigator.onLine) {
 			await processSyncQueue();
 		}
@@ -128,6 +136,81 @@ export async function pullJobsFromServer() {
 		console.log(`✅ Pulled and merged ${records.length} jobs from PocketBase`);
 	} catch (err) {
 		console.error('Pull failed', err);
+	}
+}
+
+// Pull clients from PocketBase and merge into Dexie
+export async function pullClientsFromServer() {
+	if (!pb.authStore.isValid) return;
+
+	const PAGE_SIZE = 100;
+	let page = 1;
+	let totalPages = 1;
+	let totalPulled = 0;
+	let totalDeleted = 0;
+
+	console.log('🔄 Starting client sync from PocketBase...');
+
+	try {
+		// Step 1: Collect all PB client IDs
+		const pbClientIds = new Set<string>();
+
+		while (page <= totalPages) {
+			const result = await pb.collection('clients').getList(page, PAGE_SIZE, {
+				sort: '-updatedAt'
+			});
+
+			totalPages = result.totalPages;
+
+			for (const rec of result.items) {
+				pbClientIds.add(rec.id);
+
+				const existingLocal = await db.clients.where('pbId').equals(rec.id).first();
+
+				const serverClient = {
+					id: existingLocal ? existingLocal.id : rec.id,
+					pbId: rec.id,
+					name: rec.name,
+					serviceAddressStreet: rec.serviceAddressStreet || '',
+					serviceAddressCity: rec.serviceAddressCity || '',
+					serviceAddressState: rec.serviceAddressState || '',
+					serviceAddressZip: rec.serviceAddressZip || '',
+					areaOfTown: rec.areaOfTown,
+					preferredBillingMethod: rec.preferredBillingMethod || 'email',
+					phone: rec.phone || '',
+					email: rec.email || '',
+					notes: rec.notes || '',
+					createdAt: new Date(rec.created),
+					updatedAt: new Date(rec.updated)
+				};
+
+				const localClient = await db.clients.get(serverClient.id);
+
+				if (localClient && localClient.updatedAt > serverClient.updatedAt) {
+					continue;
+				}
+
+				await db.clients.put(serverClient);
+				totalPulled++;
+			}
+
+			page++;
+		}
+
+		// Step 2: Find and delete clients that exist in Dexie but not in PB
+		const localClients = await db.clients.toArray();
+
+		for (const localClient of localClients) {
+			if (localClient.pbId && !pbClientIds.has(localClient.pbId)) {
+				await db.clients.delete(localClient.id!);
+				totalDeleted++;
+				console.log(`🗑️ Deleted client from Dexie (no longer in PB): ${localClient.name}`);
+			}
+		}
+
+		console.log(`✅ Pulled and merged ${totalPulled} clients. Deleted ${totalDeleted} from Dexie.`);
+	} catch (err) {
+		console.error('❌ Pull clients failed:', err);
 	}
 }
 

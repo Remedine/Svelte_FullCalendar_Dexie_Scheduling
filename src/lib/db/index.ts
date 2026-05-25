@@ -79,8 +79,8 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	syncQueue: EntityTable<SyncQueueItem, 'id'>;
 };
 
-db.version(11).stores({
-	clients: 'id, name, areaOfTown, email',
+db.version(12).stores({
+	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown',
 	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate',
 	syncQueue: '++id, type, collection, recordId, createdAt'
