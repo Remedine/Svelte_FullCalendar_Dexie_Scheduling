@@ -4,6 +4,7 @@
 	import { db, type Client } from '$lib/db';
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import ClientForm from '$lib/components/ClientForm.svelte';
+	import { deleteClient as deleteClientFromDb } from '$lib/db';
 
 	let clients = $state<Client[]>([]);
 	let showForm = $state(false);
@@ -94,11 +95,14 @@
 		await loadClientsWithLastJob();
 	}
 
-	async function deleteClient(id: string | undefined) {
+	async function deleteClient(id: string) {
 		if (!confirm('Delete this client?')) return;
-		await db.clients.delete(id);
+
+		await db.clients.delete(id);                    // Remove from Dexie immediately
+		await deleteClientFromDb(id);                   // Add to queue + sync to PocketBase
+
 		await loadClientsWithLastJob();
-	}
+	}	
 
 	function toggleArea(areaKey: string) {
 		if (selectedAreas.includes(areaKey)) {

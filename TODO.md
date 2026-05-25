@@ -19,6 +19,12 @@
     [] Crew View
 [] Calendar
     [] List View
+        [] Calendar month view across top of mobile with list view of all jobs below determined by date clicked on
+[] Crew Member Specific View
+    [] Mobile (Calendar week across the top with list view of jobs assigned on the bottom)
+
+## Client Requested Features
+[] Email/push notification to crew member when assigned to a job.
 
 ## UI/UX & Styling
 
@@ -30,4 +36,8 @@
 [] Calendar Now Indicator to see current time
 [] business hours on calendar
 [] Event Popovers(cards?)
-[] List
+[] List View on Calendar
+[] Allow picking client from mobile device contact list
+[] Use mobile gps location for address?
+[] 
+

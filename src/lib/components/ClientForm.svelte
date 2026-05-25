@@ -1,6 +1,6 @@
 <!-- src/lib/components/ClientForm.svelte -->
 <script lang="ts">
-	import { db, type Client } from '$lib/db';
+	import { db, type Client, createClient, updateClient } from '$lib/db';
 	import { BUSINESS_CONFIG } from '$lib/config';
 	import { z } from 'zod';
 
@@ -92,9 +92,9 @@
 			} as Client;
 
 			if (isEditing && client?.id) {
-				await db.clients.update(client.id, clientPayload);
+				await updateClient(client.id, clientPayload);   
 			} else {
-				await db.clients.add(clientPayload);
+				await createClient(clientPayload);
 			}
 
 			onSaved();

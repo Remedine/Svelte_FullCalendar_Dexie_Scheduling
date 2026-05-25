@@ -208,9 +208,17 @@ export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
 // ==================== CLIENT FUNCTIONS ====================
 
 export async function createClient(
-	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<string> {
-	const newClient = { ...clientData, createdAt: new Date(), updatedAt: new Date() };
+	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+	//  Line 178: Generate a unique string ID if none exists
+	const newId = clientData.id || crypto.randomUUID();
+
+	const newClient = {
+		...clientData,
+		id: newId,
+		createdAt: new Date(),
+		updatedAt: new Date()
+	};
+
 	const id = await db.clients.add(newClient);
 
 	await addToSyncQueue({
@@ -221,6 +229,7 @@ export async function createClient(
 	});
 
 	if (navigator.onLine) processSyncQueue();
+
 	console.log(`✅ Client created with ID: ${id}`);
 	return id;
 }
@@ -228,15 +237,36 @@ export async function createClient(
 export async function updateClient(clientId: string, updates: Partial<Client>) {
 	await db.clients.update(clientId, { ...updates, updatedAt: new Date() });
 
+	// )=- Always get the CURRENT record to use the real PocketBase ID
+	const current = await db.clients.get(clientId);
+	const realId = current?.id || clientId;
+
 	await addToSyncQueue({
 		type: 'update',
 		collection: 'clients',
-		recordId: clientId,
+		recordId: realId, // Use real ID if available
 		data: updates
 	});
 
 	if (navigator.onLine) processSyncQueue();
-	console.log(`✅ Client ${clientId} updated`);
+	console.log(`✅ Client ${clientId} updated locally (optimistic)`);
+}
+
+export async function deleteClient(clientId: string) {
+	await db.clients.delete(clientId);
+
+	// )=- Use current ID for delete
+	const current = await db.clients.get(clientId);
+	const realId = current?.id || clientId;
+
+	await addToSyncQueue({
+		type: 'delete',
+		collection: 'clients',
+		recordId: realId
+	});
+
+	if (navigator.onLine) processSyncQueue();
+	console.log(`✅ Client ${clientId} deleted locally (optimistic)`);
 }
 
 // ==================== SYNC QUEUE ====================
@@ -260,7 +290,56 @@ export async function processSyncQueue() {
 				}
 			}
 
-			// TODO: Add similiar logic for client and users
+			if (item.collection === 'clients') {
+				if (item.type === 'create') {
+					const { id, ...clientData } = item.data;
+
+					try {
+						const record = await pb.collection('clients').create(clientData);
+						await db.clients.update(item.recordId, { id: record.id });
+						console.log(`✅ Client synced to PocketBase: ${record.id}`);
+					} catch (err: any) {
+						console.error('❌ Client sync failed with 400:');
+						if (err.response?.data) {
+							console.error('PocketBase validation errors:', err.response.data);
+						}
+						throw err; // Re-throw so it still goes to the catch block
+					}
+				}
+			} else if (item.type === 'update') {
+				try {
+					// )=- Use the real PocketBase ID from Dexie if it exists
+					const currentClient = await db.clients.get(item.recordId);
+					const realId = currentClient?.id || item.recordId;
+
+					// Send only the changes that were made
+					await pb.collection('clients').update(realId, item.data);
+
+					console.log(`✅ Client updated in PocketBase: ${realId}`);
+				} catch (err: any) {
+					if (err.status === 404) {
+						console.log(`⏭️ Skipping update for deleted client`);
+						await db.syncQueue.delete(item.id!);
+					} else {
+						throw err;
+					}
+				}
+			} else if (item.type === 'delete') {
+				try {
+					const latestClient = await db.clients.get(item.recordId);
+					const realId = latestClient?.id || item.recordId;
+					await pb.collection('clients').delete(realId);
+				} catch (err: any) {
+					if (err.status === 404) {
+						console.log(`⏭️ Skipping delete for already deleted client: ${item.recordId}`);
+						await db.syncQueue.delete(item.id!);
+					} else {
+						throw err;
+					}
+				}
+			}
+
+			// TODO: Add similiar logic and users
 			
 			await db.syncQueue.delete(item.id!);
 			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
