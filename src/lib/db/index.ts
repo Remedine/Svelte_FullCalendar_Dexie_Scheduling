@@ -5,6 +5,7 @@ import { pb, pullJobsFromServer } from '$lib/pb'; // )=- Removed processSyncQueu
 
 export interface Client {
 	id?: string;
+	pbId?: string;
 	name: string;
 	serviceAddressStreet: string;
 	serviceAddressCity: string;
@@ -122,7 +123,7 @@ export async function createJob(jobData: any): Promise<string> {
 		data: newJob
 	});
 
-	if (navigator.onLine) processSyncQueue();
+	if (navigator.onLine) await processSyncQueue();
 
 	return id;
 }
@@ -140,8 +141,7 @@ export async function updateJob(jobId: string, updates: Partial<Job>) {
 		});
 	}
 
-	if (navigator.onLine) processSyncQueue();
-	console.log(`✅ Job ${jobId} updated locally (optimistic)`);
+	if (navigator.onLine) await processSyncQueue();
 }
 
 export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
@@ -163,7 +163,7 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 		data: updates
 	});
 
-	if (navigator.onLine) processSyncQueue();
+	if (navigator.onLine) await processSyncQueue();
 	console.log(`✅ Job ${jobId} cancelled locally (optimistic)`);
 }
 
@@ -183,7 +183,7 @@ export async function updateJobDates(jobId: string, newStart: Date, newEnd: Date
 		data: updates
 	});
 
-	if (navigator.onLine) processSyncQueue();
+	if (navigator.onLine) await processSyncQueue();
 	console.log(`✅ Job ${jobId} dates updated locally (optimistic)`);
 }
 
@@ -208,8 +208,8 @@ export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
 // ==================== CLIENT FUNCTIONS ====================
 
 export async function createClient(
-	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-	//  Line 178: Generate a unique string ID if none exists
+	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
 	const newId = clientData.id || crypto.randomUUID();
 
 	const newClient = {
@@ -228,45 +228,53 @@ export async function createClient(
 		data: newClient
 	});
 
-	if (navigator.onLine) processSyncQueue();
+	if (navigator.onLine) await processSyncQueue();
 
-	console.log(`✅ Client created with ID: ${id}`);
 	return id;
 }
 
 export async function updateClient(clientId: string, updates: Partial<Client>) {
 	await db.clients.update(clientId, { ...updates, updatedAt: new Date() });
 
-	// )=- Always get the CURRENT record to use the real PocketBase ID
-	const current = await db.clients.get(clientId);
-	const realId = current?.id || clientId;
-
 	await addToSyncQueue({
 		type: 'update',
 		collection: 'clients',
-		recordId: realId, // Use real ID if available
+		recordId: clientId,
 		data: updates
 	});
 
-	if (navigator.onLine) processSyncQueue();
+	if (navigator.onLine) await processSyncQueue();
 	console.log(`✅ Client ${clientId} updated locally (optimistic)`);
 }
 
 export async function deleteClient(clientId: string) {
-	await db.clients.delete(clientId);
+	const exists = await db.clients.get(clientId);
+	if (!exists) return; // Already deleted
 
-	// )=- Use current ID for delete
-	const current = await db.clients.get(clientId);
-	const realId = current?.id || clientId;
+	const idToDelete = await resolveClientPbId(clientId);
+
+	await db.clients.delete(clientId);
 
 	await addToSyncQueue({
 		type: 'delete',
 		collection: 'clients',
-		recordId: realId
+		recordId: idToDelete
 	});
 
-	if (navigator.onLine) processSyncQueue();
-	console.log(`✅ Client ${clientId} deleted locally (optimistic)`);
+	if (navigator.onLine) await processSyncQueue();
+}
+
+export async function resolveClientPbId(localClientId: string): Promise<string> {
+	if (!localClientId) return localClientId;
+
+	// First try
+	let client = await db.clients.get(localClientId);
+	if (client?.pbId) return client.pbId;
+
+	// One quick retry (covers the Dexie timing edge case)
+	await new Promise((r) => setTimeout(r, 60));
+	client = await db.clients.get(localClientId);
+	return client?.pbId || client?.id || localClientId;
 }
 
 // ==================== SYNC QUEUE ====================
@@ -289,58 +297,72 @@ export async function processSyncQueue() {
 					await pb.collection('jobs').delete(item.recordId);
 				}
 			}
-
+				
 			if (item.collection === 'clients') {
 				if (item.type === 'create') {
 					const { id, ...clientData } = item.data;
 
 					try {
 						const record = await pb.collection('clients').create(clientData);
-						await db.clients.update(item.recordId, { id: record.id });
-						console.log(`✅ Client synced to PocketBase: ${record.id}`);
-					} catch (err: any) {
-						console.error('❌ Client sync failed with 400:');
-						if (err.response?.data) {
-							console.error('PocketBase validation errors:', err.response.data);
+
+						// Use put for better visibility
+						const existing = await db.clients.get(item.recordId);
+						if (existing) {
+							await db.clients.put({ ...existing, pbId: record.id });
+						} else {
+							await db.clients.update(item.recordId, { pbId: record.id });
 						}
-						throw err; // Re-throw so it still goes to the catch block
-					}
-				}
-			} else if (item.type === 'update') {
-				try {
-					// )=- Use the real PocketBase ID from Dexie if it exists
-					const currentClient = await db.clients.get(item.recordId);
-					const realId = currentClient?.id || item.recordId;
 
-					// Send only the changes that were made
-					await pb.collection('clients').update(realId, item.data);
+						console.log(`✅ Client synced to PocketBase: ${record.id}`);
 
-					console.log(`✅ Client updated in PocketBase: ${realId}`);
-				} catch (err: any) {
-					if (err.status === 404) {
-						console.log(`⏭️ Skipping update for deleted client`);
-						await db.syncQueue.delete(item.id!);
-					} else {
+						// Correct any pending deletes
+						const pendingDeletes = await db.syncQueue
+							.where('recordId')
+							.equals(item.recordId)
+							.and((q) => q.type === 'delete' && q.collection === 'clients')
+							.toArray();
+
+						for (const q of pendingDeletes) {
+							await db.syncQueue.update(q.id!, { recordId: record.id });
+						}
+					} catch (err: any) {
+						console.error('❌ Client sync failed with 400:', err.response?.data);
 						throw err;
 					}
-				}
-			} else if (item.type === 'delete') {
-				try {
-					const latestClient = await db.clients.get(item.recordId);
-					const realId = latestClient?.id || item.recordId;
-					await pb.collection('clients').delete(realId);
-				} catch (err: any) {
-					if (err.status === 404) {
-						console.log(`⏭️ Skipping delete for already deleted client: ${item.recordId}`);
+				} else if (item.type === 'update') {
+					try {
+						const currentClient = await db.clients.get(item.recordId);
+						const realId = currentClient?.pbId || currentClient?.id || item.recordId;
+						await pb.collection('clients').update(realId, item.data);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
+					}
+				} else if (item.type === 'delete') {
+					if (!item.recordId) {
 						await db.syncQueue.delete(item.id!);
-					} else {
-						throw err;
+						continue;
+					}
+
+					const realId = await resolveClientPbId(item.recordId);
+
+					try {
+						await pb.collection('clients').delete(realId);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
 					}
 				}
 			}
 
-			// TODO: Add similiar logic and users
-			
+			// TODO: Add similar logic for users
+
 			await db.syncQueue.delete(item.id!);
 			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
 		} catch (err) {

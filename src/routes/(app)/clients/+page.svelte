@@ -98,11 +98,10 @@
 	async function deleteClient(id: string) {
 		if (!confirm('Delete this client?')) return;
 
-		await db.clients.delete(id);                    // Remove from Dexie immediately
-		await deleteClientFromDb(id);                   // Add to queue + sync to PocketBase
-
+		// Only call our central function — it handles local delete + queue
+		await deleteClientFromDb(id);
 		await loadClientsWithLastJob();
-	}	
+	}
 
 	function toggleArea(areaKey: string) {
 		if (selectedAreas.includes(areaKey)) {
