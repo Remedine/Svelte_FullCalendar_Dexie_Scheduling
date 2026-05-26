@@ -5,7 +5,7 @@
   import { auth } from '$lib/stores/auth.svelte';
   import NewUserModal from './NewUserModal.svelte';
   import UserJobsModal from './UserJobsModal.svelte';
-  import { loginWithEmail } from '$lib/pb';
+  import { loginWithEmail } from '$lib/db/pb';
 
   let allUsers = $state<User[]>([]);
 

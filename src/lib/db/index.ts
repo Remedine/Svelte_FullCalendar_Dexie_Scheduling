@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
 import * as bcrypt from 'bcryptjs';
-import { pb, pullJobsFromServer } from '$lib/pb'; // )=- Removed processSyncQueue from import
+import { pb, pullJobsFromServer } from '$lib/db/pb'; 
 
 export interface Client {
 	id?: string;
@@ -88,44 +88,49 @@ db.version(12).stores({
 
 // ==================== JOB FUNCTIONS ====================
 
+// line 90
 export async function createJob(jobData: any): Promise<string> {
-	const billableItems = jobData.billableItems?.length
-		? jobData.billableItems.map((item: any) => ({ ...item }))
-		: [{ title: String(jobData.title), price: 450, quantity: 1, total: 450 }];
+  const billableItems = jobData.billableItems?.length
+    ? jobData.billableItems.map((item: any) => ({ ...item }))
+    : [{ title: String(jobData.title), price: 450, quantity: 1, total: 450 }];
 
-	const newJob = {
-		clientId: String(jobData.clientId),
-		title: String(jobData.title),
-		start: new Date(jobData.start),
-		end: new Date(jobData.end),
-		assignedCrew: [...jobData.assignedCrew],
-		areaOfTown: jobData.areaOfTown,
-		status: 'scheduled' as const,
-		notes: jobData.notes || undefined,
-		createdAt: new Date(),
-		updatedAt: new Date(),
-		billableItems,
-		subtotal:
-			jobData.subtotal ||
-			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
-		taxRate: BUSINESS_CONFIG.defaultTaxRate,
-		taxAmount: jobData.taxAmount || 0,
-		totalAmount: jobData.totalAmount || 0
-	};
+  const newId = jobData.id || crypto.randomUUID();
 
-	const id = await db.jobs.add(newJob);
-	console.log(`✅ Job created locally (optimistic): ${id}`);
+  const newJob = {
+    id: newId,
+    clientId: String(jobData.clientId),
+    title: String(jobData.title),
+    start: new Date(jobData.start),
+    end: new Date(jobData.end),
+    assignedCrew: [...jobData.assignedCrew],
+    areaOfTown: jobData.areaOfTown,
+    status: 'scheduled' as const,
+    notes: jobData.notes || undefined,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    billableItems,
+    subtotal:
+      jobData.subtotal ||
+      billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
+    taxRate: BUSINESS_CONFIG.defaultTaxRate,
+    taxAmount: jobData.taxAmount || 0,
+    totalAmount: jobData.totalAmount || 0
+  };
 
-	await addToSyncQueue({
-		type: 'create',
-		collection: 'jobs',
-		recordId: String(id),
-		data: newJob
-	});
+  // line 116
+  const id = await db.jobs.add(newJob);
+  console.log(`✅ Job created locally (optimistic): ${id}`);
 
-	if (navigator.onLine) await processSyncQueue();
+  await addToSyncQueue({
+    type: 'create',
+    collection: 'jobs',
+    recordId: String(id),
+    data: newJob
+  });
 
-	return id;
+  if (navigator.onLine) await processSyncQueue();
+
+  return id;
 }
 
 export async function updateJob(jobId: string, updates: Partial<Job>) {
@@ -290,14 +295,54 @@ export async function processSyncQueue() {
 		try {
 			if (item.collection === 'jobs') {
 				if (item.type === 'create') {
-					await pb.collection('jobs').create(item.data);
+					const { id, createdAt, updatedAt, clientId, ...rest } = item.data;
+
+					const pbPayload = {
+						...rest,
+						client: clientId,
+						start: new Date(item.data.start).toISOString(),
+						end: new Date(item.data.end).toISOString(),
+						createdAt: new Date(item.data.createdAt || Date.now()).toISOString(),
+						updatedAt: new Date(item.data.updatedAt || Date.now()).toISOString()
+					};
+
+					try {
+						const record = await pb.collection('jobs').create(pbPayload);
+						await db.jobs.update(item.recordId, { pbId: record.id });
+						console.log(`✅ Job pushed to PocketBase: ${record.id}`);
+					} catch (err: any) {
+						console.error('❌ Job create failed:', err.response?.data);
+						throw err;
+					}
 				} else if (item.type === 'update') {
-					await pb.collection('jobs').update(item.recordId, item.data);
+					const job = await db.jobs.get(item.recordId);
+					const realId = job?.pbId || job?.id || item.recordId;
+
+					try {
+						await pb.collection('jobs').update(realId, item.data);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
+					}
 				} else if (item.type === 'delete') {
-					await pb.collection('jobs').delete(item.recordId);
+					const job = await db.jobs.get(item.recordId);
+					const realId = job?.pbId || job?.id || item.recordId;
+
+					try {
+						await pb.collection('jobs').delete(realId);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
+					}
 				}
 			}
-				
+
 			if (item.collection === 'clients') {
 				if (item.type === 'create') {
 					const { id, ...clientData } = item.data;
@@ -305,7 +350,6 @@ export async function processSyncQueue() {
 					try {
 						const record = await pb.collection('clients').create(clientData);
 
-						// Use put for better visibility
 						const existing = await db.clients.get(item.recordId);
 						if (existing) {
 							await db.clients.put({ ...existing, pbId: record.id });
@@ -315,7 +359,6 @@ export async function processSyncQueue() {
 
 						console.log(`✅ Client synced to PocketBase: ${record.id}`);
 
-						// Correct any pending deletes
 						const pendingDeletes = await db.syncQueue
 							.where('recordId')
 							.equals(item.recordId)

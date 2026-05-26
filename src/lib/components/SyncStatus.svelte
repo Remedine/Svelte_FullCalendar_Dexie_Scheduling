@@ -1,6 +1,6 @@
 <!-- src/lib/components/SyncStatus.svelte -->
 <script lang="ts">
-	import { pb, pullJobsFromServer } from '$lib/pb';
+	import { pb, pullJobsFromServer } from '$lib/db/pb';
   import { processSyncQueue } from '$lib/db';   // )=- Moved here
 
 	let isOnline = $state(true);
