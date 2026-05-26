@@ -90,53 +90,72 @@ export async function loginWithPin(name: string, pin: string) {
 }
 
 // Pull jobs from PocketBase (with conflict resolution)
+// line 79
 export async function pullJobsFromServer() {
-	if (!pb.authStore.isValid) return;
+  if (!pb.authStore.isValid) return;
 
-	try {
-		const records = await pb.collection('jobs').getFullList({
-			sort: '-updatedAt',
-			expand: 'client'
-		});
+  try {
+    const records = await pb.collection('jobs').getFullList({
+      sort: '-updatedAt',
+      expand: 'client',
+      // line 84 - FIX: disable auto-cancellation to prevent aborted requests
+      $autoCancel: false
+    });
 
-		for (const rec of records) {
-			const serverJob = {
-				id: rec.id,
-				clientId: rec.expand?.client?.id || rec.client,
-				title: rec.title,
-				start: new Date(rec.start),
-				end: new Date(rec.end),
-				assignedCrew: rec.assignedCrew || [],
-				status: rec.status,
-				billableItems: rec.billableItems || [],
-				subtotal: rec.subtotal || 0,
-				taxRate: rec.taxRate || 0.08,
-				taxAmount: rec.taxAmount || 0,
-				totalAmount: rec.totalAmount || 0,
-				areaOfTown: rec.areaOfTown,
-				notes: rec.notes,
-				cancelReason: rec.cancelReason,
-				cancelNotes: rec.cancelNotes,
-				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
-				cancelledBy: rec.cancelledBy,
-				createdAt: new Date(rec.created),
-				updatedAt: new Date(rec.updated)
-			};
+    const pbJobIds = new Set<string>();
 
-			const localJob = await db.jobs.get(rec.id);
+    for (const rec of records) {
+      pbJobIds.add(rec.id);
 
-			if (localJob && localJob.updatedAt > serverJob.updatedAt) {
-				console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
-				continue;
-			}
+      const serverJob = {
+        id: rec.id,
+        clientId: rec.expand?.client?.id || rec.client,
+        title: rec.title,
+        start: new Date(rec.start),
+        end: new Date(rec.end),
+        assignedCrew: rec.assignedCrew || [],
+        status: rec.status,
+        billableItems: rec.billableItems || [],
+        subtotal: rec.subtotal || 0,
+        taxRate: rec.taxRate || 0.08,
+        taxAmount: rec.taxAmount || 0,
+        totalAmount: rec.totalAmount || 0,
+        areaOfTown: rec.areaOfTown,
+        notes: rec.notes,
+        cancelReason: rec.cancelReason,
+        cancelNotes: rec.cancelNotes,
+        cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+        cancelledBy: rec.cancelledBy,
+        createdAt: new Date(rec.created),
+        updatedAt: new Date(rec.updated)
+      };
 
-			await db.jobs.put(serverJob);
-		}
+      const localJob = await db.jobs.get(rec.id);
 
-		console.log(`✅ Pulled and merged ${records.length} jobs from PocketBase`);
-	} catch (err) {
-		console.error('Pull failed', err);
-	}
+      if (localJob && localJob.updatedAt > serverJob.updatedAt) {
+        console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
+        continue;
+      }
+
+      await db.jobs.put(serverJob);
+    }
+
+    // Delete stale local jobs
+    const localJobs = await db.jobs.toArray();
+    for (const localJob of localJobs) {
+      if (localJob.id && !pbJobIds.has(localJob.id)) {
+        await db.jobs.delete(localJob.id);
+        console.log(`🗑️ Removed stale job from Dexie: ${localJob.title}`);
+      }
+    }
+
+    console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
+  } catch (err: any) {
+    // Only log real errors, not auto-cancellations
+    if (err?.status !== 0) {
+      console.error('Pull jobs failed', err);
+    }
+  }
 }
 
 // Pull clients from PocketBase and merge into Dexie

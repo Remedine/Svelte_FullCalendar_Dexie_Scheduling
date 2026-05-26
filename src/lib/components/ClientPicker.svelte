@@ -3,7 +3,7 @@
 	import { db, type Client } from '$lib/db';
 
 	let {
-		value = $bindable<string | null>(null),     
+		value = $bindable(),  
 		placeholder = 'Select client',
 		onSelect = (client: Client) => {},
 		id = 'client-picker'
