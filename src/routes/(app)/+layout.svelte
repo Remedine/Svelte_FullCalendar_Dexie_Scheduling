@@ -27,7 +27,7 @@
 
 	// )=- Reliable auth guard
 	$effect(() => {
-    	if (!auth.isReady) return;
+    	if (!auth.isAuthenticated) return;
 
 		const hasPocketBaseAuth = pb.authStore.isValid;
 		const hasLocalAuth = !!auth.currentUser;
@@ -98,7 +98,7 @@
 
 	<!-- Main Content Area -->
 	<main class="main-content">
-		{#if !auth.isReady}
+		{#if auth.loading}
 			<div class="loading-screen">Loading...</div>
 		{:else}
 			{@render children()}

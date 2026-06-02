@@ -20,7 +20,7 @@
     authModule = await import('$lib/stores/auth.svelte.ts');
 
     const checkAuth = () => {
-      if (authModule.auth?.isReady) {
+      if (authModule.auth?.isAuthenticated) {
         if (authModule.auth.currentUser) {
           goto('/calendar', { replaceState: true });
         }

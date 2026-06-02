@@ -30,6 +30,7 @@
 
 ## Testing & Quality/Debugs
 [] On Client View - restrict deteling clients if client has jobs (archive only)
+[] Default job length is set to 30 minutes, then jumps to 4 hours on drag/drop event
 
 ## Nice to Have / Backlog
 [] Darkmode
