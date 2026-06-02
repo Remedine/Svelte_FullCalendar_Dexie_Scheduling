@@ -1,6 +1,6 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-  import { loginWithEmail, loginWithPin, isAuthenticated } from '$lib/pb';
+  import { loginWithEmail, loginWithPin, isAuthenticated } from '$lib/db/pb';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { db } from '$lib/db';   

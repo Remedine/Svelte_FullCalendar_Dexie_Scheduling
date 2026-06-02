@@ -4,7 +4,7 @@
 	import { auth } from '$lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { pb } from '$lib/pb';
+	import { pb } from '$lib/db/pb';
 	import { processSyncQueue } from '$lib/db';
 
 	let { children } = $props();
@@ -43,8 +43,6 @@
 	<header class="top-nav">
 		<div class="top-nav__brand">
 			<h1>Capital City Windows</h1>
-			<!-- )=- Optional subtitle -->
-			<!-- <p class="top-nav__subtitle">Scheduling System</p> -->
 		</div>
 
 		<nav class="top-nav__menu">
