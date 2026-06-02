@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
 import * as bcrypt from 'bcryptjs';
 import { pb, pullJobsFromServer } from '$lib/db/pb'; 
+import { auth } from '$lib/stores/auth.svelte';
 
 export interface Client {
 	id?: string;
@@ -88,49 +89,54 @@ db.version(12).stores({
 
 // ==================== JOB FUNCTIONS ====================
 
-// line 90
 export async function createJob(jobData: any): Promise<string> {
-  const billableItems = jobData.billableItems?.length
-    ? jobData.billableItems.map((item: any) => ({ ...item }))
-    : [{ title: String(jobData.title), price: 450, quantity: 1, total: 450 }];
+	const billableItems = jobData.billableItems?.length
+		? jobData.billableItems.map((item: any) => ({ ...item }))
+		: [{ title: String(jobData.title), price: 450, quantity: 1, total: 450 }];
 
-  const newId = jobData.id || crypto.randomUUID();
+	const newId = jobData.id || crypto.randomUUID();
 
-  const newJob = {
-    id: newId,
-    clientId: String(jobData.clientId),
-    title: String(jobData.title),
-    start: new Date(jobData.start),
-    end: new Date(jobData.end),
-    assignedCrew: [...jobData.assignedCrew],
-    areaOfTown: jobData.areaOfTown,
-    status: 'scheduled' as const,
-    notes: jobData.notes || undefined,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    billableItems,
-    subtotal:
-      jobData.subtotal ||
-      billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
-    taxRate: BUSINESS_CONFIG.defaultTaxRate,
-    taxAmount: jobData.taxAmount || 0,
-    totalAmount: jobData.totalAmount || 0
-  };
+	const realClientId = await resolveClientPbId(jobData.clientId);
 
-  // line 116
-  const id = await db.jobs.add(newJob);
-  console.log(`✅ Job created locally (optimistic): ${id}`);
+	if (!realClientId) {
+		console.error('❌ Could not resolve client ID for job creation');
+		throw new Error('Invalid client selected');
+	}
 
-  await addToSyncQueue({
-    type: 'create',
-    collection: 'jobs',
-    recordId: String(id),
-    data: newJob
-  });
+	const newJob = {
+		id: newId,
+		clientId: realClientId,
+		title: String(jobData.title),
+		start: new Date(jobData.start),
+		end: new Date(jobData.end),
+		assignedCrew: [...(jobData.assignedCrew || [])],
+		areaOfTown: jobData.areaOfTown,
+		status: 'scheduled' as const, // )=- Force scheduled on create
+		notes: jobData.notes || undefined,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+		billableItems,
+		subtotal:
+			jobData.subtotal ||
+			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
+		taxRate: BUSINESS_CONFIG.defaultTaxRate,
+		taxAmount: jobData.taxAmount || 0,
+		totalAmount: jobData.totalAmount || 0
+	};
 
-  if (navigator.onLine) await processSyncQueue();
+	const id = await db.jobs.add(newJob);
+	console.log(`✅ Job created locally (optimistic): ${id}`);
 
-  return id;
+	await addToSyncQueue({
+		type: 'create',
+		collection: 'jobs',
+		recordId: String(id),
+		data: newJob
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+
+	return id;
 }
 
 export async function updateJob(jobId: string, updates: Partial<Job>) {
@@ -150,11 +156,13 @@ export async function updateJob(jobId: string, updates: Partial<Job>) {
 }
 
 export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
+	const currentUser = auth.currentUser;
+
 	const updates = {
 		status: 'cancelled' as const,
 		cancelReason,
 		cancelledAt: new Date(),
-		cancelledBy: 'User',
+		cancelledBy: currentUser?.id || null,
 		notes: notes || undefined,
 		updatedAt: new Date()
 	};
@@ -169,27 +177,41 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 	});
 
 	if (navigator.onLine) await processSyncQueue();
-	console.log(`✅ Job ${jobId} cancelled locally (optimistic)`);
+	console.log(`✅ Job ${jobId} cancelled by ${currentUser?.name || 'Unknown'}`);
 }
 
-export async function updateJobDates(jobId: string, newStart: Date, newEnd: Date) {
+export async function updateJobDates(jobId: string, newStart: Date | null, newEnd: Date | null) {
+	if (!newStart) {
+		console.error('updateJobDates: newStart is null');
+		return;
+	}
+
+	const job = await db.jobs.get(jobId);
+	const realId = job?.pbId || job?.id || jobId;
+
+	// Use current end time if newEnd is null
+	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000); // default 4 hours
+
 	const updates = {
-		start: newStart,
-		end: newEnd,
-		updatedAt: new Date()
+		start: newStart.toISOString(),
+		end: finalEnd.toISOString(),
+		updatedAt: new Date().toISOString()
 	};
 
-	await db.jobs.update(jobId, updates);
+	await db.jobs.update(jobId, {
+		start: newStart,
+		end: finalEnd,
+		updatedAt: new Date()
+	});
 
 	await addToSyncQueue({
 		type: 'update',
 		collection: 'jobs',
-		recordId: jobId,
+		recordId: realId,
 		data: updates
 	});
 
 	if (navigator.onLine) await processSyncQueue();
-	console.log(`✅ Job ${jobId} dates updated locally (optimistic)`);
 }
 
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
@@ -295,15 +317,23 @@ export async function processSyncQueue() {
 		try {
 			if (item.collection === 'jobs') {
 				if (item.type === 'create') {
-					const { id, createdAt, updatedAt, clientId, ...rest } = item.data;
+					const data = item.data;
+					const realClientId = await resolveClientPbId(data.clientId || data.client);
 
 					const pbPayload = {
-						...rest,
-						client: clientId,
-						start: new Date(item.data.start).toISOString(),
-						end: new Date(item.data.end).toISOString(),
-						createdAt: new Date(item.data.createdAt || Date.now()).toISOString(),
-						updatedAt: new Date(item.data.updatedAt || Date.now()).toISOString()
+						title: data.title,
+						start: data.start instanceof Date ? data.start.toISOString() : data.start,
+						end: data.end instanceof Date ? data.end.toISOString() : data.end,
+						client: realClientId,
+						assignedCrew: data.assignedCrew || [],
+						areaOfTown: data.areaOfTown,
+						notes: data.notes || undefined,
+						billableItems: data.billableItems || [],
+						subtotal: Number(data.subtotal) || 0,
+						taxRate: Number(data.taxRate) || 0.08,
+						taxAmount: Number(data.taxAmount) || 0,
+						totalAmount: Number(data.totalAmount) || 0,
+						status: data.status || 'scheduled'
 					};
 
 					try {
@@ -311,8 +341,7 @@ export async function processSyncQueue() {
 						await db.jobs.update(item.recordId, { pbId: record.id });
 						console.log(`✅ Job pushed to PocketBase: ${record.id}`);
 					} catch (err: any) {
-						console.error('❌ Job create failed:', err.response?.data);
-						throw err;
+						console.error('❌ Job create failed:', JSON.stringify(err.response?.data, null, 2));
 					}
 				} else if (item.type === 'update') {
 					const job = await db.jobs.get(item.recordId);
@@ -320,11 +349,12 @@ export async function processSyncQueue() {
 
 					try {
 						await pb.collection('jobs').update(realId, item.data);
+						console.log(`✅ Job updated in PocketBase: ${realId}`);
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
 						} else {
-							throw err;
+							console.error('❌ Job update failed:', JSON.stringify(err.response?.data, null, 2));
 						}
 					}
 				} else if (item.type === 'delete') {
@@ -403,8 +433,6 @@ export async function processSyncQueue() {
 					}
 				}
 			}
-
-			// TODO: Add similar logic for users
 
 			await db.syncQueue.delete(item.id!);
 			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);

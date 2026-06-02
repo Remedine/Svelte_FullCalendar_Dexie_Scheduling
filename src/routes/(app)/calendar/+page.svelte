@@ -6,7 +6,8 @@
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
-  	import { pb, pullJobsFromServer, isAuthenticated } from '$lib/pb';
+  	import { pb, pullJobsFromServer, isAuthenticated } from '$lib/db/pb';
+	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
 
 	let showPinReset = $state(false);
 	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
