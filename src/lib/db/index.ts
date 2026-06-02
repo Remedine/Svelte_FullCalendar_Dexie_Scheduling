@@ -2,7 +2,12 @@ import Dexie, { type EntityTable } from 'dexie';
 import { BUSINESS_CONFIG } from '$lib/config';
 import * as bcrypt from 'bcryptjs';
 import { pb, pullJobsFromServer } from '$lib/db/pb'; 
-import { auth } from '$lib/stores/auth.svelte';
+
+// Dynamic import to break circular dependency with auth.svelte.ts
+let auth: any = null;
+import('$lib/stores/auth.svelte').then((module) => {
+	auth = module.auth;
+});
 
 export interface Client {
 	id?: string;
@@ -63,6 +68,31 @@ export interface User {
 	updatedAt: Date;
 }
 
+export interface AppOptions {
+	id: string;
+	taxRate: number;
+	defaultJobDurationHours: number;
+	defaultBillableItems: Array<{
+		title: string;
+		price: number;
+		quantity?: number;
+		hours?: number;
+		isDefault?: boolean;
+	}>;
+	areasOfTown: Record<
+		string,
+		{
+			label: string;
+			color: string;
+			sortOrder: number;
+		}
+	>;
+	cancelReasons: string[];
+	invoiceDueDays: number;
+	lastUpdated: Date;
+	updatedBy: string;
+}
+
 // Simple sync queue
 export interface SyncQueueItem {
 	id?: string;
@@ -78,13 +108,15 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	jobs: EntityTable<Job, 'id'>;
 	users: EntityTable<User, 'id'>;
 	syncQueue: EntityTable<SyncQueueItem, 'id'>;
+	options: EntityTable<AppOptions, 'id'>;
 };
 
-db.version(12).stores({
+db.version(13).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown',
 	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate',
-	syncQueue: '++id, type, collection, recordId, createdAt'
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id'
 });
 
 // ==================== JOB FUNCTIONS ====================
@@ -156,7 +188,7 @@ export async function updateJob(jobId: string, updates: Partial<Job>) {
 }
 
 export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
-	const currentUser = auth.currentUser;
+	const currentUser = auth?.currentUser; 
 
 	const updates = {
 		status: 'cancelled' as const,

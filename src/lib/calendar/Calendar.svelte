@@ -12,6 +12,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
 	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
+	
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);

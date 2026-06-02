@@ -2,11 +2,12 @@ import { browser } from '$app/environment';
 import { db, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
-// )=- Wrapped in object so we can safely export and mutate (Svelte 5 rule)
 export const auth = $state({
 	currentUser: null as User | null,
-	isReady: false
+	isAuthenticated: false, 
+	loading: true 
 });
+
 
 export async function login(
 	name: string,
@@ -24,6 +25,7 @@ export async function login(
 	}
 
 	auth.currentUser = user;
+	auth.isAuthenticated = true;
 	localStorage.setItem('currentUserId', user.id!.toString());
 
 	return { success: true, user };
@@ -31,12 +33,14 @@ export async function login(
 
 export async function logout() {
 	auth.currentUser = null;
+	auth.isAuthenticated = false;
 	localStorage.removeItem('currentUserId');
 }
 
 //Re-usable setter so email login (or future pocketbase flowws) can set Dexie currentUser
 export function setCurrentUser(user: User | null) {
 	auth.currentUser = user;
+	auth.isAuthenticated = !!user;
 	if (user?.id) {
 		localStorage.setItem('currentUserId', user.id.toString());
 	} else {
@@ -52,14 +56,18 @@ if (browser) {
 		db.users.get(savedId).then((user) => {               
 			if (user && user.active) {
 				auth.currentUser = user;
+				auth.isAuthenticated = true;
 			}
-			auth.isReady = true;
+			auth.loading = false;
 		});
 	} else {
-		auth.isReady = true;
+		auth.loading = false;
+		auth.isAuthenticated = false;
+
 	}
 } else {
-	auth.isReady = true;
+	auth.loading = false;
+	auth.isAuthenticated = false;
 }
 
 export async function setInitialPin(userId: number, newPin: string) {
@@ -76,5 +84,6 @@ export async function setInitialPin(userId: number, newPin: string) {
 	const updatedUser = await db.users.get(userId);
 	if (updatedUser) {
 		auth.currentUser = updatedUser;
+		auth.isAuthenticated = true; 
 	}
 }
