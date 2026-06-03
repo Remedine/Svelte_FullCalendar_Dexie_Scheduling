@@ -1,6 +1,6 @@
 <!-- src/routes/(app)/admin/options/+page.svelte -->
 <script lang="ts">
-	// )=- Full updated Options page - safe clone + toast + Dexie save
+	// )=- Integrated pullFromPB() on load for better sync
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -23,7 +23,6 @@
 
 	let editingOptions = $state<any>({});
 
-	// Safer clone to prevent DataCloneError with Svelte proxies / Dates
 	function safeClone(obj: any) {
 		if (!obj) return {};
 		try {
@@ -59,13 +58,15 @@
 
 			await optionsStore.saveToDexie(updated);
 
-			// Refresh editing state
-			editingOptions = safeClone(updated);
+			if (navigator.onLine) {
+				await optionsStore.syncToPB(updated);
+			}
 
-			toast.success('Options saved successfully!');
+			editingOptions = safeClone(updated);
+			toast.success('Options saved and synced successfully!');
 		} catch (err) {
 			console.error('Save error:', err);
-			toast.error('Failed to save options. Please try again.');
+			toast.error('Saved locally. Cloud sync encountered an issue.');
 		} finally {
 			isSaving = false;
 		}
@@ -73,50 +74,100 @@
 
 	// === Areas of Town helpers ===
 	function addNewArea() {
-		if (!editingOptions.areasOfTown) editingOptions.areasOfTown = {};
-		const newKey = 'new-area-' + Date.now();
-		editingOptions.areasOfTown[newKey] = { label: 'New Area', color: '#64748b' };
+		if (!editingOptions.areasOfTown) editingOptions.areasOfTown = [];
+		editingOptions.areasOfTown.push({
+			id: 'new-area-' + Date.now(),
+			label: 'New Area',
+			color: '#64748b'
+		});
+		editingOptions.areasOfTown = [...editingOptions.areasOfTown];
 	}
 
-	function deleteArea(key: string) {
-		if (confirm(`Delete area "${editingOptions.areasOfTown[key]?.label || key}"?`)) {
-			delete editingOptions.areasOfTown[key];
+	function deleteArea(id: string) {
+		if (confirm(`Delete this area?`)) {
+			editingOptions.areasOfTown = editingOptions.areasOfTown.filter((a: any) => a.id !== id);
 		}
 	}
 
-	function moveAreaUp(key: string) {
-		const keys = Object.keys(editingOptions.areasOfTown || {});
-		const index = keys.indexOf(key);
+	function moveAreaUp(index: number) {
 		if (index <= 0) return;
-
-		const newKeys = [...keys];
-		[newKeys[index], newKeys[index - 1]] = [newKeys[index - 1], newKeys[index]];
-
-		const reordered: any = {};
-		newKeys.forEach(k => reordered[k] = editingOptions.areasOfTown[k]);
-		editingOptions.areasOfTown = reordered;
+		const arr = editingOptions.areasOfTown;
+		[arr[index], arr[index - 1]] = [arr[index - 1], arr[index]];
+		editingOptions.areasOfTown = [...arr];
 	}
 
-	function moveAreaDown(key: string) {
-		const keys = Object.keys(editingOptions.areasOfTown || {});
-		const index = keys.indexOf(key);
-		if (index === -1 || index === keys.length - 1) return;
-
-		const newKeys = [...keys];
-		[newKeys[index], newKeys[index + 1]] = [newKeys[index + 1], newKeys[index]];
-
-		const reordered: any = {};
-		newKeys.forEach(k => reordered[k] = editingOptions.areasOfTown[k]);
-		editingOptions.areasOfTown = reordered;
+	function moveAreaDown(index: number) {
+		const arr = editingOptions.areasOfTown;
+		if (index === -1 || index === arr.length - 1) return;
+		[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]];
+		editingOptions.areasOfTown = [...arr];
 	}
 
-	function isDefaultArea(key: string): boolean {
-		const keys = Object.keys(editingOptions.areasOfTown || {});
-		return keys[0] === key;
+	function isDefaultArea(index: number): boolean {
+		return index === 0;
+	}
+
+	// === Billable Items helpers ===
+	function moveBillableUp(index: number) {
+		if (index <= 0) return;
+		const arr = editingOptions.defaultBillableItems;
+		[arr[index], arr[index - 1]] = [arr[index - 1], arr[index]];
+		editingOptions.defaultBillableItems = [...arr];
+	}
+
+	function moveBillableDown(index: number) {
+		const arr = editingOptions.defaultBillableItems;
+		if (index === -1 || index === arr.length - 1) return;
+		[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]];
+		editingOptions.defaultBillableItems = [...arr];
+	}
+
+	function isDefaultBillable(index: number): boolean {
+		return index === 0;
+	}
+
+	// === Cancellation Reasons helpers ===
+	function addCancelReason() {
+		if (!editingOptions.cancelReasons) editingOptions.cancelReasons = [];
+		editingOptions.cancelReasons.push('New Cancellation Reason');
+		editingOptions.cancelReasons = [...editingOptions.cancelReasons];
+	}
+
+	function deleteCancelReason(index: number) {
+		if (confirm('Delete this cancellation reason?')) {
+			editingOptions.cancelReasons.splice(index, 1);
+			editingOptions.cancelReasons = [...editingOptions.cancelReasons];
+		}
+	}
+
+	function moveCancelReasonUp(index: number) {
+		if (index <= 0) return;
+		const arr = editingOptions.cancelReasons;
+		[arr[index], arr[index - 1]] = [arr[index - 1], arr[index]];
+		editingOptions.cancelReasons = [...arr];
+	}
+
+	function moveCancelReasonDown(index: number) {
+		const arr = editingOptions.cancelReasons;
+		if (index === -1 || index === arr.length - 1) return;
+		[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]];
+		editingOptions.cancelReasons = [...arr];
+	}
+
+	function isDefaultCancelReason(index: number): boolean {
+		return index === 0;
 	}
 
 	onMount(async () => {
 		await optionsStore.load();
+		
+		// Try to pull latest from PocketBase if we have network
+		if (navigator.onLine) {
+			const pulled = await optionsStore.pullFromPB();
+			if (pulled) {
+				console.log('✅ Fresh options pulled from PocketBase on load');
+			}
+		}
 	});
 </script>
 
@@ -161,10 +212,10 @@
 				<h3>Areas of Town</h3>
 				<p class="options-page__help">The **top area** is used as the default for new jobs. Use arrows to reorder.</p>
 
-				{#if editingOptions?.areasOfTown}
+				{#if editingOptions?.areasOfTown?.length}
 					<div class="areas-list">
-						{#each Object.entries(editingOptions.areasOfTown) as [key, area] (key)}
-							<div class="area-item {isDefaultArea(key) ? 'area-item--default' : ''}">
+						{#each editingOptions.areasOfTown as area, index (area.id)}
+							<div class="area-item {isDefaultArea(index) ? 'area-item--default' : ''}">
 								<input 
 									class="area-item__label-input"
 									bind:value={area.label} 
@@ -181,23 +232,23 @@
 									<button 
 										type="button" 
 										class="area-item__move-btn"
-										onclick={() => moveAreaUp(key)}
-										disabled={Object.keys(editingOptions.areasOfTown)[0] === key}
+										onclick={() => moveAreaUp(index)}
+										disabled={index === 0}
 									>
 										↑
 									</button>
 									<button 
 										type="button" 
 										class="area-item__move-btn"
-										onclick={() => moveAreaDown(key)}
-										disabled={Object.keys(editingOptions.areasOfTown).at(-1) === key}
+										onclick={() => moveAreaDown(index)}
+										disabled={index === editingOptions.areasOfTown.length - 1}
 									>
 										↓
 									</button>
 									<button 
 										type="button" 
 										class="area-item__remove"
-										onclick={() => deleteArea(key)}
+										onclick={() => deleteArea(area.id)}
 									>
 										✕
 									</button>
@@ -215,12 +266,50 @@
 			<!-- Cancellation Reasons -->
 			<div class="form-section">
 				<h3>Cancellation Reasons</h3>
-				<p class="options-page__help">(Full editor coming soon)</p>
-				<ul>
-					{#each editingOptions?.cancelReasons || [] as reason}
-						<li>{reason}</li>
-					{/each}
-				</ul>
+				<p class="options-page__help">The **top reason** appears first in dropdowns. Reorder as needed.</p>
+
+				{#if editingOptions?.cancelReasons?.length}
+					<div class="cancel-reasons-list">
+						{#each editingOptions.cancelReasons as reason, index (index)}
+							<div class="cancel-reason-item {isDefaultCancelReason(index) ? 'cancel-reason-item--default' : ''}">
+								<input 
+									class="cancel-reason-item__input"
+									bind:value={editingOptions.cancelReasons[index]}
+									placeholder="Enter cancellation reason"
+								/>
+								<div class="cancel-reason-item__controls">
+									<button 
+										type="button" 
+										class="cancel-reason-item__move-btn"
+										onclick={() => moveCancelReasonUp(index)}
+										disabled={index === 0}
+									>
+										↑
+									</button>
+									<button 
+										type="button" 
+										class="cancel-reason-item__move-btn"
+										onclick={() => moveCancelReasonDown(index)}
+										disabled={index === editingOptions.cancelReasons.length - 1}
+									>
+										↓
+									</button>
+									<button 
+										type="button" 
+										class="cancel-reason-item__remove"
+										onclick={() => deleteCancelReason(index)}
+									>
+										✕
+									</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				<button type="button" class="options-page__btn options-page__btn--add" onclick={addCancelReason}>
+					+ Add New Reason
+				</button>
 			</div>
 
 		{:else if activeTab === 'invoice'}
@@ -238,12 +327,12 @@
 
 			<div class="form-section">
 				<h3>Default Billable Items</h3>
-				<p class="options-page__help">Templates used when creating new jobs</p>
+				<p class="options-page__help">The first item is default for dropdown lists.</p>
 
-				{#if editingOptions?.defaultBillableItems}
+				{#if editingOptions?.defaultBillableItems?.length}
 					<div class="billable-list">
 						{#each editingOptions.defaultBillableItems as item, index (index)}
-							<div class="billable-item">
+							<div class="billable-item {isDefaultBillable(index) ? 'billable-item--default' : ''}">
 								<input class="billable-item__input" bind:value={item.title} placeholder="Service name" />
 								<div class="billable-item__price">
 									<span>$</span>
@@ -263,9 +352,32 @@
 									<option value="quantity">Quantity</option>
 									<option value="hours">Hours</option>
 								</select>
-								<button type="button" class="billable-item__remove" onclick={() => editingOptions.defaultBillableItems.splice(index, 1)}>
-									✕
-								</button>
+
+								<div class="billable-item__controls">
+									<button 
+										type="button" 
+										class="billable-item__move-btn"
+										onclick={() => moveBillableUp(index)}
+										disabled={index === 0}
+									>
+										↑
+									</button>
+									<button 
+										type="button" 
+										class="billable-item__move-btn"
+										onclick={() => moveBillableDown(index)}
+										disabled={index === editingOptions.defaultBillableItems.length - 1}
+									>
+										↓
+									</button>
+									<button 
+										type="button" 
+										class="billable-item__remove"
+										onclick={() => editingOptions.defaultBillableItems.splice(index, 1)}
+									>
+										✕
+									</button>
+								</div>
 							</div>
 						{/each}
 					</div>
@@ -373,10 +485,144 @@
 	}
 
 	.billable-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
-	.billable-item { display: flex; align-items: center; gap: 0.75rem; background: #f8fafc; padding: 0.75rem 1rem; border-radius: 8px; }
+	.billable-item { 
+		display: flex; 
+		align-items: center; 
+		gap: 0.75rem; 
+		background: #f8fafc; 
+		padding: 0.75rem 1rem; 
+		border-radius: 8px; 
+		position: relative;
+	}
+	.billable-item--default::before {
+		content: "★ Default";
+		position: absolute;
+		top: 8px;
+		left: 12px;
+		background: #22c55e;
+		color: white;
+		font-size: 0.7rem;
+		font-weight: 700;
+		padding: 1px 7px 2px;
+		border-radius: 9999px;
+		line-height: 1;
+		z-index: 2;
+		box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+	}
+
 	.billable-item__input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; }
 	.billable-item__input--price { width: 100px; }
-	.billable-item__remove { background: #fee2e2; color: #dc2626; border: none; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; }
+	.billable-item__controls {
+		display: flex;
+		gap: 4px;
+	}
+	.billable-item__move-btn {
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #e2e8f0;
+		border: none;
+		border-radius: 6px;
+		font-size: 1.1rem;
+		cursor: pointer;
+		color: #475569;
+	}
+	.billable-item__move-btn:hover:not(:disabled) {
+		background: #cbd5e1;
+	}
+	.billable-item__move-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.billable-item__remove { 
+		background: #fee2e2; 
+		color: #dc2626; 
+		border: none; 
+		width: 32px; 
+		height: 32px; 
+		border-radius: 6px; 
+		cursor: pointer; 
+	}
+
+	/* Cancellation Reasons */
+	.cancel-reasons-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.cancel-reason-item {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		background: #f8fafc;
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		position: relative;
+	}
+	.cancel-reason-item--default::before {
+		content: "★ Default";
+		position: absolute;
+		top: 8px;
+		left: 12px;
+		background: #22c55e;
+		color: white;
+		font-size: 0.7rem;
+		font-weight: 700;
+		padding: 1px 7px 2px;
+		border-radius: 9999px;
+		line-height: 1;
+		z-index: 2;
+		box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+	}
+
+	.cancel-reason-item__input {
+		flex: 1;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+	}
+
+	.cancel-reason-item__controls {
+		display: flex;
+		gap: 4px;
+	}
+
+	.cancel-reason-item__move-btn {
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #e2e8f0;
+		border: none;
+		border-radius: 6px;
+		font-size: 1.1rem;
+		cursor: pointer;
+		color: #475569;
+	}
+
+	.cancel-reason-item__move-btn:hover:not(:disabled) {
+		background: #cbd5e1;
+	}
+
+	.cancel-reason-item__move-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.cancel-reason-item__remove { 
+		background: #fee2e2; 
+		color: #dc2626; 
+		border: none; 
+		width: 32px; 
+		height: 32px; 
+		border-radius: 6px; 
+		cursor: pointer; 
+	}
 
 	.options-page__btn { padding: 0.9rem 2.25rem; border-radius: 8px; font-weight: 600; cursor: pointer; }
 	.options-page__btn--save { background: #2563eb; color: white; border: none; }

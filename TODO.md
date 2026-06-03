@@ -1,17 +1,18 @@
 # TODO - Remedine/Svelte_FullCalendar_Dexie_Scheduling
 
 ## High Priority
-[] Add PocketBase to the stack for auth and syncing
-[] Retool Auth utilizing Pocketbase
+[x] Add PocketBase to the stack for auth and syncing
+[x] Retool Auth utilizing Pocketbase
+[] Add security for Dexie data (encrypt, clear on logout)
 
 ## Dexie & Data Layer
-[] Dexie Stores 
+[x] Dexie Stores 
     [X] Client
     [X] User
     [X] Job
-    [] Options/Settings?
+    [x] Options/Settings?
     [] Invoice
-[] Pocketbase for server sync
+[x] Pocketbase for server sync
 
 ## Routes/Pages Views
 [] Jobs
@@ -29,7 +30,7 @@
 ## UI/UX & Styling
 
 ## Testing & Quality/Debugs
-[] On Client View - restrict deteling clients if client has jobs (archive only)
+[] On Client View - restrict deleting clients if client has jobs (archive only)
 [] Default job length is set to 30 minutes, then jumps to 4 hours on drag/drop event
 
 ## Nice to Have / Backlog
