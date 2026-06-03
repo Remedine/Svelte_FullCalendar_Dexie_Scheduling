@@ -1,6 +1,6 @@
 <!-- src/routes/(app)/admin/options/+page.svelte -->
 <script lang="ts">
-	// )=- Integrated pullFromPB() on load for better sync
+	// )=- Complete Options Page - All sections active with dynamic data
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -161,7 +161,6 @@
 	onMount(async () => {
 		await optionsStore.load();
 		
-		// Try to pull latest from PocketBase if we have network
 		if (navigator.onLine) {
 			const pulled = await optionsStore.pullFromPB();
 			if (pulled) {

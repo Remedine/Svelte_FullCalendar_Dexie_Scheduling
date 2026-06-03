@@ -1,7 +1,7 @@
 <!-- src/lib/components/ClientForm.svelte -->
 <script lang="ts">
 	import { db, type Client, createClient, updateClient } from '$lib/db';
-	import { BUSINESS_CONFIG } from '$lib/config';
+	import { optionsStore } from '$lib/stores/options.svelte';
 	import { z } from 'zod';
 
 	const ClientSchema = z.object({
@@ -15,7 +15,7 @@
 		serviceAddressCity: z.string().optional(),
 		serviceAddressState: z.string().length(2, 'State must be 2 letters').optional(),
 		serviceAddressZip: z.string().optional(),
-		areaOfTown: z.enum(['thane', 'downtown', 'douglas'] as const),
+		areaOfTown: z.string().min(1, 'Area of Town is required'),
 		preferredBillingMethod: z.enum(['email', 'check', 'invoice'] as const),
 		notes: z.string().optional()
 	});
@@ -34,7 +34,7 @@
 		serviceAddressCity: '',
 		serviceAddressState: 'WA',
 		serviceAddressZip: '',
-		areaOfTown: 'thane',
+		areaOfTown: '',
 		preferredBillingMethod: 'email',
 		phone: '',
 		email: '',
@@ -42,6 +42,9 @@
 	});
 
 	let errors = $state<Record<string, string>>({});
+
+	// Dynamic areas from options
+	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
 
 	function formatPhone(value: string): string {
 		const digits = value.replace(/\D/g, '');
@@ -61,7 +64,7 @@
 				serviceAddressCity: '',
 				serviceAddressState: 'WA',
 				serviceAddressZip: '',
-				areaOfTown: 'thane',
+				areaOfTown: areaOptions[0]?.id || '',
 				preferredBillingMethod: 'email',
 				phone: '',
 				email: '',
@@ -146,7 +149,6 @@
 					<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input" />
 				</div>
 
-				<!-- Improved Address Row -->
 				<div class="client-form-modal__address-row">
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">City</label>
@@ -163,12 +165,13 @@
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Area of Town</label>
+					<label class="client-form-modal__label">Area of Town <span class="required">*</span></label>
 					<select bind:value={formData.areaOfTown} class="client-form-modal__input">
-						{#each Object.entries(BUSINESS_CONFIG.areasOfTown) as [key, area]}
-							<option value={key}>{area.label}</option>
+						{#each areaOptions as area}
+							<option value={area.id}>{area.label}</option>
 						{/each}
 					</select>
+					{#if errors.areaOfTown}<small class="error">{errors.areaOfTown}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
@@ -199,6 +202,7 @@
 {/if}
 
 <style>
+	/* Your existing styles (unchanged) */
 	.client-form-modal {
 		position: fixed;
 		inset: 0;
@@ -240,7 +244,6 @@
 		gap: 0.4rem;
 	}
 
-	/* Improved Address Row */
 	.client-form-modal__address-row {
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr;
@@ -259,7 +262,7 @@
 		border-radius: 6px;
 		font-size: 1rem;
 		width: 100%;
-		box-sizing: border-box;
+		box-sizing: box-sizing;
 	}
 
 	.error {
@@ -293,17 +296,12 @@
 		color: white;
 	}
 
-	/* Mobile: stack address fields */
 	@container client-form (max-width: 520px) {
 		.client-form-modal__address-row {
 			grid-template-columns: 1fr;
 		}
-		.client-form-modal__content {
-			padding: 1.5rem 1rem;
-		}
 	}
 
-	/* Desktop: nice single line */
 	@container client-form (min-width: 521px) {
 		.client-form-modal__content {
 			border-radius: 16px;
