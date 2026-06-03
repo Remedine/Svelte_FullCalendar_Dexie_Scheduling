@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import favicon from '$lib/assets/favicon.svg';
+	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
 </script>
@@ -12,6 +13,7 @@
 
 {#if browser}
 	{@render children()}
+	<Toast />
 {:else}
 	<div class="loading-screen">
 		<div class="loading-screen__spinner"></div>
