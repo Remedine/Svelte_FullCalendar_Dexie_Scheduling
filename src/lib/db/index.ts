@@ -111,7 +111,7 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	options: EntityTable<AppOptions, 'id'>;
 };
 
-db.version(13).stores({
+db.version(14).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown',
 	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate',

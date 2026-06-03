@@ -1,7 +1,7 @@
 <!-- src/routes/(app)/+layout.svelte -->
 <script lang="ts">
-	import { page } from '$app/stores';
-	import { auth } from '$lib/stores/auth.svelte.ts';
+	import { page } from '$app/state';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { pb } from '$lib/db/pb';
@@ -9,7 +9,7 @@
 
 	let { children } = $props();
 
-	let currentPath = $derived($page.url.pathname);
+	let currentPath = $derived(page.url.pathname);
 
 	onMount(() => {
 		const handleOnline = async () => {
@@ -27,14 +27,19 @@
 
 	// )=- Reliable auth guard
 	$effect(() => {
-    	if (!auth.isAuthenticated) return;
+    if (auth.loading) return;
 
-		const hasPocketBaseAuth = pb.authStore.isValid;
-		const hasLocalAuth = !!auth.currentUser;
+    if (!auth.isAuthenticated || !auth.currentUser) {
+      goto('/login', { replaceState: true });
+      return;
+    }
 
-		if (!hasPocketBaseAuth && !hasLocalAuth) {
-			goto('/login', { replaceState: true });
-		}
+    // Optional: Non-admin users redirected to calendar
+    if (auth.currentUser.role !== 'admin') {
+      if (!currentPath.startsWith('/calendar')) {
+        goto('/calendar', { replaceState: true });
+      }
+    }
   });
 </script>
 
@@ -73,6 +78,13 @@
 				class:active={currentPath.startsWith('/admin/crew')}
 			>
 				Crew
+			</a>
+			<a 
+				href="admin/options" 
+				class="top-nav__link"
+				class:active={currentPath.startsWith('/admin/options')}
+			>
+				⚙️ Options
 			</a>
 		</nav>
 
