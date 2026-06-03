@@ -2,6 +2,7 @@
 import PocketBase from 'pocketbase';
 import { db, processSyncQueue, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
+import { setCurrentUser } from '$lib/stores/auth.svelte';
 
 // PocketBase client singleton
 export const pb = new PocketBase(import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090');
@@ -31,6 +32,7 @@ export async function loginWithEmail(email: string, password: string) {
 		};
 
 		await db.users.put(localUser);
+		setCurrentUser(localUser);
 		console.log('✅ PB super admin synced to Dexie:', localUser.name);
 
 		// Pull latest data from server first
@@ -69,8 +71,7 @@ export async function loginWithPin(name: string, pin: string) {
 			throw new Error('Account is inactive');
 		}
 
-		auth.currentUser = user;
-		localStorage.setItem('currentUserId', user.id!);
+		setCurrentUser(user);
 
 		// Pull latest data from server
 		await pullClientsFromServer();

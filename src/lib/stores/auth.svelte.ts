@@ -1,18 +1,20 @@
+// src/lib/stores/auth.svelte.ts
 import { browser } from '$app/environment';
-import { db, type User } from '$lib/db';
 import * as bcrypt from 'bcryptjs';
 
 export const auth = $state({
-	currentUser: null as User | null,
-	isAuthenticated: false, 
-	loading: true 
+	currentUser: null as any,
+	isAuthenticated: false,
+	loading: true
 });
 
-
+// We'll import db only when needed (inside functions) to avoid circular dependency
 export async function login(
 	name: string,
 	pin: string
-): Promise<{ success: boolean; user?: User; message?: string }> {
+): Promise<{ success: boolean; user?: any; message?: string }> {
+	const { db } = await import('$lib/db'); // )=- Dynamic import here
+
 	const user = await db.users.where('name').equals(name).first();
 
 	if (!user || !user.active) {
@@ -37,10 +39,10 @@ export async function logout() {
 	localStorage.removeItem('currentUserId');
 }
 
-//Re-usable setter so email login (or future pocketbase flowws) can set Dexie currentUser
-export function setCurrentUser(user: User | null) {
+export function setCurrentUser(user: any | null) {
 	auth.currentUser = user;
 	auth.isAuthenticated = !!user;
+
 	if (user?.id) {
 		localStorage.setItem('currentUserId', user.id.toString());
 	} else {
@@ -50,20 +52,22 @@ export function setCurrentUser(user: User | null) {
 
 // Auto-restore session
 if (browser) {
-	const savedId = localStorage.getItem('currentUserId');   
+	const savedId = localStorage.getItem('currentUserId');
 
 	if (savedId) {
-		db.users.get(savedId).then((user) => {               
-			if (user && user.active) {
-				auth.currentUser = user;
-				auth.isAuthenticated = true;
-			}
-			auth.loading = false;
+		import('$lib/db').then(({ db }) => {
+			// )=- Dynamic import
+			db.users.get(savedId).then((user) => {
+				if (user && user.active) {
+					auth.currentUser = user;
+					auth.isAuthenticated = true;
+				}
+				auth.loading = false;
+			});
 		});
 	} else {
 		auth.loading = false;
 		auth.isAuthenticated = false;
-
 	}
 } else {
 	auth.loading = false;
@@ -71,8 +75,9 @@ if (browser) {
 }
 
 export async function setInitialPin(userId: number, newPin: string) {
-	const bcrypt = await import('bcryptjs');
-	const hashed = await bcrypt.hash(newPin, 10);
+	const { db } = await import('$lib/db'); // )=- Dynamic import
+	const bcryptModule = await import('bcryptjs');
+	const hashed = await bcryptModule.hash(newPin, 10);
 
 	await db.users.update(userId, {
 		pinHash: hashed,
@@ -80,10 +85,9 @@ export async function setInitialPin(userId: number, newPin: string) {
 		updatedAt: new Date()
 	});
 
-	// Refresh current user in store
 	const updatedUser = await db.users.get(userId);
 	if (updatedUser) {
 		auth.currentUser = updatedUser;
-		auth.isAuthenticated = true; 
+		auth.isAuthenticated = true;
 	}
 }

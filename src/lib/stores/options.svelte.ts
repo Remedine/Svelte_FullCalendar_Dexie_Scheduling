@@ -47,7 +47,6 @@ export const options$ = liveQuery(async () => {
 				'Other'
 			],
 			invoiceDueDays: 30,
-			currency: 'USD',
 			lastUpdated: new Date(),
 			updatedBy: 'System'
 		};
