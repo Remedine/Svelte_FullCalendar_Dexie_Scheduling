@@ -8,35 +8,30 @@ export const optionsStore = $state({
 
 	async load() {
 		try {
-			const options = await db.options.get(1);
+			// First try local Dexie
+			let options = await db.options.get(1);
+
+			if (!options) {
+				// If nothing local, try pulling from PocketBase
+				options = await this.pullFromPB();
+			}
 
 			if (options) {
 				this.data = options;
 			} else {
-				const defaultOptions = {
+				console.warn('⚠️ No options data found in Dexie or PocketBase');
+				this.data = {
 					id: 1,
+					areasOfTown: [],
+					defaultBillableItems: [],
+					cancelReasons: [],
 					defaultJobDurationHours: 2,
 					taxRate: 6.5,
-					invoiceDueDays: 30,
-					areasOfTown: [
-						{ id: 'area-north', label: 'North Side', color: '#3b82f6' },
-						{ id: 'area-downtown', label: 'Downtown', color: '#10b981' },
-						{ id: 'area-south', label: 'South End', color: '#f59e0b' }
-					],
-					defaultBillableItems: [
-						{ title: 'Window Cleaning', price: 250, hours: 2 },
-						{ title: 'Gutter Guard Install', price: 450, hours: 3 }
-					],
-					cancelReasons: ['Weather', 'Customer Cancelled', 'Scheduling Conflict'],
-					lastUpdated: new Date().toISOString(),
-					updatedBy: 'System'
+					invoiceDueDays: 30
 				};
-
-				await db.options.put(defaultOptions);
-				this.data = defaultOptions;
 			}
 		} catch (err) {
-			console.error('Failed to load options from Dexie:', err);
+			console.error('Failed to load options:', err);
 		}
 	},
 

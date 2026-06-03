@@ -1,8 +1,9 @@
 <!-- src/routes/(app)/clients/+page.svelte -->
 <script lang="ts">
+	// )=- Final version - dynamic areas from optionsStore with proper loading
 	import { onMount } from 'svelte';
 	import { db, type Client } from '$lib/db';
-	import { BUSINESS_CONFIG } from '$lib/config';
+	import { optionsStore } from '$lib/stores/options.svelte';
 	import ClientForm from '$lib/components/ClientForm.svelte';
 	import { deleteClient as deleteClientFromDb } from '$lib/db';
 
@@ -16,6 +17,9 @@
 
 	let enhancedClients = $state<any[]>([]);
 
+	// Dynamic areas from optionsStore
+	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
+
 	let displayedClients = $derived.by(() => {
 		let result = [...enhancedClients];
 
@@ -24,7 +28,7 @@
 			result = result.filter(c => 
 				c.name.toLowerCase().includes(term) ||
 				(c.email && c.email.toLowerCase().includes(term)) ||
-				c.serviceAddressCity.toLowerCase().includes(term) ||
+				(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term)) ||
 				(c.phone && c.phone.toLowerCase().includes(term.replace(/\D/g, '')))
 			);
 		}
@@ -43,15 +47,14 @@
 	});
 
 	onMount(async () => {
+		await optionsStore.load();           // Make sure options are loaded
 		await loadClientsWithLastJob();
 	});
 
 	async function loadClientsWithLastJob() {
-		// Fetch all clients and jobs from Dexie
 		const allClients = await db.clients.orderBy('name').toArray();
 		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
 
-		// Map over clients and attach last job info
 		enhancedClients = allClients.map(client => {
 			const clientJobs = allJobs.filter(j => j.clientId === client.id);
 			const lastJob = clientJobs.length > 0 ? clientJobs[0] : null;
@@ -97,8 +100,6 @@
 
 	async function deleteClient(id: string) {
 		if (!confirm('Delete this client?')) return;
-
-		// Only call our central function — it handles local delete + queue
 		await deleteClientFromDb(id);
 		await loadClientsWithLastJob();
 	}
@@ -109,6 +110,16 @@
 		} else {
 			selectedAreas = [...selectedAreas, areaKey];
 		}
+	}
+
+	function getAreaColor(areaId: string | undefined): string {
+		if (!areaId) return '#64748b';
+		return areaOptions.find(a => a.id === areaId)?.color || '#64748b';
+	}
+
+	function getAreaLabel(areaId: string | undefined): string {
+		if (!areaId) return 'Unknown Area';
+		return areaOptions.find(a => a.id === areaId)?.label || areaId;
 	}
 </script>
 
@@ -137,12 +148,12 @@
 
 	<div class="area-filter">
 		<div class="area-filter__chips">
-			{#each Object.entries(BUSINESS_CONFIG.areasOfTown) as [key, area]}
+			{#each areaOptions as area (area.id)}
 				<button
 					class="area-chip"
-					class:active={selectedAreas.includes(key)}
-					onclick={() => toggleArea(key)}
-					style="background-color: {area.color}20; color: {area.color};"
+					class:active={selectedAreas.includes(area.id)}
+					onclick={() => toggleArea(area.id)}
+					style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
 				>
 					{area.label}
 				</button>
@@ -153,13 +164,13 @@
 	<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
 			<li class="client-card" 
-				style="border-left: 6px solid {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color || '#64748b'};">
+				style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
 				<div class="client-card__main">
 					<div class="client-card__header">
 						<h3 class="client-card__name">{client.name}</h3>
 						<span class="area-badge" 
-							style="background-color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}20; color: {BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.color}">
-							{BUSINESS_CONFIG.areasOfTown[client.areaOfTown]?.label}
+							style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(client.areaOfTown)};">
+							{getAreaLabel(client.areaOfTown)}
 						</span>
 					</div>
 
@@ -304,7 +315,6 @@
 		padding: 1.35rem;
 		border-radius: 12px;
 		box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-		border-left: 6px solid #64748b; /* fallback */
 		transition: transform 0.2s;
 	}
 
