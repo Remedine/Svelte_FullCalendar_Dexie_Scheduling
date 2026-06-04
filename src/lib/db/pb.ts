@@ -96,62 +96,63 @@ export async function pullJobsFromServer() {
   if (!pb.authStore.isValid) return;
 
   try {
-    const records = await pb.collection('jobs').getFullList({
-      sort: '-updatedAt',
-      expand: 'client',
-      // line 84 - FIX: disable auto-cancellation to prevent aborted requests
-      $autoCancel: false
-    });
+		const records = await pb.collection('jobs').getFullList({
+			sort: '-updatedAt',
+			expand: 'client',
+			// line 84 - FIX: disable auto-cancellation to prevent aborted requests
+			$autoCancel: false
+		});
 
-    const pbJobIds = new Set<string>();
+		const pbJobIds = new Set<string>();
 
-    for (const rec of records) {
-      pbJobIds.add(rec.id);
+		for (const rec of records) {
+			pbJobIds.add(rec.id);
 
-      const serverJob = {
-        id: rec.id,
-        clientId: rec.expand?.client?.id || rec.client,
-        title: rec.title,
-        start: new Date(rec.start),
-        end: new Date(rec.end),
-        assignedCrew: rec.assignedCrew || [],
-        status: rec.status,
-        billableItems: rec.billableItems || [],
-        subtotal: rec.subtotal || 0,
-        taxRate: rec.taxRate || 0.08,
-        taxAmount: rec.taxAmount || 0,
-        totalAmount: rec.totalAmount || 0,
-        areaOfTown: rec.areaOfTown,
-        notes: rec.notes,
-        cancelReason: rec.cancelReason,
-        cancelNotes: rec.cancelNotes,
-        cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
-        cancelledBy: rec.cancelledBy,
-        createdAt: new Date(rec.created),
-        updatedAt: new Date(rec.updated)
-      };
+			const serverJob = {
+				id: rec.id,
+				clientId: rec.expand?.client?.id || rec.client,
+				title: rec.title,
+				start: new Date(rec.start),
+				end: new Date(rec.end),
+				assignedCrew: rec.assignedCrew || [],
+				status: rec.status,
+				billableItems: rec.billableItems || [],
+				subtotal: rec.subtotal || 0,
+				taxRate: rec.taxRate || 0.08,
+				taxAmount: rec.taxAmount || 0,
+				totalAmount: rec.totalAmount || 0,
+				areaOfTown: rec.areaOfTown,
+				notes: rec.notes,
+				cancelReason: rec.cancelReason,
+				cancelNotes: rec.cancelNotes,
+				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+				cancelledBy: rec.cancelledBy,
+				createdAt: new Date(rec.created),
+				updatedAt: new Date(rec.updated)
+			};
 
-      const localJob = await db.jobs.get(rec.id);
+			const localJob = await db.jobs.get(rec.id);
 
-      if (localJob && localJob.updatedAt > serverJob.updatedAt) {
-        console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
-        continue;
-      }
+			if (localJob && localJob.updatedAt > serverJob.updatedAt) {
+				console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
+				continue;
+			}
 
-      await db.jobs.put(serverJob);
-    }
+			await db.jobs.put(serverJob);
+		}
 
-    // Delete stale local jobs
-    const localJobs = await db.jobs.toArray();
-    for (const localJob of localJobs) {
-      if (localJob.id && !pbJobIds.has(localJob.id)) {
-        await db.jobs.delete(localJob.id);
-        console.log(`🗑️ Removed stale job from Dexie: ${localJob.title}`);
-      }
-    }
+		// Delete stale local jobs
+		const localJobs = await db.jobs.toArray();
+		for (const localJob of localJobs) {
+			// Only delete if this job was previously synced (has pbId) AND its pbId is no longer on the server
+			if (localJob.pbId && !pbJobIds.has(localJob.pbId)) {
+				await db.jobs.delete(localJob.id!);
+				console.log(`🗑️ Removed stale job from Dexie: ${localJob.title}`);
+			}
+		}
 
-    console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
-  } catch (err: any) {
+		console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
+	} catch (err: any) {
     // Only log real errors, not auto-cancellations
     if (err?.status !== 0) {
       console.error('Pull jobs failed', err);

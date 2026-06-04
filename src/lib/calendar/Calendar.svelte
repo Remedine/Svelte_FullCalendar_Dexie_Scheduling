@@ -74,7 +74,11 @@
 
 				try {
 					await updateJobDates(jobId, info.event.start!, info.event.end!);
-					calendarInstance?.refetchEvents();
+
+					// )=- Small delay so the pull + Dexie merge has time to settle
+					setTimeout(() => {
+						calendarInstance?.refetchEvents();
+					}, 400);
 				} catch (err) {
 					console.error('❌ Update failed', err);
 					info.revert();
@@ -88,6 +92,11 @@
 				try {
 					await updateJobDates(jobId, info.event.start!, info.event.end!);
 					console.log(`✅ Job ${jobId} resized successfully`);
+
+					// )=- Force refetch so the modal sees the new end time
+					setTimeout(() => {
+						calendarInstance?.refetchEvents();
+					}, 300);
 				} catch (err) {
 					console.error('❌ Resize failed', err);
 					info.revert();
