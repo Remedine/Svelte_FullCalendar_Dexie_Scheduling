@@ -1,13 +1,13 @@
 <!-- src/routes/(app)/clients/+page.svelte -->
 <script lang="ts">
-	// )=- Final version - dynamic areas from optionsStore with proper loading
+	// )=- Full file with rock-solid area filter reactivity
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	import { onMount } from 'svelte';
 	import { db, type Client } from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import ClientForm from '$lib/components/ClientForm.svelte';
 	import { deleteClient as deleteClientFromDb } from '$lib/db';
 
-	let clients = $state<Client[]>([]);
 	let showForm = $state(false);
 	let editingClient = $state<Client | null>(null);
 
@@ -17,19 +17,24 @@
 
 	let enhancedClients = $state<any[]>([]);
 
-	// Dynamic areas from optionsStore
-	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
+	// This will now react properly because we fixed the store pattern
+	let areaOptions = $derived.by(() => {
+		return optionsStore.data?.areasOfTown ?? [];
+	});
+
+	$effect(() => {
+		console.log('🟢 areaOptions updated →', areaOptions.length, 'areas loaded');
+	});
 
 	let displayedClients = $derived.by(() => {
 		let result = [...enhancedClients];
 
 		const term = searchTerm.toLowerCase().trim();
 		if (term) {
-			result = result.filter(c => 
-				c.name.toLowerCase().includes(term) ||
-				(c.email && c.email.toLowerCase().includes(term)) ||
-				(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term)) ||
-				(c.phone && c.phone.toLowerCase().includes(term.replace(/\D/g, '')))
+			result = result.filter(c =>
+				c.name?.toLowerCase().includes(term) ||
+				c.email?.toLowerCase().includes(term) ||
+				c.serviceAddressCity?.toLowerCase().includes(term)
 			);
 		}
 
@@ -47,7 +52,11 @@
 	});
 
 	onMount(async () => {
-		await optionsStore.load();           // Make sure options are loaded
+		console.log('🚀 Clients page mounting...');
+		await optionsStore.load();
+		if (navigator.onLine) {
+			await optionsStore.pullFromPB();   // Force fresh data from server
+		}
 		await loadClientsWithLastJob();
 	});
 
@@ -57,7 +66,7 @@
 
 		enhancedClients = allClients.map(client => {
 			const clientJobs = allJobs.filter(j => j.clientId === client.id);
-			const lastJob = clientJobs.length > 0 ? clientJobs[0] : null;
+			const lastJob = clientJobs[0] || null;
 
 			return {
 				...client,
@@ -114,12 +123,12 @@
 
 	function getAreaColor(areaId: string | undefined): string {
 		if (!areaId) return '#64748b';
-		return areaOptions.find(a => a.id === areaId)?.color || '#64748b';
+		return areaOptions.find((a: any) => a.id === areaId)?.color || '#64748b';
 	}
 
 	function getAreaLabel(areaId: string | undefined): string {
 		if (!areaId) return 'Unknown Area';
-		return areaOptions.find(a => a.id === areaId)?.label || areaId;
+		return areaOptions.find((a: any) => a.id === areaId)?.label || areaId;
 	}
 </script>
 
@@ -163,12 +172,11 @@
 
 	<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
-			<li class="client-card" 
-				style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
+			<li class="client-card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
 				<div class="client-card__main">
 					<div class="client-card__header">
 						<h3 class="client-card__name">{client.name}</h3>
-						<span class="area-badge" 
+						<span class="area-badge"
 							style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(client.areaOfTown)};">
 							{getAreaLabel(client.areaOfTown)}
 						</span>
@@ -227,6 +235,7 @@
 {/if}
 
 <style>
+	/* BEM naming maintained */
 	.clients-page {
 		padding: 1.5rem 1rem;
 		max-width: 1200px;

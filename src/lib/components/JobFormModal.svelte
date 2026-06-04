@@ -131,42 +131,49 @@
   }
 
   async function saveJob() {
-    if (!currentJob.clientId) {
-      alert('Please select a client');
-      return;
-    }
+	if (!currentJob.clientId) {
+		alert('Please select a client');
+		return;
+	}
 
-    console.log('Saving job with clientId:', currentJob.clientId);
+	console.log('Saving job with clientId:', currentJob.clientId);
 
-    const cleanPayload = {
-      title: currentJob.title || 'Untitled Job',
-      start: currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start),
-      end: currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end),
-      clientId: currentJob.clientId,
-      assignedCrew: currentJob.assignedCrew || [],
-      areaOfTown: currentJob.areaOfTown,
-      notes: currentJob.notes || undefined,
-      billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
-      subtotal,
-      taxRate: BUSINESS_CONFIG.defaultTaxRate,
-      taxAmount,
-      totalAmount,
-      status: isEditing ? (currentJob.status || 'scheduled') : 'scheduled'
-    };
+	const cleanPayload = {
+		title: currentJob.title || 'Untitled Job',
+		start: currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start),
+		end: currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end),
+		clientId: currentJob.clientId,
+		assignedCrew: currentJob.assignedCrew || [],
+		areaOfTown: currentJob.areaOfTown,
+		notes: currentJob.notes || undefined,
+		billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
+		subtotal,
+		taxRate: BUSINESS_CONFIG.defaultTaxRate,
+		taxAmount,
+		totalAmount,
+		status: isEditing ? (currentJob.status || 'scheduled') : 'scheduled'
+	};
 
-    try {
-      if (isEditing && editingJobId) {
-        await updateJob(editingJobId, cleanPayload);
-      } else {
-        await createJob(cleanPayload);
-      }
-      show = false;
-      if (afterSaveCallback) afterSaveCallback();
-    } catch (err) {
-      console.error('Failed to save job', err);
-      alert('Error saving job - check console');
-    }
-  }
+	try {
+		if (isEditing && editingJobId) {
+			await updateJob(editingJobId, cleanPayload);
+		} else {
+			await createJob(cleanPayload);
+		}
+
+		show = false;                    // close modal immediately
+
+		// )=- Delayed callback so the pull + Dexie merge has time to settle
+		if (afterSaveCallback) {
+			setTimeout(() => {
+				afterSaveCallback();
+			}, 450);
+		}
+	} catch (err) {
+		console.error('Failed to save job', err);
+		alert('Error saving job - check console');
+	}
+}
 
   async function confirmCancel() {
     if (!editingJobId || !selectedCancelReason) return;

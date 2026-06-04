@@ -1,3 +1,4 @@
+<!-- src/lib/components/ClientPicker.svelte -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { db, type Client } from '$lib/db';
@@ -12,9 +13,19 @@
 	let clients = $state<Client[]>([]);
 	let searchTerm = $state('');
 	let isOpen = $state(false);
-	let selectedClient = $state<Client | null>(null);
 	let inputEl = $state<HTMLInputElement>();
 	let buttonEl = $state<HTMLButtonElement>();
+
+	// )=- Much more reliable: selectedClient is now a derived value
+	let selectedClient = $derived.by(() => {
+		if (!value || clients.length === 0) return null;
+		return clients.find(c => 
+			c.id === value || 
+			c.pbId === value
+		) || null;
+
+
+	});
 
 	let filteredClients = $derived.by(() => {
 		const term = searchTerm.toLowerCase().trim();
@@ -28,26 +39,14 @@
 		);
 	});
 
-	// Load clients once
+	// Load clients
 	onMount(async () => {
 		clients = await db.clients.toArray();
-		
-		if (value) {
-			selectedClient = clients.find(c => c.id === value) || null;
-		}
-
 		console.log(`📋 Loaded ${clients.length} clients from Dexie`);
-		console.table(clients.map(c => ({ 
-			id: c.id, 
-			name: c.name, 
-			email: c.email,
-			area: c.areaOfTown 
-		})));
 	});
 
 	function selectClient(client: Client) {
 		value = client.id ?? null;
-		selectedClient = client;
 		searchTerm = ''; 
 		isOpen = false;
 		onSelect(client);
@@ -85,7 +84,6 @@
 	});
 </script>
 
-<!-- HTML and styles remain exactly the same as your current file -->
 <div class="client-picker" style="position: relative; width: 100%;">
 	<label for={id} class="sr-only">Select client</label>
 
