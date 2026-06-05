@@ -17,9 +17,9 @@
 
 <script lang="ts">
   import { createJob, updateJob, cancelJob } from '$lib/db';
-  import { BUSINESS_CONFIG } from '$lib/config';
   import ClientPicker from './ClientPicker.svelte';
   import BillableItemRow from './BillableItemRow.svelte';
+  import { optionsStore } from '$lib/stores/options.svelte';
 
   let show = $state(false);
   let isEditing = $state(false);
@@ -33,21 +33,36 @@
     end: new Date(),
     clientId: null,
     assignedCrew: [],
-    areaOfTown: 'thane',
+    areaOfTown: '',
     notes: '',
     cancelReason: '',
     cancelNotes: '',
-    billableItems: [{ title: 'Full Exterior Window Cleaning', price: 100, quantity: 1, total: 100 }]
+    billableItems: [{ title: '', price: 0, quantity: 1, total: 0 }]
   });
 
   let crewOptions = $state<string[]>([]);
   let afterSaveCallback: (() => void) | null = null;
 
-  // Register this instance so openJobModal can call it
+  let areaOptions = $derived(
+    (optionsStore.data?.areasOfTown || []).map((area: any) => ({
+      value: area.id,
+      label: area.label,
+      color: area.color
+    }))
+  );
+
+  let cancelReasons = $derived(optionsStore.data?.cancelReasons || []);
+  let defaultBillableItems = $derived(optionsStore.data?.defaultBillableItems || []);
+
+  // Register this instance
   $effect(() => {
     modalInstance = {
-      open: (job?: any, callback?: () => void) => {
+      open: async (job?: any, callback?: () => void) => {
         afterSaveCallback = callback || null;
+
+        if (!optionsStore.data) {
+          await optionsStore.load?.();
+        }
 
         if (job) {
           currentJob = {
@@ -57,24 +72,23 @@
             assignedCrew: job.assignedCrew || [],
             billableItems: job.billableItems?.length 
               ? job.billableItems 
-              : [{ title: job.title || 'Service', price: 100, quantity: 1, total: 100 }]
+              : [{ title: '', price: 0, quantity: 1, total: 0 }]
           };
-          isEditing = !!job.id;
+          isEditing = true;
           editingJobId = job.id || null;
         } else {
           const now = new Date();
-
           currentJob = {
             title: 'Full Exterior Window Cleaning',
             start: now,
             end: new Date(now.getTime() + 4 * 60 * 60 * 1000),
             clientId: null,
             assignedCrew: [],
-            areaOfTown: 'thane',
+            areaOfTown: areaOptions[0]?.value || '',
             notes: '',
             cancelReason: '',
             cancelNotes: '',
-            billableItems: [{ title: 'Full Exterior Window Cleaning', price: 100, quantity: 1, total: 100 }]
+            billableItems: [{ title: '', price: 0, quantity: 1, total: 0 }]
           };
           isEditing = false;
           editingJobId = null;
@@ -96,15 +110,11 @@
     });
   });
 
-  const areaOptions = Object.entries(BUSINESS_CONFIG.areasOfTown).map(([key, value]) => ({
-    value: key,
-    label: value.label
-  }));
-
-  const cancelReasons = BUSINESS_CONFIG.cancelReasons;
-
   let subtotal = $derived(currentJob.billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0));
-  let taxAmount = $derived(Math.round(subtotal * BUSINESS_CONFIG.defaultTaxRate * 100) / 100);
+  
+  // )=- Proper tax rate handling
+  let taxRateDecimal = $derived((optionsStore.data?.taxRate || 8) / 100);
+  let taxAmount = $derived(Math.round(subtotal * taxRateDecimal * 100) / 100);
   let totalAmount = $derived(subtotal + taxAmount);
 
   function toDatetimeLocal(date: Date | null | undefined): string {
@@ -130,50 +140,51 @@
     }
   }
 
+  function getAreaColor(areaId: string | undefined): string {
+    if (!areaId || !areaOptions.length) return '#64748b';
+    const area = areaOptions.find((a: any) => a.value === areaId);
+    return area?.color || '#64748b';
+  }
+
   async function saveJob() {
-	if (!currentJob.clientId) {
-		alert('Please select a client');
-		return;
-	}
+    if (!currentJob.clientId) {
+      alert('Please select a client');
+      return;
+    }
 
-	console.log('Saving job with clientId:', currentJob.clientId);
+    const cleanPayload = {
+      title: currentJob.title || 'Untitled Job',
+      start: currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start),
+      end: currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end),
+      clientId: currentJob.clientId,
+      assignedCrew: currentJob.assignedCrew || [],
+      areaOfTown: currentJob.areaOfTown,
+      notes: currentJob.notes || undefined,
+      billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
+      subtotal,
+      taxRate: optionsStore.data?.taxRate || 8,
+      taxAmount,
+      totalAmount,
+      status: isEditing ? (currentJob.status || 'scheduled') : 'scheduled'
+    };
 
-	const cleanPayload = {
-		title: currentJob.title || 'Untitled Job',
-		start: currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start),
-		end: currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end),
-		clientId: currentJob.clientId,
-		assignedCrew: currentJob.assignedCrew || [],
-		areaOfTown: currentJob.areaOfTown,
-		notes: currentJob.notes || undefined,
-		billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
-		subtotal,
-		taxRate: BUSINESS_CONFIG.defaultTaxRate,
-		taxAmount,
-		totalAmount,
-		status: isEditing ? (currentJob.status || 'scheduled') : 'scheduled'
-	};
+    try {
+      if (isEditing && editingJobId) {
+        await updateJob(editingJobId, cleanPayload);
+      } else {
+        await createJob(cleanPayload);
+      }
 
-	try {
-		if (isEditing && editingJobId) {
-			await updateJob(editingJobId, cleanPayload);
-		} else {
-			await createJob(cleanPayload);
-		}
+      show = false;
 
-		show = false;                    // close modal immediately
-
-		// )=- Delayed callback so the pull + Dexie merge has time to settle
-		if (afterSaveCallback) {
-			setTimeout(() => {
-				afterSaveCallback();
-			}, 450);
-		}
-	} catch (err) {
-		console.error('Failed to save job', err);
-		alert('Error saving job - check console');
-	}
-}
+      if (afterSaveCallback) {
+        setTimeout(() => afterSaveCallback(), 450);
+      }
+    } catch (err) {
+      console.error('Failed to save job', err);
+      alert('Error saving job - check console');
+    }
+  }
 
   async function confirmCancel() {
     if (!editingJobId || !selectedCancelReason) return;
@@ -244,11 +255,21 @@
         <!-- Area -->
         <div class="new-job-modal__field">
           <label for="job-area" class="new-job-modal__label">Area of Town</label>
-          <select id="job-area" class="new-job-modal__input" bind:value={currentJob.areaOfTown}>
-            {#each areaOptions as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
+          <div 
+            class="area-field-wrapper"
+            style="border-left: 6px solid {getAreaColor(currentJob.areaOfTown)};"
+          >
+            <select 
+              id="job-area" 
+              class="new-job-modal__input area-select"
+              bind:value={currentJob.areaOfTown}
+            >
+              <option value="">Select area...</option>
+              {#each areaOptions as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
         </div>
 
         <!-- Crew -->
@@ -310,12 +331,12 @@
         <!-- Totals -->
         <div class="totals-summary">
           <div>Subtotal: <strong>${subtotal.toFixed(2)}</strong></div>
-          <div>Tax (8%): <strong>${taxAmount.toFixed(2)}</strong></div>
+          <div>Tax ({(optionsStore.data?.taxRate || 8).toFixed(1)}%):</div>
           <div class="totals-summary__total">Total: <strong>${totalAmount.toFixed(2)}</strong></div>
         </div>
       </div>
 
-      <!-- Footer -->
+      <!-- Sticky Footer -->
       <div class="new-job-modal__footer">
         {#if isEditing}
           <button class="cancel-job-text" onclick={() => showCancelConfirm = true}>
@@ -385,7 +406,6 @@
 {/if}
 
 <style>
-  /* Your existing styles remain the same */
   .new-job-modal {
     position: fixed;
     inset: 0;
@@ -404,7 +424,8 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     max-height: 95vh;
     overflow-y: auto;
-    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
   }
 
   .new-job-modal__title {
@@ -412,9 +433,13 @@
     font-size: 1.35rem;
     font-weight: 600;
     color: #1e2937;
+    padding: 1.5rem 1rem 0;
   }
 
   .new-job-modal__form {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 1rem;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -472,6 +497,7 @@
     border-radius: 8px;
     border: 1px solid #e2e8f0;
     font-size: 1.05rem;
+    margin-bottom: 0.75rem;
   }
 
   .totals-summary__total {
@@ -481,6 +507,7 @@
     margin-top: 0.75rem;
   }
 
+  /* Sticky Footer */
   .new-job-modal__footer {
     position: sticky;
     bottom: 0;
@@ -493,6 +520,7 @@
     align-items: center;
     z-index: 10;
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+    margin-top: auto;
   }
 
   .new-job-modal__btn {
@@ -520,6 +548,27 @@
     margin-top: 0.5rem;
   }
 
+  /* Colored Area Field */
+  .area-field-wrapper {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: white;
+    min-height: 52px;
+  }
+
+  .area-select {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 1rem;
+    outline: none;
+  }
+
+  /* Cancel Confirmation */
   .cancel-confirm-modal {
     position: fixed;
     inset: 0;

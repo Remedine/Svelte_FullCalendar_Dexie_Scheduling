@@ -46,14 +46,6 @@
 	// Dynamic areas from options
 	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
 
-	function formatPhone(value: string): string {
-		const digits = value.replace(/\D/g, '');
-		if (digits.length === 0) return '';
-		if (digits.length <= 3) return `(${digits}`;
-		if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-	}
-
 	$effect(() => {
 		if (client) {
 			formData = { ...client };
@@ -73,6 +65,20 @@
 		}
 		errors = {};
 	});
+
+	function formatPhone(value: string): string {
+		const digits = value.replace(/\D/g, '');
+		if (digits.length === 0) return '';
+		if (digits.length <= 3) return `(${digits}`;
+		if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+	}
+
+	function getAreaColor(areaId: string | undefined): string {
+		if (!areaId || !areaOptions.length) return '#64748b';
+		const area = areaOptions.find((a: any) => a.id === areaId);
+		return area?.color || '#64748b';
+	}
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
@@ -164,13 +170,20 @@
 					</div>
 				</div>
 
+				<!-- Area with Colored Left Border -->
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Area of Town <span class="required">*</span></label>
-					<select bind:value={formData.areaOfTown} class="client-form-modal__input">
-						{#each areaOptions as area}
-							<option value={area.id}>{area.label}</option>
-						{/each}
-					</select>
+					<div 
+						class="area-field-wrapper"
+						style="border-left: 6px solid {getAreaColor(formData.areaOfTown)};"
+					>
+						<select bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
+							<option value="">Select area...</option>
+							{#each areaOptions as area}
+								<option value={area.id}>{area.label}</option>
+							{/each}
+						</select>
+					</div>
 					{#if errors.areaOfTown}<small class="error">{errors.areaOfTown}</small>{/if}
 				</div>
 
@@ -202,7 +215,6 @@
 {/if}
 
 <style>
-	/* Your existing styles (unchanged) */
 	.client-form-modal {
 		position: fixed;
 		inset: 0;
@@ -262,7 +274,7 @@
 		border-radius: 6px;
 		font-size: 1rem;
 		width: 100%;
-		box-sizing: box-sizing;
+		box-sizing: border-box;
 	}
 
 	.error {
@@ -294,6 +306,26 @@
 	.client-form-modal__btn--primary {
 		background: #3b82f6;
 		color: white;
+	}
+
+	/* Colored Area Field */
+	.area-field-wrapper {
+		display: flex;
+		align-items: center;
+		padding: 0.75rem 1rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		background: white;
+		min-height: 52px;
+	}
+
+	.area-select {
+		flex: 1;
+		border: none;
+		background: transparent;
+		padding: 0;
+		font-size: 1rem;
+		outline: none;
 	}
 
 	@container client-form (max-width: 520px) {

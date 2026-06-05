@@ -1,28 +1,31 @@
 // src/lib/stores/options.svelte.ts
-// )=- Fixed logic bug in load() + kept the working Svelte 5 $state pattern
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-
 import { db } from '$lib/db';
 import { pb } from '$lib/db/pb';
 
 export let optionsStore = $state({
 	data: null as any,
+	isLoading: false,
 
 	async load() {
+		if (this.isLoading) return; // prevent multiple simultaneous calls
+
 		try {
-			// 1. Try local Dexie first
+			this.isLoading = true;
+
+			// Try local first
 			let options = await db.options.get(1);
 
 			if (!options) {
-				// 2. Nothing local → pull from PocketBase (pullFromPB already sets this.data)
 				await this.pullFromPB();
-				return; // ← important: exit here so we don't overwrite good data
+				return;
 			}
 
-			// 3. We have local data
 			this.data = options;
+			console.log('✅ Options loaded from Dexie');
 		} catch (err) {
 			console.error('Failed to load options:', err);
+		} finally {
+			this.isLoading = false;
 		}
 	},
 
@@ -30,7 +33,10 @@ export let optionsStore = $state({
 		if (!pb?.authStore?.isValid) return false;
 
 		try {
-			const record = await pb.collection('options').getFirstListItem('key="global"');
+			// )=- Disable auto-cancellation
+			const record = await pb.collection('options').getFirstListItem('key="global"', {
+				$autoCancel: false
+			});
 
 			const serverOptions = {
 				id: 1,
@@ -40,7 +46,7 @@ export let optionsStore = $state({
 			};
 
 			await db.options.put(serverOptions);
-			this.data = serverOptions; // )=- This triggers all $derived values
+			this.data = serverOptions;
 			console.log('✅ Options pulled from PocketBase');
 			return true;
 		} catch (err: any) {
@@ -51,6 +57,7 @@ export let optionsStore = $state({
 		}
 	},
 
+	// ... keep your existing saveToDexie and syncToPB methods unchanged ...
 	async saveToDexie(updatedData: any) {
 		if (!updatedData) return;
 		try {
@@ -95,7 +102,9 @@ export let optionsStore = $state({
 			console.log('📤 Sending to PocketBase:', pbPayload);
 
 			try {
-				const existing = await pb.collection('options').getFirstListItem('key="global"');
+				const existing = await pb
+					.collection('options')
+					.getFirstListItem('key="global"', { $autoCancel: false });
 				const record = await pb.collection('options').update(existing.id, pbPayload);
 				console.log('✅ Options UPDATED in PocketBase');
 				return record;
