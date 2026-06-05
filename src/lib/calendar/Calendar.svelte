@@ -7,25 +7,17 @@
 	import interactionPlugin from '@fullcalendar/interaction';
 	import multiMonthPlugin from '@fullcalendar/multimonth';
 	import { getJobsForRange, updateJobDates, updateJob, cancelJob } from '$lib/db/index';
-	import { BUSINESS_CONFIG } from '$lib/config';
-	import type { AreaOfTown } from '$lib/config';
+	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
 	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
-	
 
 	let calendarEl: HTMLDivElement;
 	let calendarInstance: Calendar | null = $state(null);
 
-	// Simplified state (modal now lives in JobFormModal.svelte)
-	let showJobForm = $state(false);
-	let currentJob = $state<any>(null);
-	let isEditing = $state(false);
-	let editingJobId = $state<string | null>(null);
-
 	let crewOptions = $state<string[]>([]);
 
-	// Load active crew members
+	// Load crew members
 	$effect(() => {
 		db.users
 			.toArray()
@@ -41,7 +33,26 @@
 			});
 	});
 
+	// )=- Ensure options are loaded and refresh calendar when areas change
+	$effect(() => {
+		if (optionsStore.data?.areasOfTown) {
+			calendarInstance?.refetchEvents();
+		} else {
+			optionsStore.load?.();
+		}
+	});
+
+	function getEventColor(areaId: string): string {
+		if (!areaId || !optionsStore.data?.areasOfTown?.length) {
+			return '#6b7280'; // fallback gray
+		}
+		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === areaId);
+		return area?.color || '#6b7280';
+	}
+
 	onMount(async () => {
+		await optionsStore.load?.();
+
 		calendarInstance = new Calendar(calendarEl, {
 			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin],
 			initialView: 'timeGridWeek',
@@ -74,11 +85,7 @@
 
 				try {
 					await updateJobDates(jobId, info.event.start!, info.event.end!);
-
-					// )=- Small delay so the pull + Dexie merge has time to settle
-					setTimeout(() => {
-						calendarInstance?.refetchEvents();
-					}, 400);
+					setTimeout(() => calendarInstance?.refetchEvents(), 400);
 				} catch (err) {
 					console.error('❌ Update failed', err);
 					info.revert();
@@ -91,12 +98,7 @@
 
 				try {
 					await updateJobDates(jobId, info.event.start!, info.event.end!);
-					console.log(`✅ Job ${jobId} resized successfully`);
-
-					// )=- Force refetch so the modal sees the new end time
-					setTimeout(() => {
-						calendarInstance?.refetchEvents();
-					}, 300);
+					setTimeout(() => calendarInstance?.refetchEvents(), 300);
 				} catch (err) {
 					console.error('❌ Resize failed', err);
 					info.revert();
@@ -138,10 +140,6 @@
 
 		calendarInstance.render();
 	});
-
-	function getEventColor(area: string): string {
-		return BUSINESS_CONFIG.areasOfTown?.[area as keyof typeof BUSINESS_CONFIG.areasOfTown]?.color || '#6b7280';
-	}
 
 	$effect(() => {
 		return () => calendarInstance?.destroy();

@@ -1,64 +1,65 @@
 <!-- src/lib/components/BillableItemRow.svelte -->
 <script lang="ts">
-    import { BUSINESS_CONFIG } from '$lib/config';
-    import type { BillableItemTemplate } from '$lib/config';
+	import { optionsStore } from '$lib/stores/options.svelte';
 
-    let {
-        item = $bindable({
-            title: 'Full Exterior Window Cleaning',
-            price: 0,
-            quantity: 1,
-            total: 0
-        }),
-        onRemove = () => {},
-        autofocusPrice = false
-    } = $props();
+	let {
+		item = $bindable({
+			title: '',
+			price: 0,
+			quantity: 1,
+			total: 0
+		}),
+		onRemove = () => {},
+		autofocusPrice = false
+	} = $props();
 
-    const templates = BUSINESS_CONFIG.commonBillableItems;
+	let templates = $derived(optionsStore.data?.defaultBillableItems || []);
 
-    let showSuggestions = $state(false);
+	let showSuggestions = $state(false);
 
-    let filteredTemplates = $derived.by(() => {
-        if (!item.title) return templates;
-        const term = item.title.toLowerCase().trim();
-        return templates.filter(t => t.title.toLowerCase().includes(term));
-    });
+	let filteredTemplates = $derived.by(() => {
+		if (!item.title) return templates;
+		const term = item.title.toLowerCase().trim();
+		return templates.filter((t: any) => 
+			t.title.toLowerCase().includes(term)
+		);
+	});
 
-    $effect(() => {
-        if (autofocusPrice && item.price === 0) {
-            setTimeout(() => {
-                const priceInput = document.querySelector('.billable-item-row__input--price:last-of-type') as HTMLInputElement;
-                priceInput?.focus();
-                priceInput?.select();
-            }, 50);
-        }
-    });
+	$effect(() => {
+		if (autofocusPrice && item.price === 0) {
+			setTimeout(() => {
+				const priceInput = document.querySelector('.billable-item-row__input--price:last-of-type') as HTMLInputElement;
+				priceInput?.focus();
+				priceInput?.select();
+			}, 50);
+		}
+	});
 
-    $effect(() => {
-        item.total = (item.price || 0) * (item.quantity || 1);
-    });
+	$effect(() => {
+		item.total = (item.price || 0) * (item.quantity || 1);
+	});
 
-    function selectTemplate(template: BillableItemTemplate) {
-        item.title = template.title;
-        item.price = template.price;
-        showSuggestions = false;
-    }
+	function selectTemplate(template: any) {
+		item.title = template.title;
+		item.price = template.price || 0;
+		item.quantity = template.quantity || 1;
+		showSuggestions = false;
+	}
 
-    function handleFocus() {
-        if (item.title === 'Full Exterior Window Cleaning') item.title = '';
-        showSuggestions = true;
-    }
+	function handleFocus() {
+		if (!item.title) showSuggestions = true;
+	}
 
-    function handleBlur() {
-        setTimeout(() => showSuggestions = false, 180);
-    }
+	function handleBlur() {
+		setTimeout(() => showSuggestions = false, 180);
+	}
 
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Enter' && filteredTemplates.length > 0) {
-            e.preventDefault();
-            selectTemplate(filteredTemplates[0]);
-        }
-    }
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && filteredTemplates.length > 0) {
+			e.preventDefault();
+			selectTemplate(filteredTemplates[0]);
+		}
+	}
 </script>
 
 <div class="billable-item-row">
