@@ -172,17 +172,16 @@
 	.main-content {
 		flex: 1;
 		min-height: 0;
-		overflow: auto;
 		padding: 0;
 	}
 
-	/* Responsive adjustments */
+	/* Responsive adjustments 
 	@media (max-width: 768px) {
 		.top-nav__menu {
 			gap: 1rem;
 			font-size: 0.95rem;
 		}
-	}
+	}*/
 	/*  User section styling */
 	.top-nav__user {
 		display: flex;

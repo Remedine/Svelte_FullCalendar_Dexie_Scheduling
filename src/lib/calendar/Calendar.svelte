@@ -1,39 +1,28 @@
 <!-- src/lib/calendar/Calendar.svelte -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	// )=- Final cleaned version after successful debugging.
+	// )=- Removed unused crewOptions state (was never referenced).
+	// )=- All core functionality preserved. File is now leaner and maintainable.
+	// )=- Pure Svelte 5 runes + strict BEM. References Remedine/Svelte_FullCalendar_Dexie_Scheduling.
+
 	import { Calendar } from '@fullcalendar/core';
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import timeGridPlugin from '@fullcalendar/timegrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import multiMonthPlugin from '@fullcalendar/multimonth';
-	import { getJobsForRange, updateJobDates, updateJob, cancelJob } from '$lib/db/index';
+	import { browser } from '$app/environment';
+	import { getJobsForRange, updateJobDates } from '$lib/db/index';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
 	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
 
-	let calendarEl: HTMLDivElement;
-	let calendarInstance: Calendar | null = $state(null);
+	let calendarEl = $state<HTMLDivElement | null>(null);
+	let calendarInstance = $state<Calendar | null>(null);
 
-	let crewOptions = $state<string[]>([]);
+	// Optional: keep this effect if you plan to use crewOptions later for filtering
+	// $effect(() => { ... load crew ... });
 
-	// Load crew members
-	$effect(() => {
-		db.users
-			.toArray()
-			.then(users => {
-				crewOptions = users
-					.filter(u => u.active === true)
-					.map(u => u.name)
-					.sort();
-			})
-			.catch(err => {
-				console.error('Failed to load crew:', err);
-				crewOptions = [];
-			});
-	});
-
-	// )=- Ensure options are loaded and refresh calendar when areas change
 	$effect(() => {
 		if (optionsStore.data?.areasOfTown) {
 			calendarInstance?.refetchEvents();
@@ -43,17 +32,20 @@
 	});
 
 	function getEventColor(areaId: string): string {
-		if (!areaId || !optionsStore.data?.areasOfTown?.length) {
-			return '#6b7280'; // fallback gray
-		}
+		if (!areaId || !optionsStore.data?.areasOfTown?.length) return '#6b7280';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === areaId);
 		return area?.color || '#6b7280';
 	}
 
-	onMount(async () => {
+	$effect(() => {
+		if (!browser || !calendarEl || calendarInstance) return;
+		initCalendar(calendarEl);
+	});
+
+	async function initCalendar(el: HTMLDivElement) {
 		await optionsStore.load?.();
 
-		calendarInstance = new Calendar(calendarEl, {
+		calendarInstance = new Calendar(el, {
 			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin],
 			initialView: 'timeGridWeek',
 			editable: true,
@@ -68,139 +60,119 @@
 			},
 
 			select: (info) => {
-				const startTime = info.start;
-				const endTime = info.end || new Date(startTime.getTime() + 4 * 60 * 60 * 1000);
-
-				openJobModal({
-					start: startTime,
-					end: endTime
-				}, () => {
-					calendarInstance?.refetchEvents();
-				});
+				openJobModal(
+					{ start: info.start, end: info.end || new Date(info.start.getTime() + 4 * 60 * 60 * 1000) },
+					() => calendarInstance?.refetchEvents()
+				);
 			},
 
 			eventDrop: async (info) => {
-				const jobId = info.event.id;
-				if (!jobId) return;
-
 				try {
-					await updateJobDates(jobId, info.event.start!, info.event.end!);
+					await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
 					setTimeout(() => calendarInstance?.refetchEvents(), 400);
-				} catch (err) {
-					console.error('❌ Update failed', err);
+				} catch (e) {
 					info.revert();
 				}
 			},
 
 			eventResize: async (info) => {
-				const jobId = info.event.id;
-				if (!jobId) return;
-
 				try {
-					await updateJobDates(jobId, info.event.start!, info.event.end!);
+					await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
 					setTimeout(() => calendarInstance?.refetchEvents(), 300);
-				} catch (err) {
-					console.error('❌ Resize failed', err);
+				} catch (e) {
 					info.revert();
 				}
 			},
 
-			eventClick: async (info) => {
-				const job = info.event.extendedProps as any;
-				if (!job?.id) return;
-
-				openJobModal(job, () => {
-					calendarInstance?.refetchEvents();
-				});
+			eventClick: (info) => {
+				openJobModal(info.event.extendedProps, () => calendarInstance?.refetchEvents());
 			},
 
 			events: async (fetchInfo, successCallback) => {
 				let jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
 
 				if (auth.currentUser?.role === 'crew') {
-					jobs = jobs.filter((job: any) => 
-						job.assignedCrew?.some((crewName: string) => 
-							crewName === auth.currentUser!.name
-						)
-					);
+					jobs = jobs.filter((j: any) => j.assignedCrew?.includes(auth.currentUser!.name));
 				}
 
-				const events = jobs.map((job: any) => ({
-					id: job.id,
-					title: `${job.title} — ${job.assignedCrew.join(', ')}`,
-					start: job.start,
-					end: job.end,
-					backgroundColor: getEventColor(job.areaOfTown),
-					extendedProps: job
-				}));
-
-				successCallback(events);
+				successCallback(
+					jobs.map((job: any) => ({
+						id: job.id,
+						title: `${job.title} — ${job.assignedCrew?.join(', ')}`,
+						start: job.start,
+						end: job.end,
+						backgroundColor: getEventColor(job.areaOfTown),
+						extendedProps: job
+					}))
+				);
 			}
 		});
 
-		calendarInstance.render();
-	});
+		requestAnimationFrame(() => {
+			calendarInstance?.render();
+			calendarInstance?.updateSize();
+		});
+	}
 
 	$effect(() => {
 		return () => calendarInstance?.destroy();
 	});
 </script>
 
-<div class="calendar-wrapper">
-	<!-- Role indicator -->
-	<div class="calendar-header__role">
+<div class="calendar__wrapper">
+	<div class="calendar__header">
 		{#if auth.currentUser}
-			<span class="calendar-header__role-badge {auth.currentUser.role}">
+			<span
+				class="calendar__role-badge"
+				class:calendar__role-badge--admin={auth.currentUser.role === 'admin'}
+				class:calendar__role-badge--crew={auth.currentUser.role === 'crew'}
+			>
 				{auth.currentUser.role === 'admin' ? '👑 Admin - All Jobs' : `👷 Crew View - ${auth.currentUser.name}`}
 			</span>
 		{/if}
 	</div>
 
-	<div bind:this={calendarEl} class="calendar-container"></div>
+	<div bind:this={calendarEl} class="calendar__container"></div>
 </div>
 
-<!-- Reusable Job Modal -->
 <JobFormModal />
 
 <style>
-	.calendar-wrapper {
-		height: 100vh;
+	.calendar__wrapper {
+		flex: 1;
+		min-height: 2000px;           /* Safety net so it never collapses */
 		display: flex;
 		flex-direction: column;
-		padding: 1rem;
+		padding: 0.5rem;
 		background: #f8fafc;
+		margin-bottom: 20px !important;
 	}
 
-	.calendar-container {
-		flex: 1;
-		min-height: 0;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		overflow: hidden;
-	}
-
-	.calendar-header__role {
-		padding: 0.75rem 1rem;
+	.calendar__header {
+		padding: 0.5rem 0.75rem;
 		text-align: right;
 		background: white;
 		border-bottom: 1px solid #e2e8f0;
+		flex-shrink: 0;
 	}
 
-	.calendar-header__role-badge {
+	.calendar__role-badge {
 		display: inline-block;
-		padding: 0.4rem 1rem;
+		padding: 0.35rem 0.9rem;
 		border-radius: 9999px;
-		font-size: 0.9rem;
+		font-size: 0.85rem;
 		font-weight: 600;
 	}
 
-	.calendar-header__role-badge.admin {
-		background: #1e40af;
-		color: white;
-	}
+	.calendar__role-badge--admin { background: #1e40af; color: white; }
+	.calendar__role-badge--crew { background: #166534; color: white; }
 
-	.calendar-header__role-badge.crew {
-		background: #166534;
-		color: white;
+	.calendar__container {
+		flex: 1;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		max-width: 98vw;
+		height: 2000px;
 	}
+	
 </style>
