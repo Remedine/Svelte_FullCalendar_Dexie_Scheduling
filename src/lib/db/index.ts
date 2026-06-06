@@ -1,6 +1,4 @@
 // src/lib/db/index.ts
-// )=- Cleaned - removed BUSINESS_CONFIG and legacy area mapping
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 
 import Dexie, { type EntityTable } from 'dexie';
 import * as bcrypt from 'bcryptjs';
@@ -12,7 +10,7 @@ import('$lib/stores/auth.svelte').then((module) => {
 	auth = module.auth;
 });
 
-// ==================== SAFE CLONE HELPER (ADDED - fixes DataCloneError) ====================
+// SAFE CLONE HELPER
 function safeClone<T>(obj: T): T {
 	if (!obj) return obj;
 	try {
@@ -29,8 +27,23 @@ function safeClone<T>(obj: T): T {
 		return obj;
 	}
 }
-// ==========================================================================================
 
+
+//AREA MAPPING HELPER
+const AREA_ID_TO_OLD_VALUE: Record<string, string> = {
+	'area-downtown': 'downtown',
+	'area-north': 'thane',
+	'area-south': 'douglas'
+};
+
+function getValidAreaOfTown(area: string | undefined): string {
+	if (!area) return 'downtown';
+	if (['thane', 'downtown', 'douglas'].includes(area)) return area;
+	return AREA_ID_TO_OLD_VALUE[area] || 'downtown';
+}
+
+
+// Interface Types
 export interface Client {
 	id?: string;
 	pbId?: string;
@@ -39,7 +52,7 @@ export interface Client {
 	serviceAddressCity: string;
 	serviceAddressState: string;
 	serviceAddressZip: string;
-	areaOfTown: string;
+	areaOfTown: string; // )=- Changed from enum to string (supports dynamic areas from options)
 	preferredBillingMethod: 'email' | 'check' | 'invoice';
 	phone: string;
 	email: string;
@@ -66,7 +79,7 @@ export interface Job {
 	taxRate: number;
 	taxAmount: number;
 	totalAmount: number;
-	areaOfTown: string;
+	areaOfTown: string; // )=- Changed to string for dynamic areas
 	notes?: string;
 	cancelReason?: string;
 	cancelNotes?: string;
@@ -101,11 +114,14 @@ export interface AppOptions {
 		hours?: number;
 		isDefault?: boolean;
 	}>;
-	areasOfTown: Array<{
-		id: string;
-		label: string;
-		color: string;
-	}>;
+	areasOfTown: Record<
+		string,
+		{
+			label: string;
+			color: string;
+			sortOrder: number;
+		}
+	>;
 	cancelReasons: string[];
 	invoiceDueDays: number;
 	lastUpdated: Date;
@@ -161,7 +177,7 @@ export async function createJob(jobData: any): Promise<string> {
 		start: new Date(jobData.start),
 		end: new Date(jobData.end),
 		assignedCrew: [...(jobData.assignedCrew || [])],
-		areaOfTown: jobData.areaOfTown, // )=- Direct use of dynamic area ID
+		areaOfTown: getValidAreaOfTown(jobData.areaOfTown),
 		status: 'scheduled' as const,
 		notes: jobData.notes || undefined,
 		createdAt: new Date(),
@@ -170,7 +186,7 @@ export async function createJob(jobData: any): Promise<string> {
 		subtotal:
 			jobData.subtotal ||
 			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
-		taxRate: jobData.taxRate || 8,
+		taxRate: BUSINESS_CONFIG.defaultTaxRate,
 		taxAmount: jobData.taxAmount || 0,
 		totalAmount: jobData.totalAmount || 0
 	});
@@ -191,12 +207,12 @@ export async function createJob(jobData: any): Promise<string> {
 }
 
 export async function updateJob(jobId: string, updates: Partial<Job>) {
+
 	const resolvedUpdates = { ...updates };
 
 	if (resolvedUpdates.clientId) {
-		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId);
+		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId)
 	}
-
 	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
 	await db.jobs.update(jobId, safeUpdates);
 
@@ -252,6 +268,7 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 
 	const realId = job.pbId || job.id || jobId;
 
+	// )=- Resolve clientId to real PB ID for consistency (even on date-only updates)
 	const resolvedClientId = job.clientId ? await resolveClientPbId(job.clientId) : undefined;
 
 	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000);
@@ -302,6 +319,7 @@ export async function createClient(
 
 	const newClient = safeClone({
 		...clientData,
+		areaOfTown: getValidAreaOfTown(clientData.areaOfTown),
 		id: newId,
 		createdAt: new Date(),
 		updatedAt: new Date()
@@ -322,8 +340,10 @@ export async function createClient(
 }
 
 export async function updateClient(clientId: string, updates: Partial<Client>) {
+	// )=- Merge updates with fresh timestamp for both local and queue
 	const mergedUpdates = safeClone({
 		...updates,
+		areaOfTown: getValidAreaOfTown(updates.areaOfTown),
 		updatedAt: new Date()
 	});
 
@@ -333,7 +353,7 @@ export async function updateClient(clientId: string, updates: Partial<Client>) {
 		type: 'update',
 		collection: 'clients',
 		recordId: clientId,
-		data: mergedUpdates
+		data: mergedUpdates // )=- Queue the merged data (includes updatedAt)
 	});
 
 	if (navigator.onLine) await processSyncQueue();
@@ -441,7 +461,10 @@ export async function processSyncQueue() {
 				if (item.type === 'create') {
 					const { id, ...clientData } = item.data;
 
-					const safeClientData = safeClone(clientData);
+					const safeClientData = safeClone({
+						...clientData,
+						areaOfTown: getValidAreaOfTown(clientData.areaOfTown)
+					});
 
 					try {
 						const record = await pb.collection('clients').create(safeClientData);
@@ -454,6 +477,16 @@ export async function processSyncQueue() {
 						}
 
 						console.log(`✅ Client synced to PocketBase: ${record.id}`);
+
+						const pendingDeletes = await db.syncQueue
+							.where('recordId')
+							.equals(item.recordId)
+							.and((q) => q.type === 'delete' && q.collection === 'clients')
+							.toArray();
+
+						for (const q of pendingDeletes) {
+							await db.syncQueue.update(q.id!, { recordId: record.id });
+						}
 					} catch (err: any) {
 						console.error('❌ Client sync failed with 400:', err.response?.data);
 						throw err;
@@ -463,9 +496,13 @@ export async function processSyncQueue() {
 						const currentClient = await db.clients.get(item.recordId);
 						const realId = currentClient?.pbId || currentClient?.id || item.recordId;
 
+						// )=- Clean payload: remove system fields that cause 400 on update
 						const { id, pbId, createdAt, updatedAt, ...cleanData } = item.data;
 
-						const safeCleanData = safeClone(cleanData);
+						const safeCleanData = safeClone({
+							...cleanData,
+							areaOfTown: getValidAreaOfTown(cleanData.areaOfTown)
+						});
 
 						await pb.collection('clients').update(realId, safeCleanData);
 						console.log(`✅ Client updated in PocketBase: ${realId}`);
@@ -510,3 +547,4 @@ export async function processSyncQueue() {
 
 export { db };
 export type { Client, Job, User };
+export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;

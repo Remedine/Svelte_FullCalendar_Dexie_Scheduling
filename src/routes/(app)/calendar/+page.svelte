@@ -1,89 +1,103 @@
 <!-- src/routes/(app)/calendar/+page.svelte -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	// )=- Mobile scrollbar cleanup: overflow hidden on page + content
+	// )=- Ensures only FullCalendar's internal scrollbar appears on mobile.
+	// )=- References Remedine/Svelte_FullCalendar_Dexie_Scheduling
+
 	import { browser } from '$app/environment';
-	import { getUpcomingJobs } from '$lib/db';
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
-  	import { pb, pullJobsFromServer, isAuthenticated } from '$lib/db/pb';
-	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
+	import JobFormModal from '$lib/components/JobFormModal.svelte';
 
 	let showPinReset = $state(false);
-	//  Dynamic import to avoid SSR/prefetch semVer error with FullCalendar
 	let CalendarComponent: any = $state(null);
-	let jobs: any[] = $state([]);
 
-	onMount(async () => {
-	if (auth.currentUser?.forcePinUpdate) {
-		showPinReset = true;
-	}
+	$effect(() => {
+		if (auth.currentUser?.forcePinUpdate) showPinReset = true;
+	});
 
-	jobs = await getUpcomingJobs(30);
-
-	if (browser) {
-		const module = await import('$lib/calendar/Calendar.svelte');
-		CalendarComponent = module.default;
-	}
-});
+	$effect(() => {
+		if (browser && !CalendarComponent) {
+			import('$lib/calendar/Calendar.svelte').then(m => CalendarComponent = m.default);
+		}
+	});
 
 	function handlePinResetSuccess() {
 		showPinReset = false;
-		// Optionally reload to refresh user data
-		window.location.reload();
+		if (browser) window.location.reload();
 	}
 </script>
 
-<div class="page">
-	<header class="page-header">
-		<h1>Schedule</h1>
+<div class="schedule-page">
+	<header class="schedule-page__header">
 		<SyncStatus />
 	</header>
-	<div class="calendar-container">
+
+	<div class="schedule-page__content">
 		{#if CalendarComponent}
 			<svelte:component this={CalendarComponent} />
 		{:else}
-			<div class="calendar-loading">
-				<div class="calendar-loading__spinner"></div>
-				<p>Loading Calendar...</p>
+			<div class="schedule-page__loading">
+				<div class="schedule-page__loading-spinner"></div>
+				<p class="schedule-page__loading-text">Loading Calendar...</p>
 			</div>
 		{/if}
 	</div>
 </div>
-<!-- )=- Forced PIN Reset Modal -->
+
 {#if showPinReset}
 	<PinResetModal onSuccess={handlePinResetSuccess} />
 {/if}
 
 <style>
-	.page {
-		min-height: 0;
+	.schedule-page {
 		display: flex;
 		flex-direction: column;
+		height: 100%;
+		min-height: 100dvh;
+		overflow: hidden;
 		background-color: #f8fafc;
 	}
 
-	.page-header {
-		padding: 1.5rem 1rem 1rem;
+	.schedule-page__header {
+		padding: 0.75rem 1rem;
 		background: white;
 		border-bottom: 1px solid #e2e8f0;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 	}
 
-	.page-header h1 {
+	.schedule-page__title {
 		margin: 0;
-		font-size: 1.75rem;
+		font-size: 1.4rem;
 		font-weight: 700;
 		color: #0f172a;
 	}
 
-	.calendar-container {
+	.schedule-page__content {
 		flex: 1;
-		overflow: hidden;
-		padding: 0.5rem;
-		min-width: 0;
+		min-height: 0;
+		overflow: hidden !important;     /* No intermediate scrollbar */
+		padding: 0.25rem;
 	}
 
-	.calendar-loading {
+	@media (max-width: 640px) {
+		.schedule-page__header {
+			padding: 0.5rem 0.75rem;
+		}
+		.schedule-page__title {
+			font-size: 1.2rem;
+		}
+		.schedule-page__content {
+			padding: 0.125rem;
+		}
+	}
+
+	/* Loading state */
+	.schedule-page__loading {
 		height: 100%;
 		display: flex;
 		flex-direction: column;
@@ -93,9 +107,9 @@
 		color: #64748b;
 	}
 
-	.calendar-loading__spinner {
-		width: 48px;
-		height: 48px;
+	.schedule-page__loading-spinner {
+		width: 42px;
+		height: 42px;
 		border: 5px solid #e2e8f0;
 		border-top: 5px solid #3b82f6;
 		border-radius: 50%;
