@@ -15,7 +15,7 @@
 <style>
 	.split-page {
 		padding: 1rem;
-		max-width: 1400px;
+		
 		margin: 0 auto;
 	}
 
