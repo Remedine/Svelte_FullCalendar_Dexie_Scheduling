@@ -1,6 +1,9 @@
 <!-- src/lib/calendar/MonthPicker.svelte -->
 <script lang="ts">
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { createEventDispatcher } from 'svelte';
+
+	const dispatch = createEventDispatcher();
 
 	let {
 		jobs = [],
@@ -14,7 +17,7 @@
 
 	let currentMonth = $state(new Date().getMonth());
 	let currentYear = $state(new Date().getFullYear());
-	let hoveredDay: any = $state(null);
+	let dragOverDay: any = $state(null);
 
 	const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 	const weekdays = ['Su','Mo','Tu','We','Th','Fr','Sa'];
@@ -65,7 +68,7 @@
 		const dateStr = toDateString(day.date);
 		selectedDate = dateStr;
 		onDateSelect?.(dateStr);
-		hoveredDay = null;
+		dragOverDay = null;
 	}
 
 	function goToToday() {
@@ -81,7 +84,7 @@
 		currentMonth += delta;
 		if (currentMonth > 11) { currentMonth = 0; currentYear++; }
 		if (currentMonth < 0) { currentMonth = 11; currentYear--; }
-		hoveredDay = null;
+		dragOverDay = null;
 	}
 
 	function isToday(date: Date): boolean {
@@ -112,52 +115,29 @@
 	<div class="month-picker__grid">
 		{#each days as day}
 			{@const dayJobs = getJobsForDay(day.date)}
-			
+
 			<button 
 				class="month-picker__day"
 				class:month-picker__day--other={!day.isCurrent}
 				class:month-picker__day--selected={toDateString(day.date) === selectedDate}
 				class:month-picker__day--today={isToday(day.date)}
+				class:month-picker__day--drag-over={dragOverDay === day}
+				data-date={toDateString(day.date)}
 				onclick={() => selectDay(day)}
-				onmouseenter={() => hoveredDay = day}
-				onmouseleave={() => hoveredDay = null}
+
+				ondragover={(e) => {
+					e.preventDefault();
+					dragOverDay = day;
+				}}
+				ondragleave={() => dragOverDay = null}
 			>
 				<span class="month-picker__number">{day.date.getDate()}</span>
-				
+
 				{#if dayJobs.length > 0}
 					<div class="month-picker__dots">
-						{#each dayJobs.slice(0, 7) as job}   <!-- Cap at 7 dots max -->
-							<span 
-								class="month-picker__dot" 
-								style="background-color: {getJobColor(job)}"
-							></span>
+						{#each dayJobs.slice(0, 7) as job}
+							<span class="month-picker__dot" style="background-color: {getJobColor(job)}"></span>
 						{/each}
-					</div>
-				{/if}
-
-				<!-- Hover Popup -->
-				{#if hoveredDay === day && dayJobs.length > 0}
-					<div class="month-picker__tooltip">
-						<div class="tooltip__header">
-							{day.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-						</div>
-						<div class="tooltip__jobs">
-							{#each dayJobs as job}
-								<div class="tooltip__job">
-									<div class="tooltip__job-title">{job.title}</div>
-									<div class="tooltip__job-meta">
-										{new Date(job.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – 
-										{new Date(job.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-										{#if job.areaOfTown}
-											• {optionsStore.data?.areasOfTown?.find((a: any) => a.id === job.areaOfTown)?.label || ''}
-										{/if}
-									</div>
-									{#if job.assignedCrew?.length}
-										<div class="tooltip__crew">{job.assignedCrew.join(', ')}</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
 					</div>
 				{/if}
 			</button>
@@ -257,83 +237,21 @@
 	}
 
 	.month-picker__dots {
-    display: flex;
-    margin-top: 3px;
-    padding-left: 1px;
+		display: flex;
+		gap: 3px;
+		margin-top: 2px;
+		align-items: center;
 	}
 
 	.month-picker__dot {
-		width: 7px;
-		height: 7px;
+		width: 6px;
+		height: 6px;
 		border-radius: 50%;
 		border: 1px solid #111;
-		margin-left: -2.5px;           /* Negative margin = overlap */
-		box-shadow: 0 0 0 0.5px white; /* Optional: helps visibility when overlapping */
 	}
 
-	.month-picker__dot:first-child {
-		margin-left: 0;
-	}
-
-	/* Slightly larger on bigger containers */
-	@container (min-width: 480px) {
-		.month-picker__day { 
-			min-height: 48px; 
-		}
-		.month-picker__dot { 
-			width: 8px; 
-			height: 8px; 
-			margin-left: -3px;
-		}
-	}
-
-	/* Hover Tooltip */
-	.month-picker__tooltip {
-		position: absolute;
-		top: 100%;
-		left: 50%;
-		transform: translateX(-50%);
-		margin-top: 6px;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		padding: 0.6rem;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-		z-index: 100;
-		min-width: 220px;
-		max-width: 280px;
-	}
-
-	.tooltip__header {
-		font-weight: 600;
-		font-size: 0.85rem;
-		margin-bottom: 0.4rem;
-		color: #1e2937;
-	}
-
-	.tooltip__jobs {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
-
-	.tooltip__job {
-		font-size: 0.8rem;
-	}
-
-	.tooltip__job-title {
-		font-weight: 500;
-		color: #1e2937;
-	}
-
-	.tooltip__job-meta {
-		font-size: 0.75rem;
-		color: #64748b;
-	}
-
-	.tooltip__crew {
-		font-size: 0.7rem;
-		color: #475569;
-		margin-top: 1px;
+	.month-picker__day--drag-over {
+		background-color: #dbeafe !important;
+		border: 2px solid #3b82f6;
 	}
 </style>
