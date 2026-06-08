@@ -1,6 +1,5 @@
 <!-- src/lib/components/UserJobsModal.svelte -->
 <script lang="ts">
-  // )=- Pure Svelte 5
   import { db } from '$lib/db';
 
   interface Props {

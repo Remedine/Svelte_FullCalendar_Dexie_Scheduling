@@ -5,8 +5,10 @@
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getJobsForRange, updateJobDates } from '$lib/db/index';
+	import { pullJobsFromServer, pb } from '$lib/db/pb';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
+	import { toast } from '$lib/stores/toast.svelte.ts';
 
 	let dayEl = $state<HTMLDivElement | null>(null);
 	let selectedDate = $state(new Date().toISOString().split('T')[0]);
@@ -21,7 +23,10 @@
 	function toDateString(d: any): string {
 		if (!d) return '';
 		const date = d instanceof Date ? d : new Date(d);
-		return date.toISOString().split('T')[0];
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
 	}
 
 	function getJobColor(job: any): string {
@@ -35,6 +40,26 @@
 		const start = new Date(); start.setMonth(start.getMonth() - 2);
 		const end = new Date(); end.setMonth(end.getMonth() + 2);
 		jobs = await getJobsForRange(start, end);
+	}
+
+	async function refreshAfterUpdate() {
+		const syncToast = toast.show('Syncing changes…', 'info', 0);
+
+		// We fully control the lifetime
+		setTimeout(() => {
+			toast.dismiss(syncToast);
+		}, 900); // ← Change this value to control duration
+
+		try {
+			if (pb.authStore.isValid && navigator.onLine) {
+				await pullJobsFromServer();
+			}
+			await loadData();
+			dayApi?.refetchEvents();
+		} catch (e) {
+			toast.dismiss(syncToast);
+			toast.error('Failed to sync changes');
+		}
 	}
 
 	$effect(() => {
@@ -55,23 +80,20 @@
 
 				select: (info) => {
 					openJobModal({ start: info.start, end: info.end }, () => {
-						loadData();
-						dayApi?.refetchEvents();
+						refreshAfterUpdate();
 					});
 				},
 
 				eventClick: (info) => {
 					openJobModal(info.event.extendedProps, () => {
-						loadData();
-						dayApi?.refetchEvents();
+						refreshAfterUpdate();
 					});
 				},
 
 				eventDrop: async (info) => {
 					try {
 						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await loadData();
-						dayApi?.refetchEvents();
+						await refreshAfterUpdate();
 					} catch (e) {
 						info.revert();
 					}
@@ -80,19 +102,19 @@
 				eventResize: async (info) => {
 					try {
 						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await loadData();
-						dayApi?.refetchEvents();
+						await refreshAfterUpdate();
 					} catch (e) {
 						info.revert();
 					}
 				},
 
 				events: (info, successCallback) => {
-					const selected = parseLocalDate(selectedDate);
+					const selectedStr = selectedDate;
+
 					const dayJobs = jobs.filter((job: any) => {
-						const jobStart = parseLocalDate(toDateString(job.start));
-						const jobEnd = job.end ? parseLocalDate(toDateString(job.end)) : jobStart;
-						return jobStart <= selected && jobEnd >= selected;
+						const jobStartStr = toDateString(job.start);
+						const jobEndStr = job.end ? toDateString(job.end) : jobStartStr;
+						return selectedStr >= jobStartStr && selectedStr <= jobEndStr;
 					});
 
 					successCallback(dayJobs.map((job: any) => ({

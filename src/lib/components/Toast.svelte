@@ -1,11 +1,9 @@
 <!-- src/lib/components/Toast.svelte -->
 <script>
 	import { toast } from '$lib/stores/toast.svelte.ts';
-
-	let toastContainer;
 </script>
 
-<div class="toast-container" bind:this={toastContainer}>
+<div class="toast-container">
 	{#each toast.toasts as t (t.id)}
 		<div class="toast toast--{t.type}">
 			<span class="toast__message">{t.message}</span>
@@ -24,14 +22,14 @@
 	.toast-container {
 		position: fixed;
 		top: 1rem;
-		left: 50%;
-		transform: translateX(-50%);
-		z-index: 10000;
+		left: 0;
+		right: 0;
 		display: flex;
 		flex-direction: column;
+		align-items: center;
 		gap: 0.75rem;
-		width: 92%;
-		max-width: 420px;
+		z-index: 10000;
+		pointer-events: none;
 	}
 
 	.toast {
@@ -44,11 +42,16 @@
 		animation: slideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 		font-size: 1rem;
 		line-height: 1.4;
+		min-width: 280px;
+		max-width: 92vw;
+		pointer-events: auto;
+		background: #3b82f6;
+		color: white;
 	}
 
-	.toast--success { background: #10b981; color: white; }
-	.toast--error   { background: #ef4444; color: white; }
-	.toast--info    { background: #3b82f6; color: white; }
+	.toast--success { background: #10b981; }
+	.toast--error   { background: #ef4444; }
+	.toast--info    { background: #3b82f6; }
 
 	.toast__message {
 		flex: 1;
@@ -76,27 +79,20 @@
 
 	@keyframes slideIn {
 		from {
-			transform: translate(-50%, -30px) scale(0.95);
+			transform: translateY(-20px);
 			opacity: 0;
 		}
 		to {
-			transform: translate(-50%, 0) scale(1);
+			transform: translateY(0);
 			opacity: 1;
 		}
 	}
 
-	/* Mobile-first enhancements */
 	@media (max-width: 640px) {
-		.toast-container {
-			top: 0.85rem;
-			width: 94%;
-			max-width: none;
-		}
-
 		.toast {
-			padding: 1.25rem 1.35rem;
-			border-radius: 14px;
+			padding: 1.2rem 1.35rem;
 			font-size: 1.05rem;
+			min-width: 260px;
 		}
 	}
 </style>

@@ -9,17 +9,22 @@ export const toast = $state({
 
 		const id = Date.now() + Math.random();
 
-		this.toasts = [...this.toasts, {
-			id,
-			message,
-			type
-		}];
+		this.toasts = [
+			...this.toasts,
+			{
+				id,
+				message,
+				type
+			}
+		];
 
 		if (duration > 0) {
 			setTimeout(() => {
 				this.dismiss(id);
 			}, duration);
 		}
+
+		return id; // ← Add this line
 	},
 
 	success(message, duration = 4000) {
@@ -35,7 +40,7 @@ export const toast = $state({
 	},
 
 	dismiss(id) {
-		this.toasts = this.toasts.filter(t => t.id !== id);
+		this.toasts = this.toasts.filter((t) => t.id !== id);
 	},
 
 	clearAll() {
