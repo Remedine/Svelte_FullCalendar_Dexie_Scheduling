@@ -10,7 +10,10 @@
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
+
 	let isExternalDrop = $state(false);
+	let dragMouseListener: ((e: MouseEvent) => void) | null = null;
+	let originalEventRect: DOMRect | null = null;
 
 	let dayEl = $state<HTMLDivElement | null>(null);
 	let selectedDate = $state(getLocalDateString());
@@ -176,86 +179,42 @@
 		});
 	}
 
-	// ==================== HEAVILY LOGGED VERSION ====================
 	async function handleExternalDrop(jobId: string, mouseX: number, mouseY: number) {
-		console.log("📍 [handleExternalDrop] START - jobId:", jobId);
-
 		const job = jobs.find((j: any) => j.id === jobId);
-		if (!job) {
-			console.error("   ❌ Job not found in local jobs array");
-			return;
-		}
-
-		console.log("   Job found:", job.title, "| start:", job.start, "| end:", job.end);
+		if (!job) return;
 
 		const dropTarget = document.elementFromPoint(mouseX, mouseY);
 		const monthPickerDay = dropTarget?.closest('.month-picker__day');
-
-		if (!monthPickerDay) {
-			console.log("   ❌ No .month-picker__day found under mouse");
-			return;
-		}
+		if (!monthPickerDay) return;
 
 		const dateStr = monthPickerDay.getAttribute('data-date');
-		console.log("   dateStr from data attribute:", dateStr);
-
-		if (!dateStr) {
-			console.error("   ❌ dateStr is falsy");
-			return;
-		}
+		if (!dateStr) return;
 
 		const originalStart = new Date(job.start);
 		const newDate = parseLocalDate(dateStr);
 
-		console.log("   originalStart:", originalStart);
-		console.log("   newDate (before time):", newDate);
-
-		// Prevent past dates
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 		if (newDate < today) {
 			toast.error("Cannot move job to a past date");
-			console.log("   ❌ Blocked - date is in the past");
 			return;
 		}
 
-		// Preserve original time
 		newDate.setHours(originalStart.getHours(), originalStart.getMinutes());
-		console.log("   newDate (after time set):", newDate);
 
-		// Calculate new end date safely
 		let newEnd = null;
-
 		if (job.end) {
-			try {
-				const originalEnd = new Date(job.end);
-				console.log("   originalEnd:", originalEnd, "| isValid:", !isNaN(originalEnd.getTime()));
-
-				if (!isNaN(originalEnd.getTime())) {
-					const duration = originalEnd.getTime() - originalStart.getTime();
-					newEnd = new Date(newDate.getTime() + duration);
-					console.log("   newEnd calculated:", newEnd);
-				} else {
-					console.warn("   ⚠️ originalEnd was an invalid date");
-				}
-			} catch (e) {
-				console.error("   ❌ Error calculating newEnd:", e);
+			const originalEnd = new Date(job.end);
+			if (!isNaN(originalEnd.getTime())) {
+				const duration = originalEnd.getTime() - originalStart.getTime();
+				newEnd = new Date(newDate.getTime() + duration);
 			}
-		} else {
-			console.log("   No original end date on job");
 		}
-
-		console.log("   FINAL values → updateJobDates(jobId, newDate, newEnd)");
-		console.log("     jobId:", jobId);
-		console.log("     newDate:", newDate);
-		console.log("     newEnd:", newEnd);
 
 		try {
 			await updateJobDates(jobId, newDate, newEnd);
-			console.log("   ✅ updateJobDates call completed");
 			await refreshAfterUpdate();
 		} catch (e) {
-			console.error("   ❌ updateJobDates threw error:", e);
 			toast.error("Failed to move job");
 		}
 	}
@@ -275,18 +234,28 @@
 				slotMaxTime: '22:00:00',
 				expandRows: false,
 				editable: true,
+				dragScroll: false,
+				eventDragMinDistance: 8,
 
 				eventDidMount: (info) => {
 					info.el.setAttribute('draggable', 'true');
+					info.el.classList.add('fc-event--draggable');
 
-					info.el.addEventListener('dragstart', (e) => {
-						draggedJobId = info.event.id!;
-						console.log("🚀 dragstart captured jobId:", draggedJobId);
-						
-						if (e.dataTransfer) {
-							e.dataTransfer.setData('text/plain', info.event.id!);
-						}
-					});
+					const handle = document.createElement('div');
+					handle.className = 'fc-event__drag-handle';
+
+					handle.innerHTML = `
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+							<rect x="3" y="11" width="18" height="2" rx="1"/>
+							<rect x="11" y="3" width="2" height="18" rx="1"/>
+							<polygon points="12,1 8,6 16,6"/>
+							<polygon points="12,23 8,18 16,18"/>
+							<polygon points="1,12 6,8 6,16"/>
+							<polygon points="23,12 18,8 18,16"/>
+						</svg>
+					`;
+
+					info.el.appendChild(handle);
 				},
 
 				eventClassNames: (arg) => {
@@ -302,75 +271,77 @@
 				},
 
 				eventDragStart: (info) => {
+					const status = info.event.extendedProps?.status;
+
+					if (status === 'completed' || status === 'cancelled') {
+						toast.error("Cannot move cancelled or completed jobs");
+						return;
+					}
+
 					draggedJobId = info.event.id!;
-					console.log("🚀 eventDragStart fired");
-					console.log("   Current view:", currentView);
-					console.log("   draggedJobId set to:", draggedJobId);
-					console.log("   Job title:", info.event.title);
+					originalEventRect = info.el.getBoundingClientRect();
 				},
 
 				eventDragStop: (info) => {
-    if (!draggedJobId) return;
+					if (dragMouseListener) {
+						document.removeEventListener('mousemove', dragMouseListener);
+						dragMouseListener = null;
+					}
+					originalEventRect = null;
 
-    const monthPickerEl = document.querySelector('.month-picker');
-    if (!monthPickerEl) {
-        draggedJobId = null;
-        return;
-    }
+					if (!draggedJobId) return;
 
-    const mouseX = info.jsEvent.clientX;
-    const mouseY = info.jsEvent.clientY;
+					const monthPickerEl = document.querySelector('.month-picker');
+					if (!monthPickerEl) {
+						draggedJobId = null;
+						return;
+					}
 
-    let dropTarget = document.elementFromPoint(mouseX, mouseY);
-    let monthPickerDay = dropTarget?.closest('.month-picker__day');
+					const mouseX = info.jsEvent.clientX;
+					const mouseY = info.jsEvent.clientY;
 
-    if (!monthPickerDay) {
-        const rect = monthPickerEl.getBoundingClientRect();
-        const isOverContainer =
-            mouseX >= rect.left && mouseX <= rect.right &&
-            mouseY >= rect.top && mouseY <= rect.bottom;
+					let dropTarget = document.elementFromPoint(mouseX, mouseY);
+					let monthPickerDay = dropTarget?.closest('.month-picker__day');
 
-        if (isOverContainer) {
-            const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
-            for (const el of dayElements) {
-                const r = el.getBoundingClientRect();
-                if (mouseX >= r.left && mouseX <= r.right && mouseY >= r.top && mouseY <= r.bottom) {
-                    monthPickerDay = el;
-                    break;
-                }
-            }
-        }
-    }
+					if (!monthPickerDay) {
+						const rect = monthPickerEl.getBoundingClientRect();
+						const isOverContainer =
+							mouseX >= rect.left && mouseX <= rect.right &&
+							mouseY >= rect.top && mouseY <= rect.bottom;
 
-    const isOverMonthPicker = !!monthPickerDay;
+						if (isOverContainer) {
+							const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
+							for (const el of dayElements) {
+								const r = el.getBoundingClientRect();
+								if (mouseX >= r.left && mouseX <= r.right && mouseY >= r.top && mouseY <= r.bottom) {
+									monthPickerDay = el;
+									break;
+								}
+							}
+						}
+					}
 
-    if (isOverMonthPicker && monthPickerDay) {
-        isExternalDrop = true;                    // ← Flag set
-        const dateStr = monthPickerDay.getAttribute('data-date');
-        handleExternalDrop(draggedJobId, mouseX, mouseY);
-    }
+					if (monthPickerDay) {
+						isExternalDrop = true;
+						handleExternalDrop(draggedJobId, mouseX, mouseY);
+					}
 
-    draggedJobId = null;
-},
+					draggedJobId = null;
+				},
 
 				select: (info) => {
-					openJobModal({ start: info.start, end: info.end }, () => {
-						refreshAfterUpdate();
-					});
+					openJobModal({ start: info.start, end: info.end }, () => refreshAfterUpdate());
 				},
 
 				eventClick: (info) => {
-					openJobModal(info.event.extendedProps, () => {
-						refreshAfterUpdate();
-					});
+					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
 				},
 
 				eventDrop: async (info) => {
 					if (isExternalDrop) {
 						isExternalDrop = false;
-						return; // Skip FullCalendar's internal time change
+						return;
 					}
-
 					try {
 						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
 						await refreshAfterUpdate();
@@ -598,7 +569,49 @@
 	.status-completed { color: #166534; }
 	.status-cancelled { color: #991b1b; }
 
-	/* Event Styling */
+	/* === Visual Drag Handle (Top Right) === */
+	:global(.fc-event--draggable) {
+		position: relative;
+	}
+
+	/* Hide in Month view */
+	:global(.fc-dayGridMonth-view .fc-event__drag-handle) {
+		display: none !important;
+	}
+
+	:global(.fc-event__drag-handle) {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		width: 16px;
+		height: 16px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: grab;
+		z-index: 30;
+		opacity: 0.9;
+		transition: opacity 0.15s ease;
+		pointer-events: auto;
+	}
+
+	:global(.fc-event__drag-handle svg) {
+		filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+	}
+
+	:global(.fc-event--draggable:hover) .fc-event__drag-handle {
+		opacity: 1;
+	}
+
+	:global(.fc-event__drag-handle:hover) {
+		cursor: grab;
+	}
+
+	:global(.fc-event--draggable:hover) {
+		box-shadow: 0 0 0 1px #3b82f6;
+	}
+
+	/* Event status styling */
 	:global(.event-completed) { opacity: 0.55; }
 	:global(.event-completed .fc-event-title) { text-decoration: line-through; }
 	:global(.event-cancelled) { opacity: 0.65; border-style: dashed !important; cursor: not-allowed; }
