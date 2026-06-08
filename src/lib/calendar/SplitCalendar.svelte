@@ -11,9 +11,18 @@
 	import { toast } from '$lib/stores/toast.svelte.ts';
 
 	let dayEl = $state<HTMLDivElement | null>(null);
-	let selectedDate = $state(new Date().toISOString().split('T')[0]);
+	let selectedDate = $state(getLocalDateString());
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
+	let isSyncing = $state(false);
+
+	// Get today's date in local time (avoids UTC shift bug)
+	function getLocalDateString(date: Date = new Date()): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	}
 
 	function parseLocalDate(dateStr: string): Date {
 		const [y, m, d] = dateStr.split('-').map(Number);
@@ -43,12 +52,12 @@
 	}
 
 	async function refreshAfterUpdate() {
+		isSyncing = true;
 		const syncToast = toast.show('Syncing changes…', 'info', 0);
 
-		// We fully control the lifetime
 		setTimeout(() => {
 			toast.dismiss(syncToast);
-		}, 900); // ← Change this value to control duration
+		}, 900);
 
 		try {
 			if (pb.authStore.isValid && navigator.onLine) {
@@ -59,6 +68,8 @@
 		} catch (e) {
 			toast.dismiss(syncToast);
 			toast.error('Failed to sync changes');
+		} finally {
+			isSyncing = false;
 		}
 	}
 
@@ -69,6 +80,7 @@
 			dayApi = new Calendar(dayEl, {
 				plugins: [timeGridPlugin, interactionPlugin],
 				initialView: 'timeGridDay',
+				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
 				dayHeaders: false,
 				height: 'auto',
@@ -77,6 +89,9 @@
 				slotMaxTime: '22:00:00',
 				expandRows: false,
 				editable: true,
+
+				eventDragStart: () => {},
+				eventDragStop: () => {},
 
 				select: (info) => {
 					openJobModal({ start: info.start, end: info.end }, () => {
@@ -110,7 +125,6 @@
 
 				events: (info, successCallback) => {
 					const selectedStr = selectedDate;
-
 					const dayJobs = jobs.filter((job: any) => {
 						const jobStartStr = toDateString(job.start);
 						const jobEndStr = job.end ? toDateString(job.end) : jobStartStr;
@@ -130,6 +144,7 @@
 
 			dayApi.render();
 			dayApi.updateSize();
+			dayApi.gotoDate(parseLocalDate(selectedDate));
 
 			setTimeout(() => {
 				dayApi?.refetchEvents();
@@ -146,25 +161,67 @@
 	}
 </script>
 
-<div class="split-calendar">
-	<MonthPicker 
-		{jobs}
-		bind:selectedDate 
-		onDateSelect={handleDateSelect} 
-	/>
-
-	<div class="split-calendar__day-wrapper">
-		<div class="split-calendar__day-header">
-			{parseLocalDate(selectedDate).toLocaleDateString(undefined, { 
-				weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' 
-			})}
+<div class="split-calendar-container">
+	<div class="split-calendar">
+		<!-- Sidebar -->
+		<div class="split-calendar__sidebar">
+			<MonthPicker 
+				{jobs}
+				bind:selectedDate 
+				onDateSelect={handleDateSelect} 
+			/>
 		</div>
-		<div class="split-calendar__day" bind:this={dayEl}></div>
+
+		<!-- Day View -->
+		<div class="split-calendar__day-wrapper" class:refreshing={isSyncing}>
+			<div class="split-calendar__day-header">
+				{parseLocalDate(selectedDate).toLocaleDateString(undefined, { 
+					weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' 
+				})}
+			</div>
+			<div class="split-calendar__day" bind:this={dayEl}></div>
+		</div>
 	</div>
 </div>
 
 <style>
+	.split-calendar-container {
+		container-type: inline-size;
+		container-name: split-calendar;
+		width: 100%;
+	}
+
+	.split-calendar {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		width: 100%;
+		min-width: 0;
+	}
+
+	@container split-calendar (min-width: 900px) {
+		.split-calendar {
+			flex-direction: row;
+			gap: 1.5rem;
+			align-items: flex-start;
+		}
+
+		.split-calendar__sidebar {
+			flex: 0 0 340px;
+		}
+
+		.split-calendar__day-wrapper {
+			flex: 1;
+			min-height: 700px;
+		}
+	}
+
+	.split-calendar__sidebar {
+		width: 100%;
+	}
+
 	.split-calendar__day-wrapper {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		background: white;
@@ -172,10 +229,16 @@
 		border-radius: 12px;
 		overflow: hidden;
 		min-height: 650px;
+		transition: opacity 0.2s ease;
+	}
+
+	.split-calendar__day-wrapper.refreshing {
+		opacity: 0.6;
+		pointer-events: none;
 	}
 
 	.split-calendar__day-header {
-		padding: 0.6rem 1rem;
+		padding: 0.75rem 1rem;
 		font-weight: 600;
 		text-align: center;
 		background: #f8fafc;
@@ -186,6 +249,22 @@
 	.split-calendar__day {
 		flex: 1;
 		min-height: 600px;
+		min-width: 0;
 		overflow: hidden;
+	}
+
+	/* Drag visual feedback */
+	:global(.fc-event-dragging) {
+		opacity: 0.85;
+		transform: scale(1.02);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		transition: transform 0.1s ease, box-shadow 0.1s ease;
+	}
+
+	/* Wider sidebar on very large screens */
+	@container split-calendar (min-width: 1400px) {
+		.split-calendar__sidebar {
+			flex-basis: 380px;
+		}
 	}
 </style>
