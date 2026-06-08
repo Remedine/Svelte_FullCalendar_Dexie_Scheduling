@@ -302,11 +302,18 @@ export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
 		.toArray();
 }
 
-export async function getJobsForRange(start: Date, end: Date): Promise<Job[]> {
+export async function getJobsForRange(
+	start: Date,
+	end: Date,
+	includeCancelled = false
+): Promise<Job[]> {
 	return await db.jobs
 		.where('start')
 		.between(start, end, true, true)
-		.and((job) => job.status !== 'cancelled')
+		.and((job) => {
+			if (includeCancelled) return true;
+			return job.status !== 'cancelled';
+		})
 		.toArray();
 }
 
