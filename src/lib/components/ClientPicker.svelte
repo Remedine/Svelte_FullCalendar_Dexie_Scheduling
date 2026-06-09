@@ -1,12 +1,13 @@
 <!-- src/lib/components/ClientPicker.svelte -->
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { db, type Client } from '$lib/db';
+	import { db, type Client, createClient } from '$lib/db';
 
 	let {
 		value = $bindable(),  
-		placeholder = 'Select client',
+		placeholder = 'Select or create client',
 		onSelect = (client: Client) => {},
+		onCreate = async (name: string) => {},
+		allowCreate = $bindable(true),
 		id = 'client-picker'
 	} = $props();
 
@@ -16,22 +17,28 @@
 	let inputEl = $state<HTMLInputElement>();
 	let buttonEl = $state<HTMLButtonElement>();
 
-	// )=- Much more reliable: selectedClient is now a derived value
+	// )=- Load clients + refresh function (called after creation)
+	async function loadClients() {
+		clients = await db.clients.orderBy('name').toArray();
+		console.log(`📋 Loaded ${clients.length} clients from Dexie`);
+	}
+
+	// Initial load + reactive reload when needed
+	$effect(() => {
+		loadClients();
+	});
+
 	let selectedClient = $derived.by(() => {
 		if (!value || clients.length === 0) return null;
 		return clients.find(c => 
-			c.id === value || 
-			c.pbId === value
+			c.id === value || c.pbId === value
 		) || null;
-
-
 	});
 
 	let filteredClients = $derived.by(() => {
 		const term = searchTerm.toLowerCase().trim();
-		if (!term) {
-			return [...clients];
-		}
+		if (!term) return [...clients];
+
 		return clients.filter(c =>
 			c.name.toLowerCase().includes(term) ||
 			(c.email && c.email.toLowerCase().includes(term)) ||
@@ -39,11 +46,53 @@
 		);
 	});
 
-	// Load clients
-	onMount(async () => {
-		clients = await db.clients.toArray();
-		console.log(`📋 Loaded ${clients.length} clients from Dexie`);
+	let showCreateOption = $derived.by(() => {
+		if (!allowCreate || !searchTerm.trim()) return false;
+		const term = searchTerm.trim();
+		return !clients.some(c => c.name.toLowerCase() === term.toLowerCase());
 	});
+
+	async function createAndSelectClient() {
+		if (!searchTerm.trim() || !allowCreate) return;
+
+		const newName = searchTerm.trim();
+
+		try {
+			const newClientData = {
+				name: newName,
+				serviceAddressStreet: '',
+				serviceAddressCity: '',
+				serviceAddressState: 'WA',
+				serviceAddressZip: '',
+				areaOfTown: '',
+				preferredBillingMethod: 'email' as const,
+				phone: '',
+				email: '',
+				notes: ''
+			};
+
+			const newId = await createClient(newClientData);
+			const newClient = await db.clients.get(newId);
+
+			if (newClient) {
+				// )=- Critical: Refresh the list so the new client appears
+				await loadClients();
+
+				// Set selection
+				value = newClient.id ?? null;
+				searchTerm = '';
+				isOpen = false;
+
+				onSelect(newClient);
+				await onCreate(newClient.name);
+
+				console.log(`✅ New client created and selected: ${newClient.name}`);
+			}
+		} catch (err) {
+			console.error('Failed to create client inline:', err);
+			alert('Failed to create new client. Please use the full Client form.');
+		}
+	}
 
 	function selectClient(client: Client) {
 		value = client.id ?? null;
@@ -65,9 +114,13 @@
 			isOpen = false;
 			searchTerm = '';
 		}
-		if (e.key === 'Enter' && filteredClients.length > 0) {
+		if (e.key === 'Enter') {
 			e.preventDefault();
-			selectClient(filteredClients[0]);
+			if (showCreateOption) {
+				createAndSelectClient();
+			} else if (filteredClients.length > 0) {
+				selectClient(filteredClients[0]);
+			}
 		}
 	}
 
@@ -85,7 +138,7 @@
 </script>
 
 <div class="client-picker" style="position: relative; width: 100%;">
-	<label for={id} class="sr-only">Select client</label>
+	<label for={id} class="sr-only">Select or create client</label>
 
 	<button
 		bind:this={buttonEl}
@@ -112,7 +165,19 @@
 
 	{#if isOpen}
 		<div class="dropdown" id="client-listbox" role="listbox">
-			{#if filteredClients.length === 0}
+			{#if showCreateOption}
+				<div
+					class="option create-option"
+					role="option"
+					onclick={createAndSelectClient}
+					tabindex="0"
+					onkeydown={(e) => e.key === 'Enter' && createAndSelectClient()}
+				>
+					<strong>+ Create new client: "{searchTerm}"</strong>
+				</div>
+			{/if}
+
+			{#if filteredClients.length === 0 && !showCreateOption}
 				<div class="no-results">No clients found</div>
 			{:else}
 				{#each filteredClients as client (client.id)}
@@ -141,7 +206,6 @@
 </div>
 
 <style>
-	/* Your existing styles are perfect — no changes needed */
 	.client-picker { 
 		font-family: inherit;
 		width: 100%;                    
@@ -198,6 +262,16 @@
 	.option:hover,
 	.option:focus {
 		background: #f8fafc;
+	}
+
+	.option.create-option {
+		background: #f0fdf4;
+		border-bottom: 2px solid #86efac;
+		font-weight: 600;
+	}
+
+	.option.create-option:hover {
+		background: #dcfce7;
 	}
 
 	.option.selected {

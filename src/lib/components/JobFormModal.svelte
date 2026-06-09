@@ -20,12 +20,14 @@
   import ClientPicker from './ClientPicker.svelte';
   import BillableItemRow from './BillableItemRow.svelte';
   import { optionsStore } from '$lib/stores/options.svelte';
+  import { db, type Client } from '$lib/db';
 
   let show = $state(false);
   let isEditing = $state(false);
   let editingJobId = $state<string | null>(null);
   let showCancelConfirm = $state(false);
   let selectedCancelReason = $state('');
+  let jobClientId = $state<string>('');
 
   let currentJob = $state<any>({
     title: 'Full Exterior Window Cleaning',
@@ -53,6 +55,10 @@
 
   let cancelReasons = $derived(optionsStore.data?.cancelReasons || []);
   let defaultBillableItems = $derived(optionsStore.data?.defaultBillableItems || []);
+
+  let selectedClient = $derived.by(() => {
+    return jobClientId ? /* fetch from clients or pass via onSelect */ null : null;
+  });
 
   // Register this instance
   $effect(() => {
@@ -217,9 +223,20 @@
 
         <!-- Client -->
         <div class="new-job-modal__field">
-          <label for="client-picker" class="new-job-modal__label">Client</label>
-          <ClientPicker bind:value={currentJob.clientId} placeholder="Select client..." />
-        </div>
+	          <label for="client-picker" class="new-job-modal__label">Client</label>
+            <ClientPicker
+              bind:value={jobClientId}
+              allowCreate={true}
+              placeholder="Select or create client..."
+              onSelect={(client: Client) => {
+                console.log('✅ Client selected:', client.name);
+                // You can also set other fields here if needed (e.g. areaOfTown)
+              }}
+              onCreate={async (name: string) => {
+                console.log('New client created inline:', name);
+              }}
+            />
+          </div>
 
         <!-- Dates -->
         <div class="new-job-modal__field-group">

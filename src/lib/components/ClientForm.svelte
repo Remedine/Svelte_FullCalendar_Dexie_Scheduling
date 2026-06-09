@@ -43,13 +43,44 @@
 
 	let errors = $state<Record<string, string>>({});
 
-	// Dynamic areas from options
-	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
+	// )=- Robust derived value supporting both array and Record shapes from optionsStore
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	let areaOptions = $derived.by(() => {
+		const raw = optionsStore.data?.areasOfTown;
+		if (!raw) return [];
+		if (Array.isArray(raw)) return raw;
+		return Object.entries(raw).map(([id, val]: [string, any]) => ({ id, ...val }));
+	});
+
+	// )=- Explicit derived color so the left border updates instantly when user changes the dropdown
+	let selectedAreaColor = $derived.by(() => {
+		if (!formData.areaOfTown || !areaOptions.length) return '#64748b';
+		const area = areaOptions.find((a: any) => a.id === formData.areaOfTown);
+		return area?.color || '#64748b';
+	});
+
+	// Safe trigger to ensure options are loaded when the form opens
+	$effect(() => {
+		if (show && !optionsStore.data && !optionsStore.isLoading) {
+			optionsStore.load();
+		}
+	});
+
+	// )=- One-time initialization using a flag (prevents effect_update_depth_exceeded)
+	let hasInitializedNewForm = $state(false);
 
 	$effect(() => {
-		if (client) {
+		if (!show) {
+			hasInitializedNewForm = false;
+			return;
+		}
+
+		if (client?.id) {
+			// Editing existing client
 			formData = { ...client };
-		} else {
+			hasInitializedNewForm = false;
+		} else if (!hasInitializedNewForm && areaOptions.length > 0) {
+			// New client + options ready → set first area as default once
 			formData = {
 				name: '',
 				serviceAddressStreet: '',
@@ -62,7 +93,9 @@
 				email: '',
 				notes: ''
 			};
+			hasInitializedNewForm = true;
 		}
+
 		errors = {};
 	});
 
@@ -72,12 +105,6 @@
 		if (digits.length <= 3) return `(${digits}`;
 		if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
 		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-	}
-
-	function getAreaColor(areaId: string | undefined): string {
-		if (!areaId || !areaOptions.length) return '#64748b';
-		const area = areaOptions.find((a: any) => a.id === areaId);
-		return area?.color || '#64748b';
 	}
 
 	async function handleSubmit(e: SubmitEvent) {
@@ -101,7 +128,7 @@
 			} as Client;
 
 			if (isEditing && client?.id) {
-				await updateClient(client.id, clientPayload);   
+				await updateClient(client.id, clientPayload);
 			} else {
 				await createClient(clientPayload);
 			}
@@ -175,7 +202,7 @@
 					<label class="client-form-modal__label">Area of Town <span class="required">*</span></label>
 					<div 
 						class="area-field-wrapper"
-						style="border-left: 6px solid {getAreaColor(formData.areaOfTown)};"
+						style="border-left: 6px solid {selectedAreaColor};"
 					>
 						<select bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
 							<option value="">Select area...</option>
