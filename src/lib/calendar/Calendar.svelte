@@ -61,7 +61,7 @@
 
 			select: (info) => {
 				openJobModal(
-					{ start: info.start, end: info.end || new Date(info.start.getTime() + 4 * 60 * 60 * 1000) },
+					{ start: info.start },
 					() => calendarInstance?.refetchEvents()
 				);
 			},

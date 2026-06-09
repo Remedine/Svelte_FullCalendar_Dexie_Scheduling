@@ -27,7 +27,6 @@
   let editingJobId = $state<string | null>(null);
   let showCancelConfirm = $state(false);
   let selectedCancelReason = $state('');
-  let jobClientId = $state<string>('');
 
   let currentJob = $state<any>({
     title: 'Full Exterior Window Cleaning',
@@ -56,53 +55,68 @@
   let cancelReasons = $derived(optionsStore.data?.cancelReasons || []);
   let defaultBillableItems = $derived(optionsStore.data?.defaultBillableItems || []);
 
-  let selectedClient = $derived.by(() => {
-    return jobClientId ? /* fetch from clients or pass via onSelect */ null : null;
-  });
-
   // Register this instance
-  $effect(() => {
-    modalInstance = {
-      open: async (job?: any, callback?: () => void) => {
-        afterSaveCallback = callback || null;
+$effect(() => {
+  modalInstance = {
+    open: async (job?: any, callback?: () => void) => {
+      afterSaveCallback = callback || null;
 
-        if (!optionsStore.data) {
-          await optionsStore.load?.();
-        }
-
-        if (job) {
-          currentJob = {
-            ...job,
-            start: job.start instanceof Date ? job.start : new Date(job.start),
-            end: job.end instanceof Date ? job.end : new Date(job.end),
-            assignedCrew: job.assignedCrew || [],
-            billableItems: job.billableItems?.length 
-              ? job.billableItems 
-              : [{ title: '', price: 0, quantity: 1, total: 0 }]
-          };
-          isEditing = true;
-          editingJobId = job.id || null;
-        } else {
-          const now = new Date();
-          currentJob = {
-            title: 'Full Exterior Window Cleaning',
-            start: now,
-            end: new Date(now.getTime() + 4 * 60 * 60 * 1000),
-            clientId: null,
-            assignedCrew: [],
-            areaOfTown: areaOptions[0]?.value || '',
-            notes: '',
-            cancelReason: '',
-            cancelNotes: '',
-            billableItems: [{ title: '', price: 0, quantity: 1, total: 0 }]
-          };
-          isEditing = false;
-          editingJobId = null;
-        }
-        show = true;
+      if (!optionsStore.data) {
+        await optionsStore.load?.();
       }
-    };
-  });
+
+      if (job) {
+        const startDate = job.start instanceof Date ? job.start : new Date(job.start);
+
+        let endDate;
+
+        if (job.end instanceof Date && !isNaN(job.end.getTime())) {
+          endDate = job.end;
+        } else {
+          // Use the correct field name from options
+          const durationHours = optionsStore.data?.defaultJobDurationHours ?? 2;
+          endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
+        }
+
+        currentJob = {
+          ...job,
+          start: startDate,
+          end: endDate,
+          assignedCrew: job.assignedCrew || [],
+          billableItems: job.billableItems?.length 
+            ? job.billableItems 
+            : [{ title: '', price: 0, quantity: 1, total: 0 }]
+        };
+
+        isEditing = true;
+        editingJobId = job.id || null;
+
+      } else {
+        // New job (when opened without passing a job object)
+        const now = new Date();
+        const durationHours = optionsStore.data?.defaultJobDurationHours ?? 2;
+
+        currentJob = {
+          title: 'Full Exterior Window Cleaning',
+          start: now,
+          end: new Date(now.getTime() + durationHours * 60 * 60 * 1000),
+          clientId: null,
+          assignedCrew: [],
+          areaOfTown: areaOptions[0]?.value || '',
+          notes: '',
+          cancelReason: '',
+          cancelNotes: '',
+          billableItems: [{ title: '', price: 0, quantity: 1, total: 0 }]
+        };
+
+        isEditing = false;
+        editingJobId = null;
+      }
+
+            show = true;
+          }
+        };
+      });
 
   // Load crew members
   $effect(() => {
@@ -116,9 +130,20 @@
     });
   });
 
+  // Scroll modal content to top when it opens
+  $effect(() => {
+    if (show) {
+      setTimeout(() => {
+        const content = document.querySelector('.new-job-modal__content');
+        if (content) {
+          content.scrollTop = 0;
+        }
+      }, 50);
+    }
+  });
+
   let subtotal = $derived(currentJob.billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0));
   
-  // )=- Proper tax rate handling
   let taxRateDecimal = $derived((optionsStore.data?.taxRate || 8) / 100);
   let taxAmount = $derived(Math.round(subtotal * taxRateDecimal * 100) / 100);
   let totalAmount = $derived(subtotal + taxAmount);
@@ -218,25 +243,30 @@
         <!-- Job Title -->
         <div class="new-job-modal__field">
           <label for="job-title" class="new-job-modal__label">Job Title (optional)</label>
-          <input id="job-title" class="new-job-modal__input" bind:value={currentJob.title} />
+          <input 
+            id="job-title" 
+            class="new-job-modal__input" 
+            bind:value={currentJob.title}
+            autofocus 
+          />
         </div>
 
         <!-- Client -->
         <div class="new-job-modal__field">
-	          <label for="client-picker" class="new-job-modal__label">Client</label>
-            <ClientPicker
-              bind:value={jobClientId}
-              allowCreate={true}
-              placeholder="Select or create client..."
-              onSelect={(client: Client) => {
-                console.log('✅ Client selected:', client.name);
-                // You can also set other fields here if needed (e.g. areaOfTown)
-              }}
-              onCreate={async (name: string) => {
-                console.log('New client created inline:', name);
-              }}
-            />
-          </div>
+          <label for="client-picker" class="new-job-modal__label">Client</label>
+          
+          <ClientPicker
+            bind:value={currentJob.clientId}
+            allowCreate={true}
+            placeholder="Select or create client..."
+            onSelect={(client: Client) => {
+              console.log('✅ Client selected:', client.name);
+            }}
+            onCreate={async (name: string) => {
+              console.log('New client created inline:', name);
+            }}
+          />
+        </div>
 
         <!-- Dates -->
         <div class="new-job-modal__field-group">
@@ -524,7 +554,6 @@
     margin-top: 0.75rem;
   }
 
-  /* Sticky Footer */
   .new-job-modal__footer {
     position: sticky;
     bottom: 0;
@@ -565,7 +594,6 @@
     margin-top: 0.5rem;
   }
 
-  /* Colored Area Field */
   .area-field-wrapper {
     display: flex;
     align-items: center;
@@ -585,7 +613,6 @@
     outline: none;
   }
 
-  /* Cancel Confirmation */
   .cancel-confirm-modal {
     position: fixed;
     inset: 0;

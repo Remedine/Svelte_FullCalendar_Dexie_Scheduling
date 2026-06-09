@@ -2,59 +2,127 @@
 <script lang="ts">
 	import { db, type Client, createClient } from '$lib/db';
 
+	type CreateOption = {
+		id: '__create__';
+		name: string;
+	};
+
+	type Option = Client | CreateOption;
+
 	let {
-		value = $bindable(),  
-		placeholder = 'Select or create client',
+		value = $bindable<string | null | undefined>(undefined),
+		placeholder = 'Search or create client...',
 		onSelect = (client: Client) => {},
 		onCreate = async (name: string) => {},
 		allowCreate = $bindable(true),
+		clearable = $bindable(true),
 		id = 'client-picker'
 	} = $props();
 
 	let clients = $state<Client[]>([]);
 	let searchTerm = $state('');
 	let isOpen = $state(false);
+	let isCreating = $state(false);
+	let activeIndex = $state(-1);
+	let hasInitialized = $state(false);
+
 	let inputEl = $state<HTMLInputElement>();
-	let buttonEl = $state<HTMLButtonElement>();
+	let dropdownEl = $state<HTMLDivElement>();
 
-	// )=- Load clients + refresh function (called after creation)
-	async function loadClients() {
-		clients = await db.clients.orderBy('name').toArray();
-		console.log(`📋 Loaded ${clients.length} clients from Dexie`);
-	}
-
-	// Initial load + reactive reload when needed
+	// One-time load using runes only (no onMount)
 	$effect(() => {
-		loadClients();
+		if (!hasInitialized) {
+			hasInitialized = true;
+			db.clients.orderBy('name').toArray().then(data => {
+				clients = data;
+			});
+		}
+	});
+
+	// Auto open when typing
+	$effect(() => {
+		if (searchTerm.trim() && !isOpen) {
+			isOpen = true;
+		}
+	});
+
+	// Reset when parent clears value
+	$effect(() => {
+		if (!value) searchTerm = '';
+	});
+
+	// Clamp active index
+	$effect(() => {
+		if (activeIndex >= options.length) {
+			activeIndex = options.length > 0 ? options.length - 1 : -1;
+		}
+	});
+
+	// Scroll active item into view
+	$effect(() => {
+		if (activeIndex >= 0 && isOpen) {
+			document.getElementById(`option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+		}
+	});
+
+	let options = $derived.by<Option[]>(() => {
+		const term = searchTerm.toLowerCase().trim();
+		let result: Option[] = [...clients];
+
+		if (term) {
+			result = clients.filter(c =>
+				c.name.toLowerCase().includes(term) ||
+				(c.email && c.email.toLowerCase().includes(term)) ||
+				(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
+			);
+		}
+
+		const showCreate = allowCreate && term &&
+			!clients.some(c => c.name.trim().toLowerCase() === term);
+
+		if (showCreate) {
+			result = [{ id: '__create__', name: term }, ...result];
+		}
+
+		return result;
 	});
 
 	let selectedClient = $derived.by(() => {
 		if (!value || clients.length === 0) return null;
-		return clients.find(c => 
-			c.id === value || c.pbId === value
-		) || null;
+		return clients.find(c => c.id === value || c.pbId === value) || null;
 	});
 
-	let filteredClients = $derived.by(() => {
-		const term = searchTerm.toLowerCase().trim();
-		if (!term) return [...clients];
-
-		return clients.filter(c =>
-			c.name.toLowerCase().includes(term) ||
-			(c.email && c.email.toLowerCase().includes(term)) ||
-			(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
-		);
+	let showCreateHint = $derived.by(() => {
+		return options.length > 0 && isCreateOption(options[0]);
 	});
 
-	let showCreateOption = $derived.by(() => {
-		if (!allowCreate || !searchTerm.trim()) return false;
-		const term = searchTerm.trim();
-		return !clients.some(c => c.name.toLowerCase() === term.toLowerCase());
+	let displayValue = $derived.by(() => {
+		if (isOpen) return searchTerm;
+		return selectedClient?.name ?? '';
 	});
+
+	function isCreateOption(option: Option): option is CreateOption {
+		return option.id === '__create__';
+	}
+
+	function setActiveIndex(index: number) {
+		activeIndex = Math.max(-1, Math.min(index, options.length - 1));
+	}
+
+	function selectActiveOption() {
+		if (activeIndex < 0 || activeIndex >= options.length) return;
+		const option = options[activeIndex];
+		if (isCreateOption(option)) {
+			createAndSelectClient();
+		} else {
+			selectClient(option);
+		}
+	}
 
 	async function createAndSelectClient() {
-		if (!searchTerm.trim() || !allowCreate) return;
+		if (!searchTerm.trim() || !allowCreate || isCreating) return;
 
+		isCreating = true;
 		const newName = searchTerm.trim();
 
 		try {
@@ -75,170 +143,218 @@
 			const newClient = await db.clients.get(newId);
 
 			if (newClient) {
-				// )=- Critical: Refresh the list so the new client appears
-				await loadClients();
-
-				// Set selection
+				clients = await db.clients.orderBy('name').toArray();
 				value = newClient.id ?? null;
-				searchTerm = '';
+				searchTerm = newClient.name;
 				isOpen = false;
-
+				activeIndex = -1;
 				onSelect(newClient);
 				await onCreate(newClient.name);
-
-				console.log(`✅ New client created and selected: ${newClient.name}`);
 			}
 		} catch (err) {
-			console.error('Failed to create client inline:', err);
-			alert('Failed to create new client. Please use the full Client form.');
+			console.error(err);
+			alert('Failed to create new client.');
+		} finally {
+			isCreating = false;
 		}
 	}
 
 	function selectClient(client: Client) {
 		value = client.id ?? null;
-		searchTerm = ''; 
+		searchTerm = client.name;
 		isOpen = false;
+		activeIndex = -1;
 		onSelect(client);
-		inputEl?.focus();
 	}
 
-	function toggleDropdown() {
-		isOpen = !isOpen;
-		if (isOpen) {
-			setTimeout(() => inputEl?.focus(), 10);
-		}
+	function clearSelection() {
+		if (!clearable) return;
+		value = null;
+		searchTerm = '';
+		isOpen = false;
+		activeIndex = -1;
 	}
 
-	function handleInputKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			isOpen = false;
-			searchTerm = '';
+	function handleInputFocus() {
+		if (!searchTerm && selectedClient) {
+			searchTerm = selectedClient.name;
 		}
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			if (showCreateOption) {
-				createAndSelectClient();
-			} else if (filteredClients.length > 0) {
-				selectClient(filteredClients[0]);
+		isOpen = true;
+		activeIndex = options.length > 0 ? 0 : -1;
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (!isOpen) {
+			if (e.key === 'ArrowDown' || e.key === 'Enter') {
+				e.preventDefault();
+				isOpen = true;
+				activeIndex = 0;
 			}
+			return;
+		}
+
+		switch (e.key) {
+			case 'Escape':
+				e.preventDefault();
+				isOpen = false;
+				activeIndex = -1;
+				break;
+			case 'ArrowDown':
+				e.preventDefault();
+				setActiveIndex(activeIndex + 1);
+				break;
+			case 'ArrowUp':
+				e.preventDefault();
+				setActiveIndex(activeIndex - 1);
+				break;
+			case 'Enter':
+				e.preventDefault();
+				selectActiveOption();
+				break;
 		}
 	}
 
-	function handleClickOutside(e: MouseEvent) {
-		const target = e.target as Node;
-		if (buttonEl && !buttonEl.contains(target)) {
+	function handleBlur(e: FocusEvent) {
+		if (!dropdownEl?.contains(e.relatedTarget as Node)) {
 			isOpen = false;
+			activeIndex = -1;
+		}
+	}
+
+	function handleClickOutside(e: PointerEvent) {
+		const path = e.composedPath();
+		if (
+			(!inputEl || !path.includes(inputEl)) &&
+			(!dropdownEl || !path.includes(dropdownEl))
+		) {
+			isOpen = false;
+			activeIndex = -1;
 		}
 	}
 
 	$effect(() => {
-		document.addEventListener('click', handleClickOutside);
-		return () => document.removeEventListener('click', handleClickOutside);
+		document.addEventListener('pointerdown', handleClickOutside);
+		return () => document.removeEventListener('pointerdown', handleClickOutside);
 	});
 </script>
 
-<div class="client-picker" style="position: relative; width: 100%;">
-	<label for={id} class="sr-only">Select or create client</label>
+<div class="client-picker">
+	<label for={id} class="sr-only">Client</label>
 
-	<button
-		bind:this={buttonEl}
-		type="button"
-		{id}
-		class="selected-display"
-		onclick={toggleDropdown}
-		aria-haspopup="listbox"
-		aria-expanded={isOpen}
-		aria-controls="client-listbox"
-	>
+	<div class="client-picker__input-wrapper">
 		<input
 			bind:this={inputEl}
+			{id}
 			type="text"
-			bind:value={searchTerm}
-			placeholder={selectedClient ? selectedClient.name : placeholder}
-			onkeydown={handleInputKeydown}
-			onfocus={() => isOpen = true}
-			readonly={!isOpen}
+			value={displayValue}
+			oninput={(e) => searchTerm = (e.currentTarget as HTMLInputElement).value}
+			onfocus={handleInputFocus}
+			onkeydown={handleKeydown}
+			onblur={handleBlur}
+			placeholder={placeholder}
+			class="client-picker__input"
+			role="combobox"
+			aria-expanded={isOpen}
+			aria-controls="client-listbox"
 			aria-autocomplete="list"
+			aria-activedescendant={activeIndex >= 0 ? `option-${activeIndex}` : undefined}
 		/>
-		<span class="arrow">▼</span>
-	</button>
+
+		{#if selectedClient && clearable}
+			<button
+				type="button"
+				class="client-picker__clear"
+				onclick={(e) => { e.stopPropagation(); clearSelection(); }}
+				aria-label="Clear selection"
+			>
+				×
+			</button>
+		{/if}
+	</div>
 
 	{#if isOpen}
-		<div class="dropdown" id="client-listbox" role="listbox">
-			{#if showCreateOption}
-				<div
-					class="option create-option"
-					role="option"
-					onclick={createAndSelectClient}
-					tabindex="0"
-					onkeydown={(e) => e.key === 'Enter' && createAndSelectClient()}
-				>
-					<strong>+ Create new client: "{searchTerm}"</strong>
-				</div>
-			{/if}
+		<div 
+			bind:this={dropdownEl}
+			class="client-picker__dropdown" 
+			id="client-listbox" 
+			role="listbox"
+		>
+			{#each options as option, index (option.id)}
+				{@const isCreate = isCreateOption(option)}
+				{@const isActive = index === activeIndex}
 
-			{#if filteredClients.length === 0 && !showCreateOption}
-				<div class="no-results">No clients found</div>
-			{:else}
-				{#each filteredClients as client (client.id)}
-					<div
-						class="option"
-						class:selected={client.id === value}
-						role="option"
-						aria-selected={client.id === value}
-						onclick={() => selectClient(client)}
-						tabindex="0"
-						onkeydown={(e) => e.key === 'Enter' && selectClient(client)}
-					>
-						<strong>{client.name}</strong><br>
-						<small>
-							{client.serviceAddressCity}, {client.serviceAddressState} • 
-							{client.email}
-							{#if client.phone}
-								<br>📞 {client.phone}
-							{/if}
-						</small>
-					</div>
-				{/each}
+				<div
+					id={`option-${index}`}
+					class="client-picker__option"
+					class:client-picker__option--active={isActive}
+					class:client-picker__option--create={isCreate}
+					class:client-picker__option--loading={isCreate && isCreating}
+					role="option"
+					aria-selected={!isCreate && option.id === value}
+					onmouseenter={() => activeIndex = index}
+					onmousedown={(e) => {
+						e.stopPropagation();
+						if (isCreate) {
+							createAndSelectClient();
+						} else {
+							selectClient(option);
+						}
+					}}
+				>
+					{#if isCreate}
+						<strong>+ Create new client: "{searchTerm}"</strong>
+						{#if isCreating}
+							<span class="client-picker__loading">Creating...</span>
+						{/if}
+						{#if showCreateHint && !isCreating}
+							<small class="client-picker__hint">Press Enter to create</small>
+						{/if}
+					{:else}
+						<strong>{option.name}</strong>
+						{#if option.serviceAddressCity || option.email}
+							<small>
+								{option.serviceAddressCity || ''}{option.serviceAddressCity && option.email ? ' • ' : ''}
+								{option.email || ''}
+							</small>
+						{/if}
+					{/if}
+				</div>
+			{/each}
+
+			{#if options.length === 0}
+				<div class="client-picker__no-results">No clients found</div>
 			{/if}
 		</div>
 	{/if}
 </div>
 
 <style>
-	.client-picker { 
-		font-family: inherit;
-		width: 100%;                    
-	}
-
-	.selected-display {
-		display: flex;
-		align-items: center;
-		width: 100%;                   
-		background: white;
+	.client-picker { font-family: inherit; width: 100%; position: relative; }
+	.client-picker__input-wrapper { position: relative; display: flex; align-items: center; }
+	.client-picker__input {
+		width: 100%;
+		padding: 0.75rem 2.5rem 0.75rem 1rem;
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
-		padding: 0.75rem 1rem;
-		cursor: pointer;
-		text-align: left;
 		font-size: 1rem;
-	}
-
-	.selected-display input {
-		border: none;
+		background: white;
 		outline: none;
-		background: transparent;
-		flex: 1;
+	}
+	.client-picker__input:focus {
+		border-color: #3b82f6;
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+	}
+	.client-picker__clear {
+		position: absolute;
+		right: 0.75rem;
+		background: none;
+		border: none;
+		color: #64748b;
+		font-size: 1.2rem;
 		cursor: pointer;
 	}
-
-	.arrow {
-		margin-left: 0.5rem;
-		font-size: 0.8rem;
-		color: #64748b;
-	}
-
-	.dropdown {
+	.client-picker__clear:hover { color: #ef4444; }
+	.client-picker__dropdown {
 		position: absolute;
 		top: 100%;
 		left: 0;
@@ -252,53 +368,22 @@
 		box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
 		z-index: 100;
 	}
-
-	.option {
+	.client-picker__option {
 		padding: 0.75rem 1rem;
 		cursor: pointer;
 		border-bottom: 1px solid #f1f5f9;
 	}
-
-	.option:hover,
-	.option:focus {
-		background: #f8fafc;
-	}
-
-	.option.create-option {
+	.client-picker__option:hover,
+	.client-picker__option--active { background: #f8fafc; }
+	.client-picker__option--create {
 		background: #f0fdf4;
 		border-bottom: 2px solid #86efac;
 		font-weight: 600;
 	}
-
-	.option.create-option:hover {
-		background: #dcfce7;
-	}
-
-	.option.selected {
-		background: #eff6ff;
-		font-weight: 500;               
-	}
-
-	.option small {
-		display: block;
-		margin-top: 2px;
-		color: #64748b;
-	}
-
-	.no-results {
-		padding: 1rem;
-		text-align: center;
-		color: #64748b;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		border: 0;
-	}
+	.client-picker__option--create:hover,
+	.client-picker__option--create.client-picker__option--active { background: #dcfce7; }
+	.client-picker__option--loading { opacity: 0.7; pointer-events: none; }
+	.client-picker__hint { display: block; margin-top: 4px; font-size: 0.75rem; color: #16a34a; }
+	.client-picker__loading { font-size: 0.85rem; color: #16a34a; margin-left: 0.5rem; }
+	.client-picker__no-results { padding: 1rem; text-align: center; color: #64748b; }
 </style>
