@@ -1,8 +1,5 @@
 <!-- src/routes/(app)/clients/+page.svelte -->
 <script lang="ts">
-	// )=- Full file with rock-solid area filter reactivity
-	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	import { onMount } from 'svelte';
 	import { db, type Client } from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import ClientForm from '$lib/components/ClientForm.svelte';
@@ -17,7 +14,7 @@
 
 	let enhancedClients = $state<any[]>([]);
 
-	// This will now react properly because we fixed the store pattern
+	// Dynamic areas from options store (already reactive)
 	let areaOptions = $derived.by(() => {
 		return optionsStore.data?.areasOfTown ?? [];
 	});
@@ -51,21 +48,36 @@
 		return result;
 	});
 
-	onMount(async () => {
+	// )=- Replaced onMount with Svelte 5 $effect + flag (per agents.md rules)
+	let initialized = $state(false);
+
+	$effect(() => {
+		if (!initialized) {
+			initialized = true;
+			initPage();
+		}
+	});
+
+	async function initPage() {
 		console.log('🚀 Clients page mounting...');
 		await optionsStore.load();
 		if (navigator.onLine) {
 			await optionsStore.pullFromPB();   // Force fresh data from server
 		}
 		await loadClientsWithLastJob();
-	});
+	}
 
 	async function loadClientsWithLastJob() {
 		const allClients = await db.clients.orderBy('name').toArray();
 		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
 
 		enhancedClients = allClients.map(client => {
-			const clientJobs = allJobs.filter(j => j.clientId === client.id);
+			// )=- Match jobs by local id OR pbId (handles post-sync state correctly)
+			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+			const clientJobs = allJobs.filter(j => 
+				j.clientId === client.id || 
+				(client.pbId && j.clientId === client.pbId)
+			);
 			const lastJob = clientJobs[0] || null;
 
 			return {
@@ -108,7 +120,16 @@
 	}
 
 	async function deleteClient(id: string) {
-		if (!confirm('Delete this client?')) return;
+		// )=- Prevent deletion if client has any jobs (protects data integrity)
+		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+		const clientWithJobs = enhancedClients.find(c => c.id === id);
+		if (clientWithJobs && (clientWithJobs.totalJobs ?? 0) > 0) {
+			alert('Cannot delete this client because they have existing job records.\n\nPlease cancel or delete the associated jobs first.');
+			return;
+		}
+
+		if (!confirm('Delete this client? This action cannot be undone.')) return;
+
 		await deleteClientFromDb(id);
 		await loadClientsWithLastJob();
 	}
@@ -213,7 +234,15 @@
 					<button onclick={() => editClient(client)} class="client-card__btn client-card__btn--edit">
 						Edit
 					</button>
-					<button onclick={() => deleteClient(client.id!)} class="client-card__btn client-card__btn--delete">
+					<button 
+						onclick={() => deleteClient(client.id!)}
+						class="client-card__btn client-card__btn--delete"
+						class:client-card__btn--disabled={(client.totalJobs ?? 0) > 0}
+						disabled={(client.totalJobs ?? 0) > 0}
+						title={(client.totalJobs ?? 0) > 0 
+							? 'Cannot delete: client has existing jobs' 
+							: 'Delete client'}
+					>
 						Delete
 					</button>
 				</div>
@@ -235,7 +264,7 @@
 {/if}
 
 <style>
-	/* BEM naming maintained */
+	/* BEM naming maintained throughout */
 	.clients-page {
 		padding: 1.5rem 1rem;
 		max-width: 1200px;
@@ -372,6 +401,13 @@
 
 	.client-card__btn--edit { background: #e0f2fe; color: #0369a1; }
 	.client-card__btn--delete { background: #fee2e2; color: #ef4444; }
+
+	.client-card__btn--disabled {
+		background: #f1f5f9 !important;
+		color: #94a3b8 !important;
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
 
 	.clients-page__empty {
 		text-align: center;

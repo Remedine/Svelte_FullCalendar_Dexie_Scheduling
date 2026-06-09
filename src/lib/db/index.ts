@@ -28,20 +28,12 @@ function safeClone<T>(obj: T): T {
 	}
 }
 
-
-//AREA MAPPING HELPER
-const AREA_ID_TO_OLD_VALUE: Record<string, string> = {
-	'area-downtown': 'downtown',
-	'area-north': 'thane',
-	'area-south': 'douglas'
-};
-
+// ==================== AREA HELPER (simplified for fresh start) ====================
+// )=- Removed legacy mapping. We now trust area IDs coming directly from options table.
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 function getValidAreaOfTown(area: string | undefined): string {
-	if (!area) return 'downtown';
-	if (['thane', 'downtown', 'douglas'].includes(area)) return area;
-	return AREA_ID_TO_OLD_VALUE[area] || 'downtown';
+	return area || '';
 }
-
 
 // Interface Types
 export interface Client {
@@ -52,7 +44,7 @@ export interface Client {
 	serviceAddressCity: string;
 	serviceAddressState: string;
 	serviceAddressZip: string;
-	areaOfTown: string; // )=- Changed from enum to string (supports dynamic areas from options)
+	areaOfTown: string;
 	preferredBillingMethod: 'email' | 'check' | 'invoice';
 	phone: string;
 	email: string;
@@ -79,7 +71,7 @@ export interface Job {
 	taxRate: number;
 	taxAmount: number;
 	totalAmount: number;
-	areaOfTown: string; // )=- Changed to string for dynamic areas
+	areaOfTown: string;
 	notes?: string;
 	cancelReason?: string;
 	cancelNotes?: string;
@@ -114,14 +106,13 @@ export interface AppOptions {
 		hours?: number;
 		isDefault?: boolean;
 	}>;
-	areasOfTown: Record<
-		string,
-		{
-			label: string;
-			color: string;
-			sortOrder: number;
-		}
-	>;
+	// )=- Using array to match how ClientForm and clients page consume the data
+	areasOfTown: Array<{
+		id: string;
+		label: string;
+		color: string;
+		sortOrder?: number;
+	}>;
 	cancelReasons: string[];
 	invoiceDueDays: number;
 	lastUpdated: Date;
@@ -170,6 +161,10 @@ export async function createJob(jobData: any): Promise<string> {
 		throw new Error('Invalid client selected');
 	}
 
+	// )=- Pull tax rate from options table instead of hardcoded value
+	const optionsRecord = await db.options.get(1);
+	const taxRate = optionsRecord?.taxRate ?? 0.08;
+
 	const newJob = safeClone({
 		id: newId,
 		clientId: realClientId,
@@ -186,7 +181,7 @@ export async function createJob(jobData: any): Promise<string> {
 		subtotal:
 			jobData.subtotal ||
 			billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0),
-		taxRate: BUSINESS_CONFIG.defaultTaxRate,
+		taxRate,
 		taxAmount: jobData.taxAmount || 0,
 		totalAmount: jobData.totalAmount || 0
 	});
@@ -207,12 +202,12 @@ export async function createJob(jobData: any): Promise<string> {
 }
 
 export async function updateJob(jobId: string, updates: Partial<Job>) {
-
 	const resolvedUpdates = { ...updates };
 
 	if (resolvedUpdates.clientId) {
-		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId)
+		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId);
 	}
+
 	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
 	await db.jobs.update(jobId, safeUpdates);
 
@@ -267,10 +262,7 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 	}
 
 	const realId = job.pbId || job.id || jobId;
-
-	// )=- Resolve clientId to real PB ID for consistency (even on date-only updates)
 	const resolvedClientId = job.clientId ? await resolveClientPbId(job.clientId) : undefined;
-
 	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000);
 
 	const updates = safeClone({
@@ -347,7 +339,6 @@ export async function createClient(
 }
 
 export async function updateClient(clientId: string, updates: Partial<Client>) {
-	// )=- Merge updates with fresh timestamp for both local and queue
 	const mergedUpdates = safeClone({
 		...updates,
 		areaOfTown: getValidAreaOfTown(updates.areaOfTown),
@@ -360,7 +351,7 @@ export async function updateClient(clientId: string, updates: Partial<Client>) {
 		type: 'update',
 		collection: 'clients',
 		recordId: clientId,
-		data: mergedUpdates // )=- Queue the merged data (includes updatedAt)
+		data: mergedUpdates
 	});
 
 	if (navigator.onLine) await processSyncQueue();
@@ -503,7 +494,6 @@ export async function processSyncQueue() {
 						const currentClient = await db.clients.get(item.recordId);
 						const realId = currentClient?.pbId || currentClient?.id || item.recordId;
 
-						// )=- Clean payload: remove system fields that cause 400 on update
 						const { id, pbId, createdAt, updatedAt, ...cleanData } = item.data;
 
 						const safeCleanData = safeClone({
@@ -554,4 +544,3 @@ export async function processSyncQueue() {
 
 export { db };
 export type { Client, Job, User };
-export type AreaOfTown = keyof typeof BUSINESS_CONFIG.areasOfTown;

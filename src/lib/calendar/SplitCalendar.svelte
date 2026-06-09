@@ -237,6 +237,16 @@
 				dragScroll: false,
 				eventDragMinDistance: 8,
 
+				dateClick: (info) => {
+					// Default to a 4-hour appointment when user single-clicks a time slot
+					const end = new Date(info.date.getTime() + 4 * 60 * 60 * 1000);
+					
+					openJobModal(
+						{ start: info.date, end },
+						() => refreshAfterUpdate()
+					);
+				},
+
 				eventDidMount: (info) => {
 					info.el.setAttribute('draggable', 'true');
 					info.el.classList.add('fc-event--draggable');
