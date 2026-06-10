@@ -3,7 +3,6 @@
 	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
 	import { pb } from '$lib/db/pb';
 	import { processSyncQueue } from '$lib/db';
 
@@ -11,7 +10,16 @@
 
 	let currentPath = $derived(page.url.pathname);
 
-	onMount(() => {
+	// )=- Logout handler for the avatar dropdown menu. Uses dynamic import to match existing pattern in layout.
+	async function handleLogout() {
+		const { logout } = await import('$lib/stores/auth.svelte.ts');
+		await logout();
+		goto('/login', { replaceState: true });
+	}
+
+	// )=- Converted from onMount to pure $effect for Svelte 5 runes compliance (per AGENTS.md).
+	// Sets up online listener reactively with proper cleanup.
+	$effect(() => {
 		const handleOnline = async () => {
 			console.log('🌐 Back online - processing sync queue');
 			await processSyncQueue();
@@ -19,28 +27,33 @@
 
 		window.addEventListener('online', handleOnline);
 
-		// Cleanup
 		return () => {
 			window.removeEventListener('online', handleOnline);
 		};
 	});
 
-	// )=- Reliable auth guard
+	// )=- Strengthened central auth guard using $effect.
+	// - Waits for loading to complete before any redirects (prevents flash/early redirect).
+	// - Single source of truth: central `auth` store (unifies PIN + PB email logins).
+	// - Crew users are restricted to /calendar and sub-paths only.
+	// - Uses replaceState to avoid polluting browser history.
+	// - This provides consistency across all pages under the (app) route group.
 	$effect(() => {
-    if (auth.loading) return;
+		if (auth.loading) return;
 
-    if (!auth.isAuthenticated || !auth.currentUser) {
-      goto('/login', { replaceState: true });
-      return;
-    }
+		if (!auth.isAuthenticated || !auth.currentUser) {
+			goto('/login', { replaceState: true });
+			return;
+		}
 
-    // Optional: Non-admin users redirected to calendar
-    if (auth.currentUser.role !== 'admin') {
-      if (!currentPath.startsWith('/calendar')) {
-        goto('/calendar', { replaceState: true });
-      }
-    }
-  });
+		// Role-based access: non-admins (crew) can only access calendar views and their own profile.
+		// )=- Updated to allow crew self-service profile management for password, PIN, photo.
+		if (auth.currentUser.role !== 'admin') {
+			if (!currentPath.startsWith('/calendar') && currentPath !== '/profile' && !currentPath.startsWith('/reset-pin')) {
+				goto('/calendar', { replaceState: true });
+			}
+		}
+	});
 </script>
 
 <div class="app-layout">
@@ -58,52 +71,72 @@
 			>
 				📅 Schedule
 			</a>
-			<a 
-				href="/clients" 
-				class="top-nav__link"
-				class:active={currentPath.startsWith('/clients')}
-			>
-				👥 Clients
-			</a>
-			<a 
-				href="/jobs" 
-				class="top-nav__link"
-				class:active={currentPath.startsWith('/jobs')}
-			>
-				📋 Jobs
-			</a>
-			<a 
-				href="admin/crew" 
-				class="top-nav__link"
-				class:active={currentPath.startsWith('/admin/crew')}
-			>
-				Crew
-			</a>
-			<a 
-				href="admin/options" 
-				class="top-nav__link"
-				class:active={currentPath.startsWith('/admin/options')}
-			>
-				⚙️ Options
-			</a>
+			<!-- )=- Role-aware navigation: only admins see Clients, Jobs, Crew, and Options.
+			     Crew users are restricted by the auth guard above and only need Schedule.
+			     This improves consistency and prevents UI confusion for restricted roles. -->
+			{#if auth.currentUser?.role === 'admin'}
+				<a 
+					href="/clients" 
+					class="top-nav__link"
+					class:active={currentPath.startsWith('/clients')}
+				>
+					👥 Clients
+				</a>
+				<a 
+					href="/jobs" 
+					class="top-nav__link"
+					class:active={currentPath.startsWith('/jobs')}
+				>
+					📋 Jobs
+				</a>
+				<a 
+					href="/admin/crew" 
+					class="top-nav__link"
+					class:active={currentPath.startsWith('/admin/crew')}
+				>
+					Crew
+				</a>
+				<a 
+					href="/admin/options" 
+					class="top-nav__link"
+					class:active={currentPath.startsWith('/admin/options')}
+				>
+					⚙️ Options
+				</a>
+			{/if}
 		</nav>
 
 		<div class="top-nav__user">
 			{#if auth.currentUser}
-				<span class="top-nav__user-info">
-					Logged in as <strong>{auth.currentUser.name}</strong>
-				</span>
-				<button 
-					onclick={async () => {
-						await import('$lib/stores/auth.svelte.ts').then(m => m.logout());
-						window.location.href = '/login';
-					}}
-					class="top-nav__logout-btn"
-				>
-					Logout
-				</button>
+				<!-- )=- Moved profile access here. Avatar (photo or initial) instead of "Logged in as" text.
+				     Hover over wrapper to reveal menu with Profile and Logout.
+				     Logout uses the pre-defined handleLogout for consistency. -->
+				<div class="top-nav__user-avatar-wrapper">
+					<div class="top-nav__user-avatar">
+						{#if auth.currentUser.photo}
+							<img 
+								src={auth.currentUser.photo} 
+								alt="Profile" 
+								class="top-nav__avatar-img" 
+							/>
+						{:else}
+							<span class="top-nav__avatar-placeholder">
+								{(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0,1).toUpperCase()}
+							</span>
+						{/if}
+					</div>
+					<div class="top-nav__user-menu">
+						<a href="/profile" class="top-nav__user-menu-item">Profile</a>
+						<button 
+							onclick={handleLogout}
+							class="top-nav__user-menu-item top-nav__user-menu-item--logout"
+						>
+							Logout
+						</button>
+					</div>
+				</div>
 			{:else}
-				<span>Not logged in</span>
+				<span class="top-nav__user-info">Not logged in</span>
 			{/if}
 		</div>
 	</header>
@@ -194,6 +227,7 @@
 		color: #475569;
 	}
 
+	/* Old logout button styles kept for compatibility (not used in avatar menu) */
 	.top-nav__logout-btn {
 		background: #ef4444;
 		color: white;
@@ -207,6 +241,92 @@
 
 	.top-nav__logout-btn:hover {
 		background: #dc2626;
+	}
+
+	/* )=- Avatar dropdown for profile access. Wrapper is relative for positioning the menu on hover.
+	   Avatar is small circle with photo or placeholder initial. Menu appears below on hover.
+	   BEM: top-nav__user-avatar-wrapper, top-nav__user-avatar, top-nav__avatar-img etc.
+	   Menu is simple vertical list of items. Logout item styled differently. */
+	.top-nav__user-avatar-wrapper {
+		position: relative;
+		cursor: pointer;
+	}
+
+	.top-nav__user-avatar {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		overflow: hidden;
+		border: 1px solid #e2e8f0;
+		background: #f1f5f9;
+		flex-shrink: 0;
+	}
+
+	.top-nav__avatar-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.top-nav__avatar-placeholder {
+		width: 100%;
+		height: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #475569;
+		background: #e2e8f0;
+	}
+
+	.top-nav__user-menu {
+		display: none;
+		position: absolute;
+		top: 100%;
+		right: 0;
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+		min-width: 130px;
+		z-index: 100;
+		padding: 0.25rem 0;
+		margin-top: 4px;
+	}
+
+	.top-nav__user-avatar-wrapper:hover .top-nav__user-menu {
+		display: block;
+	}
+
+	.top-nav__user-menu-item {
+		display: block;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.9rem;
+		color: #475569;
+		text-decoration: none;
+		white-space: nowrap;
+		background: none;
+		border: none;
+		width: 100%;
+		text-align: left;
+		cursor: pointer;
+		font-weight: 500;
+	}
+
+	.top-nav__user-menu-item:hover {
+		background: #f1f5f9;
+		color: #1e2937;
+	}
+
+	.top-nav__user-menu-item--logout {
+		color: #ef4444;
+	}
+
+	.top-nav__user-menu-item--logout:hover {
+		background: #fef2f2;
+		color: #dc2626;
 	}
 		.loading-screen {
 		display: flex;

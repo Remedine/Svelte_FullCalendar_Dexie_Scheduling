@@ -8,7 +8,11 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<!-- )=- Primary SVG favicon. Modern browsers use this.
+	     The /favicon.ico 404 (and similar LastPass extension errors on inputs) are expected legacy/extension noise and harmless.
+	     If you want to fully silence the .ico 404, add a favicon.ico to /static (1x1 transparent png renamed works). -->
+	<link rel="icon" href={favicon} type="image/svg+xml" />
+	<link rel="shortcut icon" href={favicon} />
 </svelte:head>
 
 {#if browser}
