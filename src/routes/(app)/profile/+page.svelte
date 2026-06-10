@@ -1,17 +1,17 @@
 <script lang="ts">
   // )=- Self-service profile page for the logged-in user (crew or admin self).
   // We deliberately do NOT reuse /admin/crew (admin multi-user management tool).
-  // This is personal to auth.currentUser. Reuses updateUser for Dexie+PB sync (photo/name/pin/etc), direct pb (with realId resolution) for password + requestEmailChange for email.
+  // This is personal to auth.currentUser. Reuses updateUser for Dexie+PB sync (photo/name), direct pb (with realId resolution) for password + requestEmailChange for email.
   // )=- ID-badge style card with polished BEM styling (per user request + Agents.md).
   // - Edit buttons (pencils) right-aligned for Name and Email rows (avatar pencil stays overlaid).
   // - Added subtle field labels: "Name", "Email", "Role" inside the badge.
-  // - PIN and Password actions now stacked vertically (not inline) with right-aligned pencils.
-  // - Security action labels changed to "Update PIN" and "Update Password".
+  // - Security actions stacked vertically with right-aligned pencils. Only "Update Password" remains (PIN login removed entirely).
   // - All buttons remain icon-only (pencils / check / x). Nice spacing, typography, and card polish using strict BEM.
   // - Email editing fully supported.
+  // )=- PIN/forcePin completely removed from UI, state, and save paths. Only email/password auth now.
   // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
   import { auth } from '$lib/stores/auth.svelte';
-  import { db, updateUser } from '$lib/db';
+  import { db, updateUser, getUserPhotoSrc } from '$lib/db';
   import { pb } from '$lib/db/pb';
 
   let loading = $state(false);
@@ -20,10 +20,6 @@
 
   // Photo input ref for camera (triggered directly by the pencil next to avatar)
   let photoInput: HTMLInputElement | null = $state(null);
-
-  // PIN form state
-  let newPin = $state('');
-  let confirmPin = $state('');
 
   // Password form state (PB email auth change - requires oldPassword for security)
   let oldPassword = $state('');
@@ -39,21 +35,18 @@
 
   // )=- editing controls which (if any) field is in edit mode. Photo uses direct trigger (no editing state needed).
   // Only 'name' and 'email' use inline replacement inside the badge rows.
-  // 'pin' and 'password' open compact forms below the badge.
-  let editing = $state<'pin' | 'password' | 'name' | 'email' | null>(null);
+  // 'password' opens the compact form below the badge.
+  let editing = $state<'password' | 'name' | 'email' | null>(null);
 
   // )=- Track pending email change (from requestEmailChange) so we can show "pending confirmation" pill + resend in the badge.
   // Cleared on reload or when a new request overwrites it. Local email is already optimistically set to the pending value.
   let pendingEmailChange = $state<string | null>(null);
 
-  function startEditing(section: 'pin' | 'password' | 'name' | 'email') {
+  function startEditing(section: 'password' | 'name' | 'email') {
     editing = section;
     error = '';
     success = '';
-    if (section === 'pin') {
-      newPin = '';
-      confirmPin = '';
-    } else if (section === 'password') {
+    if (section === 'password') {
       oldPassword = '';
       newPassword = '';
       confirmNewPassword = '';
@@ -117,45 +110,13 @@
     photoInput?.click();
   }
 
-  // Set / change PIN (reuses existing hash + update logic). Called from icon-only save button.
-  async function savePin() {
-    if (!newPin || newPin.length !== 4 || newPin !== confirmPin) {
-      error = 'PIN must be exactly 4 digits and match';
-      return;
-    }
-    if (!auth.currentUser) return;
-
-    loading = true;
-    error = '';
-    success = '';
-
-    try {
-      const bcrypt = await import('bcryptjs');
-      const pinHash = await bcrypt.hash(newPin, 10);
-      await updateUser(auth.currentUser.id!, {
-        pinHash,
-        forcePinUpdate: false,
-      });
-      auth.currentUser.pinHash = pinHash;
-      auth.currentUser.forcePinUpdate = false;
-      success = 'PIN updated';
-      newPin = '';
-      confirmPin = '';
-      editing = null;
-    } catch (e: any) {
-      error = e.message || 'Failed to set PIN';
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Change password on PB side (for email/password login). Requires oldPassword. Direct (not via queue) for security.
+  // Change password on PB side (for email/password login only). Requires oldPassword. Direct (not via queue) for security.
   // )=- Must resolve the real PocketBase record id (pbId) instead of the local Dexie id.
   // Hybrid users (admin-created crew) keep a local UUID as .id but store the PB id in .pbId after email login.
   // Using the wrong id here would target a non-existent record (or the wrong one), so the update would silently
   // not affect the actual auth record even if no exception was thrown in some cases.
   // This mirrors the realId resolution used in processSyncQueue for users updates.
-  // Password changes also require a valid pb.authStore session (email/password login), not just PIN login.
+  // Only email/password sessions have a valid PB token for password self-service (PIN login removed).
   async function changePassword() {
     if (!oldPassword || !newPassword || newPassword.length < 8 || newPassword !== confirmNewPassword) {
       error = 'Old password required. New password min 8 chars and must match.';
@@ -171,9 +132,8 @@
     }
 
     // Password self-service requires an active PB auth session (the one that can supply oldPassword).
-    // PIN-only sessions do not have a valid token for the users collection.
     if (!pb.authStore.isValid) {
-      error = 'Password change requires you to be logged in with your email and current password (not just PIN). Please log in via email first, then return here to update your password.';
+      error = 'Password change requires you to be logged in with your email and current password. Please log in via email first, then return here to update your password.';
       return;
     }
 
@@ -229,7 +189,6 @@
   // This sends a real confirmation email (now that you have SMTP configured) to the new address.
   // Only on success do we update the local Dexie record (so local state only reflects accepted requests).
   // In local dev without mail we still have a fallback to direct update (with email + emailConfirm).
-  // For users without a valid PB email session (pure PIN), we still allow local-only update.
   // )=- Polish: Added pending confirmation indicator + resend button next to email in the ID badge.
   // Shows "pending confirmation" pill + resend when a change has been requested but not yet confirmed on server.
   async function saveEmail() {
@@ -306,7 +265,7 @@
           pendingEmailChange = trimmed; // show pending pill + resend until user confirms via email link
         }
       } else if (navigator.onLine) {
-        // No active PB email session (e.g. logged in via PIN only). Update local only.
+        // No active PB email session. Update local only (user must have email/password login to do full server email change).
         await db.users.update(auth.currentUser.id!, {
           email: trimmed,
           updatedAt: new Date(),
@@ -379,13 +338,15 @@
 
 <div class="profile-page">
   {#if auth.currentUser}
-    <!-- )=- ID-badge card (BEM). Right-aligned pencils on Name/Email, labels present, security stacked with "Update PIN"/"Update Password".
+    <!-- )=- ID-badge card (BEM). Right-aligned pencils on Name/Email, labels present.
+         Security now only has "Update Password" (PIN login option fully removed).
          Avatar pencil kept overlaid on photo. All buttons icon-only. -->
     <div class="profile__badge">
       <!-- Avatar / photo with pencil edit icon next to it (overlay style for badge look) -->
       <div class="profile__badge-photo">
         {#if auth.currentUser.photo}
-          <img src={auth.currentUser.photo} alt="ID photo" class="profile__badge-img" />
+          <!-- )=- Normalize here too for consistency (fixes potential 404 if photo is bare filename). -->
+          <img src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)} alt="ID photo" class="profile__badge-img" />
         {:else}
           <div class="profile__badge-placeholder">
             {(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0, 1).toUpperCase()}
@@ -508,29 +469,16 @@
             <span class="profile__badge-value profile__badge-value--role">
               {auth.currentUser.role}
             </span>
-            {#if auth.currentUser.forcePinUpdate}<span class="profile__force">PIN required</span>{/if}
             {#if auth.currentUser.forcePhotoUpdate}<span class="profile__force">Photo required</span>{/if}
           </div>
         </div>
       </div>
     </div>
 
-    <!-- )=- Security actions now stacked vertically (column) with right-aligned pencils for consistency with name/email fields.
-         Labels updated to "Update PIN" and "Update Password". Buttons remain pure icon (pencil only).
+    <!-- )=- Security section (BEM). Only password remains (PIN login removed entirely).
+         Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
     <div class="profile__security">
-      <div class="profile__security-item">
-        <span class="profile__security-label">Update PIN</span>
-        <button
-          class="profile__edit-btn"
-          onclick={() => startEditing('pin')}
-          title="Update PIN"
-          disabled={loading || (editing !== null && editing !== 'pin')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-        </button>
-      </div>
-
       <div class="profile__security-item">
         <span class="profile__security-label">Update Password</span>
         <button
@@ -543,20 +491,6 @@
         </button>
       </div>
     </div>
-
-    <!-- Compact PIN form (icon-only save/cancel). Appears when the Update PIN pencil is clicked. -->
-    {#if editing === 'pin'}
-      <div class="profile__inline-form">
-        <input type="password" bind:value={newPin} maxlength="4" placeholder="New 4-digit PIN" class="profile__input" inputmode="numeric" />
-        <input type="password" bind:value={confirmPin} maxlength="4" placeholder="Confirm" class="profile__input" inputmode="numeric" />
-        <button onclick={savePin} disabled={loading} class="profile__icon-btn" title="Save PIN">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </button>
-        <button onclick={cancelEditing} class="profile__icon-btn profile__icon-btn--cancel" title="Cancel">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
-      </div>
-    {/if}
 
     <!-- Compact password form (icon-only save/cancel). Appears when the Update Password pencil is clicked. -->
     {#if editing === 'password'}
@@ -586,11 +520,11 @@
      - Right-aligned edit pencils on Name and Email field rows (via flex:1 main + trailing actions).
      - Avatar pencil stays overlaid on the photo (classic badge affordance).
      - Explicit labels for Name, Email, Role using .profile__badge-label.
-     - Security actions stacked vertically (.profile__security as column) with right-aligned pencils.
-     - "Update PIN" / "Update Password" labels on the action rows.
+     - Security section stacked vertically (.profile__security as column) with right-aligned pencil.
+     - Only "Update Password" remains (PIN login completely removed; no PIN form or label).
      - Nice ID-card aesthetics: subtle gradient, soft border/shadow, clear typography hierarchy, field separators, refined icon buttons.
      - All buttons are icon-only. Consistent spacing and touch targets.
-     Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 
   .profile-page {
     padding: 1rem;

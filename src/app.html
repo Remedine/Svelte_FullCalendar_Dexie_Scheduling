@@ -4,6 +4,11 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<!-- )=- Favicon: serve the SVG from static/ (copied from lib/assets). This stops the browser's default /favicon.ico 404 noise.
+		     Modern browsers support SVG favicons. Added before %sveltekit.head% so it's early.
+		     If you want a .ico fallback for very old browsers, drop a favicon.ico in static/ too.
+		     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

@@ -5,7 +5,7 @@
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getJobsForRange, updateJobDates } from '$lib/db/index';
+	import { getJobsForRange, updateJobDates, getUserPhotoSrc } from '$lib/db/index';
 	import { pullJobsFromServer, pb } from '$lib/db/pb';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
@@ -16,7 +16,15 @@
 	let originalEventRect: DOMRect | null = null;
 
 	let dayEl = $state<HTMLDivElement | null>(null);
-	let selectedDate = $state(getLocalDateString());
+	let selectedDate = $state(
+		// )=- Support ?date=YYYY-MM-DD from job details "Jump to calendar" (and direct links).
+		// Sets the initial view date so the calendar focuses the relevant day/week when jumping from a job.
+		// Works on initial load of the split calendar page.
+		// Reference: JOBS_AND_INVOICES_SPEC.md (calendar jump improvements in Phase 7)
+		typeof window !== 'undefined'
+			? new URLSearchParams(window.location.search).get('date') || getLocalDateString()
+			: getLocalDateString()
+	);
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
@@ -63,7 +71,8 @@
 					const map: Record<string, string> = {};
 					users.forEach((u: any) => {
 						if (u.name && u.photo) {
-							map[u.name] = u.photo;
+							// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
+							map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
 						}
 					});
 					crewPhotoMap = map;
@@ -187,7 +196,10 @@
 				const map: Record<string, string> = {};
 				users.forEach((u: any) => {
 					if (u.name && u.photo) {
-						map[u.name] = u.photo;
+						// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
+						// This fixes the 404s for crew avatars on event cards (e.g. blob_xxx.png relative paths) when photos are stored as filenames in Dexie after PB sync.
+						// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+						map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
 					}
 				});
 				if (Object.keys(map).length > 0) {
@@ -573,10 +585,29 @@
 
 	function handleDateSelect(dateStr: string) {
 		selectedDate = dateStr;
+		syncDateToUrl(dateStr);
 		if (dayApi) {
 			dayApi.gotoDate(parseLocalDate(dateStr));
 			dayApi.refetchEvents();
 		}
+	}
+
+	// )=- Minor enhancement for Phase 7 "Minor calendar date-focus support if missing".
+	// When the user changes the focused date (via MonthPicker or other), we now update the ?date= param
+	// in the URL using replaceState. This makes "Jump to calendar" links from JobDetailsModal (and direct
+	// deep links) more useful — the address bar always reflects the current focused day, and the link
+	// remains stable if the user browses other dates then comes back.
+	// The existing initial load from window.location.search + gotoDate on first render already provides
+	// the core focus behavior. This is the "minor" polish to make the feature bidirectional and robust.
+	// Uses the same safe local date helpers (parseLocalDate / getLocalDateString) to stay consistent
+	// with our recent TZ fixes for due/paid dates.
+	// )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 + Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	function syncDateToUrl(dateStr: string) {
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		url.searchParams.set('date', dateStr);
+		// replaceState keeps browser back/forward clean (no history spam for every date click)
+		window.history.replaceState({}, '', url.pathname + url.search);
 	}
 </script>
 

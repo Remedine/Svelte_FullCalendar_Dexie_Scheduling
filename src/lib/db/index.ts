@@ -1,8 +1,8 @@
 // src/lib/db/index.ts
 
 import Dexie, { type EntityTable } from 'dexie';
-import * as bcrypt from 'bcryptjs';
 import { pb, pullJobsFromServer } from '$lib/db/pb';
+// )=- bcryptjs import removed (was only for PIN hashing in login/create/setInitialPin flows). PIN login deleted; password hashing is handled by PocketBase on the server side for email auth.
 
 // Dynamic import to break circular dependency with auth.svelte.ts
 let auth: any = null;
@@ -71,6 +71,9 @@ export interface Client {
 
 export interface Job {
 	id?: string;
+	// )=- Added pbId (was used throughout the sync layer and pull logic but missing from the interface — latent type hole).
+	// This also makes the new invoice helpers and getPaginatedJobsForClient type-safe.
+	pbId?: string;
 	clientId: string;
 	title: string;
 	start: Date;
@@ -92,7 +95,12 @@ export interface Job {
 	cancelReason?: string;
 	cancelNotes?: string;
 	cancelledAt?: Date;
-	cancelledBy: string;
+	// )=- Made optional because createJob (and normal job creation) never supplies it; only cancelJob does.
+	// This was a latent type inaccuracy exposed when we started adding fields to the interface.
+	cancelledBy?: string;
+	// )=- Added for legacy invoice imports (handwritten OCR / Asana CSV). Allows imperfect imported jobs
+	// to still be searchable and linkable while we tolerate missing fields. See JOBS_AND_INVOICES_SPEC.md.
+	importSource?: string;
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -103,14 +111,14 @@ export interface User {
 	firstName?: string;  // )=- Optional for backward compat with existing data. New records always set via createUser/edit.
 	lastName?: string;
 	name: string;  // derived or legacy full name for compat with assignedCrew arrays and old displays
-	pinHash: string;
+	pinHash: string;       // )=- Legacy only (PIN login removed). Kept so old Dexie rows with pinHash don't break on read/put. Ignored everywhere.
 	email?: string;
 	role: 'admin' | 'crew';
 	photo?: string;
 	active: boolean;
-	forcePinUpdate: boolean;
+	forcePinUpdate: boolean; // )=- Legacy flag (PIN removed). No code paths read or act on it for auth gating anymore.
 	forcePhotoUpdate: boolean;
-	verified?: boolean;  // )=- Optional/undefined for old data; treat as false for quick PIN gating. Set true on email verification.
+	verified?: boolean;      // )=- PB email verification flag for the user record. Optional for legacy rows.
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -139,11 +147,48 @@ export interface AppOptions {
 	updatedBy: string;
 }
 
+// )=- New first-class Invoice entity (per JOBS_AND_INVOICES_SPEC.md).
+// Statuses are explicit; overdue is always derived at read time.
+// Supports primary editable .docx + separate supporting documents for the 900+ legacy imports.
+// Files themselves live in PocketBase; Dexie only stores metadata (no large binaries except user avatars).
+export interface Invoice {
+	id?: string;
+	pbId?: string;
+	jobId: string; // local or PB id — resolved during sync like clientId on jobs
+	clientId: string; // denormalized for queries and legacy import flexibility
+	status: 'draft' | 'generated' | 'sent' | 'paid';
+	dueDate: Date;
+	paidAt?: Date;
+	amount: number;
+	// Optional snapshot so historical invoices don't shift if the job billables are later edited
+	billableItems?: Array<{
+		title: string;
+		price: number;
+		quantity: number;
+		total: number;
+	}>;
+	notes?: string;
+	// )=- 'asana-export', 'handwritten-ocr', 'manual', etc. Must allow imperfect data for imports.
+	importSource?: string;
+	// The one editable .docx the user reviews, manually edits in Word, then re-uploads.
+	primaryInvoiceFile?: {
+		filename: string;
+	};
+	// Scans, photos, original exports, etc. Stored separately from the primary editable doc.
+	supportingDocuments?: Array<{
+		filename: string;
+		type?: string;
+	}>;
+	createdAt: Date;
+	updatedAt: Date;
+}
+
 // Simple sync queue
 export interface SyncQueueItem {
 	id?: string;
 	type: 'create' | 'update' | 'delete';
-	collection: 'jobs' | 'clients' | 'users';
+	// )=- Added 'invoices' so the existing optimistic + queue + pull pattern works for the new entity.
+	collection: 'jobs' | 'clients' | 'users' | 'invoices';
 	recordId: string;
 	data?: any;
 	createdAt: Date;
@@ -155,14 +200,34 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	users: EntityTable<User, 'id'>;
 	syncQueue: EntityTable<SyncQueueItem, 'id'>;
 	options: EntityTable<AppOptions, 'id'>;
+	// )=- New invoices store. Indexes chosen for the main access patterns:
+	// - jobId for the common "get invoice for this job" lookup in details modal & cards
+	// - clientId for the expandable related jobs on the clients page
+	// - status + dueDate for facets, overdue computation, and has/no-invoice filtering
+	// - pbId added in v19 (was missing, causing SchemaError on pull after first PB invoice save)
+	invoices: EntityTable<Invoice, 'id'>;
 };
 
-db.version(16).stores({
+// )=- Bumped to version 19 to add pbId index to the invoices object store.
+// This fixes the exact Dexie SchemaError the user just reported:
+//   "KeyPath pbId on object store invoices is not indexed"
+//   (triggered in pullInvoicesFromServer at the `db.invoices.where('pbId').equals(rec.id).first()` line
+//    during refreshFromServer on /jobs after the first successful invoice push to PocketBase).
+// Root cause: The Invoice interface + createInvoice/updateInvoice queue code + pull merge logic
+// (and get-by-pbId fallbacks) all assumed/used pbId on invoices (like we did for jobs/clients/users),
+// but when the invoices store was first declared the .stores() string omitted `, pbId`.
+// Dexie only allows .where() on declared indexes/primary keys. Adding the index in a new version(19)
+// lets Dexie upgrade the DB and makes the "find existing local by server pbId for last-write-wins + stale delete"
+// work after the first server invoice appears.
+// Previous v18 bump was for jobs pbId (same class of bug).
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md (Phase 1/2 data + sync)
+db.version(19).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
-	jobs: 'id, clientId, start, end, status, areaOfTown',
-	users: 'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',  // )=- Bumped to v16 for firstName, lastName, verified fields. Indexed for lookups (PIN login by firstName, etc.).
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId',
+	users: 'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified', // forcePinUpdate + pinHash/verified kept in schema for legacy row compat (PIN auth deleted)
 	syncQueue: '++id, type, collection, recordId, createdAt',
-	options: 'id'
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId'
 });
 
 // ==================== JOB FUNCTIONS ====================
@@ -329,6 +394,395 @@ export async function getJobsForRange(
 		.toArray();
 }
 
+// )=- New paginated job query specifically for the expandable "Related Jobs" lists on the clients page.
+// Defensive matching on local clientId OR the client's pbId (exactly like loadClientsWithLastJob).
+// Returns most recent first, limited for pagination (default 10 as specified).
+// includeCancelled allows future "include cancelled" facet usage.
+// Reference: JOBS_AND_INVOICES_SPEC.md
+export async function getPaginatedJobsForClient(
+	clientId: string,
+	{ limit = 10, offset = 0, includeCancelled = false }: { limit?: number; offset?: number; includeCancelled?: boolean } = {}
+): Promise<Job[]> {
+	const client = await db.clients.get(clientId);
+	const possibleIds = new Set<string>();
+	if (clientId) possibleIds.add(clientId);
+	if (client?.pbId) possibleIds.add(client.pbId);
+
+	let jobs = await db.jobs
+		.where('clientId')
+		.anyOf([...possibleIds])
+		.toArray();
+
+	if (!includeCancelled) {
+		jobs = jobs.filter((j: Job) => j.status !== 'cancelled');
+	}
+
+	// )=- Deduplicate by canonical id (pbId || id). This prevents "double loading each job" in the
+	// client page related jobs expandable if Dexie has duplicate job records for the same logical
+	// job (one keyed by local id, one by pbId after sync). Matches the defensive logic used in
+	// loadClientsWithLastJob and pull jobs.
+	// Reference: JOBS_AND_INVOICES_SPEC.md
+	const seen = new Set<string>();
+	jobs = jobs.filter((j: Job) => {
+		const key = j.pbId || j.id || '';
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+
+	// Most recent first (consistent with existing client "last job" / "upcoming" logic)
+	jobs.sort((a: Job, b: Job) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+	return jobs.slice(offset, offset + limit);
+}
+
+// ==================== INVOICE FUNCTIONS ====================
+// )=- Core CRUD + lookup helpers for the new first-class Invoice entity.
+// Follows the exact same optimistic local + queue + processSyncQueue pattern as jobs/clients.
+// File handling (primaryInvoiceFile + supportingDocuments) is intentionally left as metadata only here;
+// the actual PB file upload logic will be added in Phase 2 (per spec).
+// All dates are normalized to Date objects. Snapshots (billableItems) are cloned.
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+
+export async function createInvoice(
+	invoiceData: Partial<Invoice> & { id?: string },
+	files?: {
+		primary?: { blob: Blob; filename: string };
+		supporting?: Array<{ blob: Blob; filename: string; type?: string }>;
+	}
+): Promise<string> {
+	const newId = invoiceData.id || crypto.randomUUID();
+
+	// Resolve both client and job to their real (PB-preferred) ids for sync consistency.
+	const realClientId = await resolveClientPbId(invoiceData.clientId || '');
+
+	// Try to get the canonical job id (prefer pbId if the job has been synced)
+	const job = invoiceData.jobId ? await db.jobs.get(invoiceData.jobId) : null;
+	const realJobId = job?.pbId || job?.id || invoiceData.jobId || '';
+
+	// )=- Build metadata-only record for Dexie (no blobs stored locally per spec: only avatars keep data URLs).
+	// File blobs (for .docx and scans) are passed only via the queue data for sync (see _files below).
+	const newInvoice = safeClone({
+		...invoiceData,
+		id: newId,
+		clientId: realClientId || invoiceData.clientId || '',
+		jobId: realJobId,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+		status: invoiceData.status || 'draft',
+		dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : new Date(),
+		amount: Number(invoiceData.amount) || 0,
+		billableItems: invoiceData.billableItems ? invoiceData.billableItems.map((item: any) => ({ ...item })) : undefined,
+		// Store only filenames in the persistent Dexie record
+		primaryInvoiceFile: files?.primary ? { filename: files.primary.filename } : invoiceData.primaryInvoiceFile,
+		supportingDocuments: files?.supporting 
+			? files.supporting.map(s => ({ filename: s.filename, type: s.type })) 
+			: invoiceData.supportingDocuments,
+	});
+
+	const id = await db.invoices.add(newInvoice);
+
+	// )=- Queue data includes _files (blobs) only for the sync step. The actual invoice record in Dexie stays metadata-only.
+	// This matches the pattern used for user passwords (only in queueData) and follows "don't keep image/document files locally".
+	const queueData = {
+		...newInvoice,
+		...(files && { _files: files })
+	};
+
+	await addToSyncQueue({
+		type: 'create',
+		collection: 'invoices',
+		recordId: String(id),
+		data: queueData
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+
+	// )=- Cast to string because Dexie add can return the key type which the project's other create* functions also rely on.
+	// We guarantee a string id via crypto.randomUUID() fallback.
+	const returnedId = String(id);
+	console.log(`✅ Invoice created locally (optimistic): ${returnedId}`);
+	return returnedId;
+}
+
+export async function updateInvoice(
+	invoiceId: string, 
+	updates: Partial<Invoice>,
+	files?: {
+		primary?: { blob: Blob; filename: string };
+		supporting?: Array<{ blob: Blob; filename: string; type?: string }>;
+	}
+) {
+	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
+
+	// If clientId or jobId are being updated, resolve them
+	if (safeUpdates.clientId) {
+		safeUpdates.clientId = await resolveClientPbId(safeUpdates.clientId);
+	}
+	if (safeUpdates.jobId) {
+		const job = await db.jobs.get(safeUpdates.jobId);
+		if (job) {
+			safeUpdates.jobId = job.pbId || job.id || safeUpdates.jobId;
+		}
+	}
+
+	// )=- Apply filename metadata for any new/replaced files without storing blobs in Dexie.
+	// Primary is always a full replace (the editable .docx).
+	// Supporting is additive (append new scans/PDFs for legacy or extras) so we don't lose previous entries in Dexie.
+	// The actual new blobs go in _files for the queue/FormData; PB multi-file update receives only the delta files (existing stay on server).
+	// On next pull the full authoritative list comes back.
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+	if (files?.primary) {
+		safeUpdates.primaryInvoiceFile = { filename: files.primary.filename };
+	}
+	if (files?.supporting?.length) {
+		const current = await db.invoices.get(invoiceId);
+		const prev = current?.supportingDocuments || [];
+		const added = files.supporting.map(s => ({ filename: s.filename, type: s.type }));
+		safeUpdates.supportingDocuments = [...prev, ...added];
+	}
+
+	await db.invoices.update(invoiceId, safeUpdates);
+
+	// )=- Include _files (blobs) only in queue data for the sync step. Dexie record keeps only metadata.
+	// )=- If this invoice currently has no pbId (local-only, original create never landed on PB, or this is the first
+	// mutation like Regenerate on a draft that was only local), promote the queue item to 'create' and enrich
+	// the data with the full current Dexie record. This ensures the processor create branch runs (with the new
+	// primary/supporting files) instead of queuing an 'update' that would target a non-existent PB id and 404.
+	// The processor will still handle races (if a create landed between queue and process, the create branch can
+	// be extended later to fall back to update if pbId now present).
+	// This eliminates the 404 PATCH the user is seeing in logs for "regenerate on local invoice without PB row".
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+	const current = await db.invoices.get(invoiceId);
+	const hasPbId = !!current?.pbId;
+	const effectiveType = hasPbId ? 'update' : 'create';
+
+	let queueData = {
+		...safeUpdates,
+		...(files && { _files: files })
+	};
+
+	if (!hasPbId && current) {
+		// Enrich so create processor gets jobId, clientId, amount, billableItems, status, dueDate etc. + the _files delta.
+		queueData = {
+			...current,
+			...safeUpdates,
+			...(files && { _files: files })
+		};
+	}
+
+	await addToSyncQueue({
+		type: effectiveType,
+		collection: 'invoices',
+		recordId: invoiceId,
+		data: queueData
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+	console.log(`✅ Invoice ${invoiceId} updated locally (optimistic)`);
+}
+
+// )=- Shared helper for overdue computation (used in jobs cards, clients related jobs, modal, facets).
+// Overdue = has invoice, not 'paid', and dueDate in the past.
+// Kept here so it's consistent and easy to unit test / reuse. Matches the derived in JobDetailsModal.
+// )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (overdue visual treatment everywhere) + Remedine/Svelte_FullCalendar_Dexie_Scheduling
+export function isInvoiceOverdue(invoice?: Invoice | null): boolean {
+	if (!invoice) return false;
+	if (invoice.status === 'paid') return false;
+	const due = invoice.dueDate instanceof Date ? invoice.dueDate : new Date(invoice.dueDate);
+	return due < new Date();
+}
+
+export async function getInvoiceForJob(jobId: string): Promise<Invoice | undefined> {
+	if (!jobId) return undefined;
+
+	// Direct match (most common case)
+	let invoice = await db.invoices.where('jobId').equals(jobId).first();
+	if (invoice) return invoice;
+
+	// Defensive: if the passed jobId is a local id, try the job's pbId (or vice versa)
+	const job = await db.jobs.get(jobId);
+	if (job?.pbId) {
+		invoice = await db.invoices.where('jobId').equals(job.pbId).first();
+		if (invoice) return invoice;
+	}
+
+	// Also try the reverse: if jobId passed is a pbId, see if any invoice points to the local job id
+	// (rare after normalization, but cheap)
+	const localJob = await db.jobs.where('pbId').equals(jobId).first();
+	if (localJob) {
+		invoice = await db.invoices.where('jobId').equals(localJob.id!).first();
+		if (invoice) return invoice;
+	}
+
+	return undefined;
+}
+
+export async function getInvoicesForClient(clientId: string, limit = 50): Promise<Invoice[]> {
+	const client = await db.clients.get(clientId);
+	const possibleIds = new Set<string>();
+	if (clientId) possibleIds.add(clientId);
+	if (client?.pbId) possibleIds.add(client.pbId);
+
+	return await db.invoices
+		.where('clientId')
+		.anyOf([...possibleIds])
+		.sortBy('dueDate')
+		.then((invs: Invoice[]) => invs.slice(0, limit));
+}
+
+// )=- generateInvoiceDocx helper (Phase 4).
+// Uses the existing docx + file-saver dependencies to produce an editable .docx the user can open in Word.
+// Called from the JobInvoicePanel (or directly from modal for the "Generate Draft" button).
+// The returned Blob is immediately downloadable and can be passed to createInvoice/updateInvoice via the files param
+// so it gets stored in PB as the primaryInvoiceFile.
+// We keep the document simple but professional for now (title, client info, billables table, totals, notes).
+// This is the implementation of the "one-click Mark Complete → auto-generated editable Word invoice" promise in the readme.
+// Uses browser-safe Packer.toBlob() (not toBuffer) so it runs in the SvelteKit/Vite client without nodebuffer errors.
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+export async function generateInvoiceDocx(
+	job: Job,
+	client: Client | null | undefined,
+	opts: { taxRate?: number; invoiceDueDays?: number; businessName?: string } = {}
+): Promise<Blob> {
+	// Dynamic import so we don't pull docx into every bundle that imports db
+	const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, BorderStyle } = await import('docx');
+
+	const businessName = opts.businessName || 'Capital City Windows';
+	const dueDate = job.end ? new Date(new Date(job.end).getTime() + (opts.invoiceDueDays ?? 30) * 86400000) : null;
+
+	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
+		new TableRow({
+			children: [
+				new TableCell({ 
+					children: [new Paragraph({ 
+						children: [new TextRun({ text: item.title || `Item ${idx + 1}` })] 
+					})] 
+				}),
+				new TableCell({ 
+					children: [new Paragraph({ 
+						alignment: AlignmentType.RIGHT,
+						children: [new TextRun({ text: String(item.quantity || 1) })] 
+					})] 
+				}),
+				new TableCell({ 
+					children: [new Paragraph({ 
+						alignment: AlignmentType.RIGHT,
+						children: [new TextRun({ text: `$${(item.price || 0).toFixed(2)}` })] 
+					})] 
+				}),
+				new TableCell({ 
+					children: [new Paragraph({ 
+						alignment: AlignmentType.RIGHT,
+						children: [new TextRun({ text: `$${(item.total || 0).toFixed(2)}` })] 
+					})] 
+				}),
+			]
+		})
+	);
+
+	const doc = new Document({
+		sections: [{
+			properties: {},
+			children: [
+				new Paragraph({
+					alignment: AlignmentType.CENTER,
+					children: [new TextRun({ text: businessName, bold: true, size: 36 })]
+				}),
+				new Paragraph({
+					alignment: AlignmentType.CENTER,
+					children: [new TextRun({ text: 'INVOICE', bold: true, size: 28, color: '1e40af' })]
+				}),
+				new Paragraph({ text: '' }),
+				new Paragraph({ children: [new TextRun({ text: `Job: ${job.title || 'Untitled'}`, bold: true })] }),
+				new Paragraph({ children: [new TextRun({ text: `Date: ${new Date(job.start).toLocaleDateString()}` })] }),
+				new Paragraph({ children: [new TextRun({ text: `Client: ${client?.name || job.clientId}` })] }),
+				new Paragraph({ text: '' }),
+				new Table({
+					rows: [
+						new TableRow({
+							children: [
+								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Description', bold: true })] })] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Qty', bold: true })] })] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Unit', bold: true })] })] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Total', bold: true })] })] }),
+							]
+						}),
+						...billableRows,
+						new TableRow({
+							children: [
+								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Subtotal', bold: true })] })] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.subtotal || 0).toFixed(2)}`, bold: true })] })] }),
+							]
+						}),
+						new TableRow({
+							children: [
+								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `Tax (${(job.taxRate || 0).toFixed(1)}%)` })] })] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.taxAmount || 0).toFixed(2)}` })] })] }),
+							]
+						}),
+						new TableRow({
+							children: [
+								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true })] })] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [] }),
+								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.totalAmount || 0).toFixed(2)}`, bold: true })] })] }),
+							]
+						}),
+					]
+				}),
+				new Paragraph({ text: '' }),
+				new Paragraph({ children: [new TextRun({ text: `Due Date: ${dueDate ? dueDate.toLocaleDateString() : '—'}` })] }),
+				new Paragraph({ text: '' }),
+				new Paragraph({ children: [new TextRun({ text: job.notes ? `Notes: ${job.notes}` : '' })] }),
+				new Paragraph({ text: 'Thank you for your business!' }),
+			]
+		}]
+	});
+
+	const blob = await Packer.toBlob(doc);
+	// )=- Switched from Packer.toBuffer() (Node-only, causes "nodebuffer is not supported by this platform" in browser via jszip/docx internals) to Packer.toBlob().
+	// toBlob() is the official browser path, returns a proper Blob directly (correct mime). Matches exactly what JobInvoicePanel passes to createInvoice/updateInvoice _files.primary and what saveAs expects.
+	// This fixes the exact error from the pasted logs (JobInvoicePanel:69 during handleGenerateDraft / handleRegenerate).
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md Phase 4. Also keeps the dynamic import.
+	return blob;
+}
+
+// )=- Convenience helper used by "Mark Complete" flow and draft generation.
+// Creates (or returns existing) invoice linked to the job, with proper dueDate from options.
+// Does NOT generate the .docx here — that will live in the UI layer / dedicated helper (Phase 4).
+export async function ensureInvoiceForJob(job: Job, status: Invoice['status'] = 'generated'): Promise<string> {
+	const existing = await getInvoiceForJob(job.id!);
+	if (existing) {
+		// If we are "completing" a job that only had a draft, bump the status
+		if (existing.status === 'draft' && status === 'generated') {
+			await updateInvoice(existing.id!, { status: 'generated', updatedAt: new Date() });
+		}
+		return existing.id!;
+	}
+
+	const optionsRecord = await db.options.get(1);
+	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
+	const dueDate = new Date(new Date(job.end).getTime() + dueDays * 24 * 60 * 60 * 1000);
+
+	const invoiceData: Partial<Invoice> = {
+		jobId: job.id,
+		clientId: job.clientId,
+		status,
+		dueDate,
+		amount: job.totalAmount,
+		billableItems: job.billableItems ? job.billableItems.map((i: any) => ({ ...i })) : undefined,
+		notes: job.notes,
+		importSource: job.importSource,
+	};
+
+	return await createInvoice(invoiceData);
+}
+
 // ==================== CLIENT FUNCTIONS ====================
 
 export async function createClient(
@@ -395,11 +849,12 @@ export async function deleteClient(clientId: string) {
 	if (navigator.onLine) await processSyncQueue();
 }
 
-// )=- Updated createUser for new auth flow: requires firstName, lastName, email, password (for PB verified auth record).
-// Sets derived 'name', verified: false initially (PIN quick-login only after email verification sets it true).
-// Password is passed only in queue data for PB create (not stored in local Dexie user).
+// )=- Updated createUser for email/password only auth flow: requires firstName, lastName, email, password (for PB auth record + verification).
+// Sets derived 'name'. No pinHash/forcePinUpdate/verified set here (those are legacy).
+// Password is passed only in queue data for PB create (PB handles hashing; not stored in local Dexie user).
 // Follows clients/jobs pattern exactly for local id vs PB id.
 export async function createUser(
+	// )=- PIN login removed; creation no longer emits verified/forcePinUpdate/pinHash.
 	userData: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'pbId' | 'name' | 'verified'> & { password: string }
 ): Promise<string> {
 	const { password, firstName, lastName, ...rest } = userData;
@@ -412,7 +867,8 @@ export async function createUser(
 		firstName,
 		lastName,
 		name: fullName,
-		verified: false,  // )=- New users start unverified for quick PIN; set true on successful email/password login.
+		// )=- Do not set pinHash/forcePinUpdate/verified on new records (PIN login completely removed).
+		// Interface + Dexie schema retain the columns purely for reading old migrated data without errors.
 		createdAt: new Date(),
 		updatedAt: new Date()
 	});
@@ -698,7 +1154,7 @@ export async function processSyncQueue() {
 						// triggers "validation_values_mismatch" (because email change confirmation is enabled by default).
 						// Email changes are handled via pb.collection('users').requestEmailChange() in the profile UI
 						// (the secure flow that sends a confirmation to the new address).
-						// We still update the email locally in Dexie for immediate app use (PIN login etc.).
+						// We still update the email locally in Dexie for immediate app use.
 						if ('email' in pbPayload) {
 							delete (pbPayload as any).email;
 						}
@@ -742,10 +1198,337 @@ export async function processSyncQueue() {
 				}
 			}
 
+			// )=- Phase 2: Real invoice sync including PB file handling for primaryInvoiceFile + supportingDocuments.
+			// Uses FormData when files (_files) are present in queue data so PB correctly receives the Blobs as file fields.
+			// For plain metadata (no files) we fall back to regular object create/update (cheaper).
+			// Blobs in _files are converted to File (with proper name) before sending.
+			// After successful push we store the pbId back to the local Dexie record (like jobs/clients).
+			// Note: We never store the actual file blobs in the persistent invoices Dexie table — only in the transient queue item.
+			// Pull of file metadata happens via future pullInvoices or on-demand via pb.files.getUrl in the UI.
+			// Reference: JOBS_AND_INVOICES_SPEC.md + "don't keep any image files locally (except avatars)".
+			if (item.collection === 'invoices') {
+				if (item.type === 'create') {
+					try {
+						const data = item.data;
+						const localAtProcess = await db.invoices.get(item.recordId);
+
+						// )=- If by the time this create item is processed the local now has a pbId (e.g. the original
+						// create from Generate ran, or a promoted update fallback created it), treat this as an update
+						// instead so we don't create duplicate records on PB. Use the files from this item if present.
+						if (localAtProcess?.pbId) {
+							const realId = localAtProcess.pbId;
+							const hasFiles = !!data._files;
+							if (hasFiles) {
+								const formData = new FormData();
+								Object.keys(data).forEach((key) => {
+									if (key === '_files') return;
+									const val = data[key];
+									if (val == null) return;
+									if (val instanceof Date) formData.append(key, val.toISOString());
+									else if (typeof val === 'object' && !Array.isArray(val)) formData.append(key, JSON.stringify(val));
+									else formData.append(key, String(val));
+								});
+								if (data._files?.primary) {
+									const f = data._files.primary;
+									formData.append('primaryInvoiceFile', new File([f.blob], f.filename, { type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+								}
+								if (data._files?.supporting?.length) {
+									for (const s of data._files.supporting) {
+										formData.append('supportingDocuments', new File([s.blob], s.filename, { type: s.type || s.blob.type || 'application/octet-stream' }));
+									}
+								}
+								await pb.collection('invoices').update(realId, formData);
+								console.log(`✅ Invoice (with files) updated in PocketBase (create item promoted to update): ${realId}`);
+							} else {
+								await pb.collection('invoices').update(realId, data);
+								console.log(`✅ Invoice updated in PocketBase (create item promoted to update): ${realId}`);
+							}
+						} else {
+							const hasFiles = !!data._files;
+
+							if (hasFiles) {
+								// Use FormData for reliable multi-file + scalar upload
+								const formData = new FormData();
+
+								// Append scalar fields (PB will interpret relations by id)
+								if (data.jobId) formData.append('job', data.jobId);
+								if (data.clientId) formData.append('client', data.clientId);
+								if (data.status) formData.append('status', data.status);
+								if (data.dueDate) formData.append('dueDate', data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate);
+								if (data.paidAt) formData.append('paidAt', data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt);
+								if (data.amount != null) formData.append('amount', String(data.amount));
+								if (data.billableItems) formData.append('billableItems', JSON.stringify(data.billableItems));
+								if (data.notes) formData.append('notes', data.notes);
+								if (data.importSource) formData.append('importSource', data.importSource);
+
+								// Primary .docx (the editable one)
+								if (data._files.primary) {
+									const f = data._files.primary;
+									const file = new File([f.blob], f.filename, { 
+										type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+									});
+									formData.append('primaryInvoiceFile', file);
+								}
+
+								// Supporting scans / other docs (multiple)
+								if (data._files.supporting?.length) {
+									for (const s of data._files.supporting) {
+										const file = new File([s.blob], s.filename, { 
+											type: s.type || s.blob.type || 'application/octet-stream' 
+										});
+										formData.append('supportingDocuments', file);
+									}
+								}
+
+								const record = await pb.collection('invoices').create(formData);
+								await db.invoices.update(item.recordId, { pbId: record.id });
+								console.log(`✅ Invoice (with files) pushed to PocketBase: ${record.id}`);
+							} else {
+								// No files — plain JSON create (faster)
+								const pbPayload: any = {
+									job: data.jobId,
+									client: data.clientId,
+									status: data.status || 'draft',
+									dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
+									paidAt: data.paidAt ? (data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt) : null,
+									amount: Number(data.amount) || 0,
+									billableItems: data.billableItems || [],
+									notes: data.notes || undefined,
+									importSource: data.importSource || undefined
+								};
+								const record = await pb.collection('invoices').create(pbPayload);
+								await db.invoices.update(item.recordId, { pbId: record.id });
+								console.log(`✅ Invoice pushed to PocketBase: ${record.id}`);
+							}
+						}
+					} catch (err: any) {
+						console.error('❌ Invoice create sync failed:', err?.response?.data || err);
+					}
+				} else if (item.type === 'update') {
+					try {
+						const localInvoice = await db.invoices.get(item.recordId);
+						const data = item.data;
+						const hasFiles = !!data._files;
+
+						if (!localInvoice) {
+							// Local record disappeared between queuing and processing — drop the item.
+							await db.syncQueue.delete(item.id!);
+							throw { __intentionallyDropped: true, reason: 'local invoice record missing during sync' };
+						}
+
+						if (!localInvoice.pbId) {
+							// )=- Fallback create for invoices that only exist locally (no pbId yet).
+							// This happens when the original createInvoice (from Generate Draft) never successfully
+							// landed on PocketBase (offline, previous error, strict collection rules, or the row was
+							// deleted on server), but the user later does "Regenerate" (or other update with files).
+							// Previously this would do .update(realId=localUUID) → 404 on PB (see the exact error
+							// the user reported: 404 on /invoices/records/<uuid> then misleading "Synced update").
+							// Now we promote the pending update to a create using the *current full state* from Dexie
+							// (which has the latest snapshot + any local changes) + the files from *this* queue item
+							// (the newly regenerated .docx). After success we stamp pbId exactly like the normal create path.
+							// This makes "regenerate on a local-only invoice" work and is resilient for the sync queue.
+							// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+							if (hasFiles) {
+								const formData = new FormData();
+
+								// Full fields from the current local record (the authoritative state for initial create)
+								if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
+								if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
+								if (localInvoice.status) formData.append('status', localInvoice.status);
+								if (localInvoice.dueDate) formData.append('dueDate', localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate);
+								if (localInvoice.paidAt) formData.append('paidAt', localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt);
+								if (localInvoice.amount != null) formData.append('amount', String(localInvoice.amount));
+								if (localInvoice.billableItems) formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
+								if (localInvoice.notes) formData.append('notes', localInvoice.notes);
+								if (localInvoice.importSource) formData.append('importSource', localInvoice.importSource);
+
+								// The delta files from this update (e.g. the regenerated primary docx)
+								if (data._files.primary) {
+									const f = data._files.primary;
+									const file = new File([f.blob], f.filename, { 
+										type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+									});
+									formData.append('primaryInvoiceFile', file);
+								}
+								if (data._files.supporting?.length) {
+									for (const s of data._files.supporting) {
+										const file = new File([s.blob], s.filename, { 
+											type: s.type || s.blob.type || 'application/octet-stream' 
+										});
+										formData.append('supportingDocuments', file);
+									}
+								}
+
+								const record = await pb.collection('invoices').create(formData);
+								await db.invoices.update(item.recordId, { pbId: record.id });
+								console.log(`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback): ${record.id}`);
+							} else {
+								const pbPayload: any = {
+									job: localInvoice.jobId,
+									client: localInvoice.clientId,
+									status: localInvoice.status || 'draft',
+									dueDate: localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate,
+									paidAt: localInvoice.paidAt ? (localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt) : null,
+									amount: Number(localInvoice.amount) || 0,
+									billableItems: localInvoice.billableItems || [],
+									notes: localInvoice.notes || undefined,
+									importSource: localInvoice.importSource || undefined
+								};
+								const record = await pb.collection('invoices').create(pbPayload);
+								await db.invoices.update(item.recordId, { pbId: record.id });
+								console.log(`✅ Invoice pushed to PocketBase (regenerate/create fallback): ${record.id}`);
+							}
+						} else {
+							// Normal update path — we have a pbId so the record should exist on PB.
+							let realId = localInvoice.pbId;
+							let updateSucceeded = false;
+
+							try {
+								if (hasFiles) {
+									const formData = new FormData();
+
+									// Only append fields that are being updated
+									Object.keys(data).forEach((key) => {
+										if (key === '_files') return;
+										const val = data[key];
+										if (val == null) return;
+										if (val instanceof Date) {
+											formData.append(key, val.toISOString());
+										} else if (typeof val === 'object' && !Array.isArray(val)) {
+											formData.append(key, JSON.stringify(val));
+										} else {
+											formData.append(key, String(val));
+										}
+									});
+
+									if (data._files.primary) {
+										const f = data._files.primary;
+										const file = new File([f.blob], f.filename, { 
+											type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+										});
+										formData.append('primaryInvoiceFile', file);
+									}
+									if (data._files.supporting?.length) {
+										for (const s of data._files.supporting) {
+											const file = new File([s.blob], s.filename, { 
+												type: s.type || s.blob.type || 'application/octet-stream' 
+											});
+											formData.append('supportingDocuments', file);
+										}
+									}
+
+									await pb.collection('invoices').update(realId, formData);
+									console.log(`✅ Invoice (with files) updated in PocketBase: ${realId}`);
+								} else {
+									await pb.collection('invoices').update(realId, data);
+									console.log(`✅ Invoice updated in PocketBase: ${realId}`);
+								}
+								updateSucceeded = true;
+							} catch (updateErr: any) {
+								const is404 = updateErr?.status === 404 || updateErr?.response?.status === 404 || updateErr?.statusCode === 404;
+								if (is404) {
+									// )=- The PB record for this pbId no longer exists on the server (was deleted in Admin UI,
+									// or create never fully committed, or collection was reset), but we have a stale pbId locally
+									// and this update (e.g. Regenerate) carries the latest file.
+									// Fall back to create using the current full localInvoice data + the files from this queue item.
+									// This prevents the 404 the user saw when regenerating a locally-existing invoice that has
+									// no row (anymore) on PocketBase.
+									// After create we will overwrite the (stale) pbId.
+									// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+									console.warn(`Invoice ${realId} 404 on update — falling back to create from current local state + delta files`);
+									// proceed to fallback create below by setting flag
+								} else {
+									throw updateErr;
+								}
+							}
+
+							if (!updateSucceeded) {
+								// Fallback create path (triggered either by no pbId above, or by 404 on update here)
+								if (hasFiles) {
+									const formData = new FormData();
+
+									if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
+									if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
+									if (localInvoice.status) formData.append('status', localInvoice.status);
+									if (localInvoice.dueDate) formData.append('dueDate', localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate);
+									if (localInvoice.paidAt) formData.append('paidAt', localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt);
+									if (localInvoice.amount != null) formData.append('amount', String(localInvoice.amount));
+									if (localInvoice.billableItems) formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
+									if (localInvoice.notes) formData.append('notes', localInvoice.notes);
+									if (localInvoice.importSource) formData.append('importSource', localInvoice.importSource);
+
+									if (data._files.primary) {
+										const f = data._files.primary;
+										const file = new File([f.blob], f.filename, { 
+											type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+										});
+										formData.append('primaryInvoiceFile', file);
+									}
+									if (data._files.supporting?.length) {
+										for (const s of data._files.supporting) {
+											const file = new File([s.blob], s.filename, { 
+												type: s.type || s.blob.type || 'application/octet-stream' 
+											});
+											formData.append('supportingDocuments', file);
+										}
+									}
+
+									const record = await pb.collection('invoices').create(formData);
+									await db.invoices.update(item.recordId, { pbId: record.id });
+									console.log(`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`);
+								} else {
+									const pbPayload: any = {
+										job: localInvoice.jobId,
+										client: localInvoice.clientId,
+										status: localInvoice.status || 'draft',
+										dueDate: localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate,
+										paidAt: localInvoice.paidAt ? (localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt) : null,
+										amount: Number(localInvoice.amount) || 0,
+										billableItems: localInvoice.billableItems || [],
+										notes: localInvoice.notes || undefined,
+										importSource: localInvoice.importSource || undefined
+									};
+									const record = await pb.collection('invoices').create(pbPayload);
+									await db.invoices.update(item.recordId, { pbId: record.id });
+									console.log(`✅ Invoice pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`);
+								}
+							}
+						}
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+							// Prevent the unconditional "✅ Synced update" log below and the outer "Failed to sync" log.
+							// This 404 means the PB record didn't exist (either never created or was deleted on server).
+							// For the !pbId case we already did the fallback create above; for has-pbId case we abandon this queue item.
+							throw { __intentionallyDropped: true, reason: '404 on invoice update (no PB row)' };
+						} else {
+							console.error('❌ Invoice update sync failed:', err?.response?.data || err);
+						}
+					}
+				} else if (item.type === 'delete') {
+					try {
+						const invoice = await db.invoices.get(item.recordId);
+						const realId = invoice?.pbId || invoice?.id || item.recordId;
+						await pb.collection('invoices').delete(realId);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
+					}
+				}
+			}
+
 			await db.syncQueue.delete(item.id!);
 			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
 		} catch (err) {
-			console.error(`Failed to sync queue item ${item.id}`, err);
+			if (err && (err as any).__intentionallyDropped) {
+				// Expected drop, e.g. 404 on invoice update for a local-only record (the regenerate/create fallback handled it)
+				// or other cases where we deliberately removed the queue item without considering it a failure.
+			} else {
+				console.error(`Failed to sync queue item ${item.id}`, err);
+			}
 		}
 	}
 }
@@ -780,4 +1563,27 @@ export async function cleanupDuplicateUsers() {
 }
 
 export { db };
-export type { Client, Job, User };
+// )=- No need for extra "export type" re-export. The `export interface Invoice` declaration (above) already makes
+// `import { Invoice } from '$lib/db'` work. The previous export type line was causing duplicate export conflicts
+// in svelte-check even for a single name.
+// Reference: JOBS_AND_INVOICES_SPEC.md (Phase 1)
+
+// )=- Helper to turn a user.photo (which may be data: URL, full http, or bare PB filename like "blob_xxx.png")
+// into a usable <img src> value.
+// When bare filename, use pb.files.getURL (note capital URL per current SDK) to build the API URL.
+// This is the central fix for crew/user avatar 404s showing as relative /blob_... paths in layout, jobs cards,
+// calendar event cards, and job details modal.
+// Call this in templates or when building photo maps.
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+export function getUserPhotoSrc(photo: string | undefined, user: any): string | undefined {
+	if (!photo) return undefined;
+	if (photo.startsWith('data:') || photo.startsWith('http')) return photo;
+	const uid = user?.pbId || user?.id;
+	if (!uid) return photo;
+	try {
+		return pb.files.getURL({ id: uid, collectionName: 'users' }, photo);
+	} catch {
+		return photo;
+	}
+}
+
