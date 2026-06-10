@@ -2,6 +2,8 @@
 <script lang="ts">
 	import { db, type Client } from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { goto } from '$app/navigation';
 	import ClientForm from '$lib/components/ClientForm.svelte';
 	import { deleteClient as deleteClientFromDb } from '$lib/db';
 
@@ -41,6 +43,14 @@
 
 		if (sortMode === 'recent') {
 			result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+		} else if (sortMode === 'upcoming') {
+			// )=- Sort by soonest next job (nulls last), fallback to name
+			result.sort((a, b) => {
+				if (a.nextJobDate && b.nextJobDate) return a.nextJobDate.getTime() - b.nextJobDate.getTime();
+				if (a.nextJobDate) return -1;
+				if (b.nextJobDate) return 1;
+				return a.name.localeCompare(b.name);
+			});
 		} else {
 			result.sort((a, b) => a.name.localeCompare(b.name));
 		}
@@ -49,7 +59,14 @@
 	});
 
 	// )=- Replaced onMount with Svelte 5 $effect + flag (per agents.md rules)
+	// )=- Added defensive auth/role check for consistency across all protected pages.
 	let initialized = $state(false);
+
+	$effect(() => {
+		if (!auth.loading && (!auth.isAuthenticated || !auth.currentUser)) {
+			goto('/login', { replaceState: true });
+		}
+	});
 
 	$effect(() => {
 		if (!initialized) {
@@ -80,10 +97,17 @@
 			);
 			const lastJob = clientJobs[0] || null;
 
+			// )=- Compute next upcoming job for 'upcoming' sort and display (future jobs only, soonest first)
+			const futureJobs = clientJobs
+				.filter(j => new Date(j.start) > new Date())
+				.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+			const nextJob = futureJobs[0] || null;
+
 			return {
 				...client,
 				lastJobDate: lastJob ? new Date(lastJob.start) : null,
-				totalJobs: clientJobs.length
+				totalJobs: clientJobs.length,
+				nextJobDate: nextJob ? new Date(nextJob.start) : null
 			};
 		});
 	}
@@ -220,9 +244,12 @@
 
 					<div class="client-card__meta">
 						{#if client.lastJobDate}
-							Last Job: <strong>{client.lastJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+							Last: <strong>{client.lastJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
 						{:else}
 							<span class="no-jobs">No jobs yet</span>
+						{/if}
+						{#if client.nextJobDate}
+							<span> • Next: <strong>{client.nextJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong></span>
 						{/if}
 						{#if client.totalJobs > 0}
 							<span> • {client.totalJobs} job{client.totalJobs > 1 ? 's' : ''}</span>
