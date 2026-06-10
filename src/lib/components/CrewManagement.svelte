@@ -1,11 +1,10 @@
 <!-- src/lib/components/CrewManagement.svelte -->
 <script lang="ts">
-  // )=- Removed onMount import (converted to $effect) for full Svelte 5 runes compliance in auth/user management.
-  import { db, type User, updateUser, deleteUser as deleteUserFromDb } from '$lib/db';
+  import { db, type User, updateUser, deleteUser as deleteUserFromDb, getUserPhotoSrc } from '$lib/db';
   import { auth } from '$lib/stores/auth.svelte';
   import NewUserModal from './NewUserModal.svelte';
   import UserJobsModal from './UserJobsModal.svelte';
-  import { loginWithEmail } from '$lib/db/pb';
+  import { loginWithEmail, pullUsersFromServer } from '$lib/db/pb';
 
   let allUsers = $state<User[]>([]);
 
@@ -18,17 +17,23 @@
   let editFirstName = $state('');
   let editLastName = $state('');
   let editRole = $state<'admin' | 'crew'>('crew');
-  let editForcePin = $state(false);
   let editForcePhoto = $state(false);
   let editEmail = $state('');
 
   let isAdmin = $derived(auth.currentUser?.role === 'admin');
 
+  // Guard so we only auto-load the roster once per page instance (prevents repeated server calls on reactivity).
+  let hasAutoLoadedRoster = $state(false);
+
   async function loadUsers() {
     const { cleanupDuplicateUsers } = await import('$lib/db');
     await cleanupDuplicateUsers();
+
+    if (isAdmin && navigator.onLine) {
+      await pullUsersFromServer();
+    }
+
     const raw = await db.users.toArray();
-    // )=- Dedup by email or (pbId || id) ...
     const seen = new Set();
     allUsers = raw.filter((u: any) => {
       const key = u.email || u.pbId || u.id;
@@ -36,6 +41,13 @@
       seen.add(key);
       return true;
     });
+  }
+
+  async function refreshRoster() {
+    if (!isAdmin) return;
+    hasAutoLoadedRoster = false;
+    await pullUsersFromServer(true);
+    await loadUsers();
   }
 
   function openNewUser() {
@@ -52,7 +64,6 @@
     editFirstName = user.firstName || (user.name ? user.name.split(' ')[0] : '');
     editLastName = user.lastName || (user.name ? user.name.split(' ').slice(1).join(' ') : '');
     editRole = user.role;
-    editForcePin = user.forcePinUpdate ?? false;
     editForcePhoto = user.forcePhotoUpdate ?? false;
     showEditModal = true;
   }
@@ -64,7 +75,7 @@
   }
 
   async function saveEdit() {
-    if (!selectedUser || !editName.trim() || !isAdmin) return;
+    if (!selectedUser || (!editFirstName.trim() && !editLastName.trim()) || !isAdmin) return;
 
     const adminCount = allUsers.filter(u => u.role === 'admin' && u.active).length;
     if (selectedUser.role === 'admin' && editRole !== 'admin' && adminCount <= 1) {
@@ -72,15 +83,13 @@
       return;
     }
 
-    // )=- Use updateUser helper (queues for PB sync) instead of direct db.users.update, to match jobs/clients pattern.
     const first = editFirstName.trim();
     const last = editLastName.trim();
     await updateUser(selectedUser.id!, {
       firstName: first,
       lastName: last,
-      name: `${first} ${last}`.trim(),  // )=- Keep derived name for compat with assignedCrew strings and old code.
+      name: `${first} ${last}`.trim(),
       role: editRole,
-      forcePinUpdate: editForcePin,
       forcePhotoUpdate: editForcePhoto,
       updatedAt: new Date()
     });
@@ -141,33 +150,26 @@
     }
 
     if (confirm('Delete this user permanently?')) {
-      // )=- Use deleteUserFromDb (aliased) which queues the delete using pbId if present (see deleteUser in db/index.ts).
       await deleteUserFromDb(id);
       await loadUsers();
     }
   }
 
-  export async function setInitialPin(userId: string, newPin: string) {
-    const bcrypt = await import('bcryptjs');
-    const hashed = await bcrypt.hash(newPin, 10);
-    // )=- Use updateUser for sync consistency (though PIN reset may be local-first).
-    await updateUser(userId, {
-      pinHash: hashed,
-      forcePinUpdate: false,
-      updatedAt: new Date()
-    });
-  }
-
-  // )=- Converted from onMount to $effect for Svelte 5 runes compliance as part of auth/user management cleanup.
   $effect(() => {
-    if (isAdmin) loadUsers();
+    if (isAdmin && !hasAutoLoadedRoster) {
+      hasAutoLoadedRoster = true;
+      loadUsers();
+    }
   });
 </script>
 
 <div class="user-management">
   <header class="user-management__header">
     <h1 class="user-management__title">User Management</h1>
-    <button onclick={openNewUser} class="user-management__add-btn">+ Add New User</button>
+    <div style="display: flex; gap: 0.5rem;">
+      <button onclick={openNewUser} class="user-management__add-btn">+ Add New User</button>
+      <button onclick={refreshRoster} class="user-management__add-btn" style="background: #2196f3;">Refresh roster from server</button>
+    </div>
   </header>
 
   <div class="user-management__grid">
@@ -177,7 +179,8 @@
         <div class="user-management__avatar-col">
           <div class="user-management__avatar">
             {#if user.photo}
-              <img src={user.photo} alt={`${user.firstName} ${user.lastName || user.name || ''}`} class="user-management__avatar-img" />
+              <!-- )=- Use the centralized getUserPhotoSrc helper so bare PB filenames become full /api/files/... URLs instead of relative paths (which resolve to /admin/blob_... and 404). -->
+              <img src={getUserPhotoSrc(user.photo, user)} alt={`${user.firstName} ${user.lastName || user.name || ''}`} class="user-management__avatar-img" />
             {:else}
               <span class="user-management__avatar-placeholder">{(user.firstName || user.name || 'U').slice(0,1).toUpperCase()}</span>
             {/if}
@@ -236,7 +239,6 @@
       <div class="modal-content" onclick={e => e.stopPropagation()}>
         <h2 class="modal__title">Edit {selectedUser.firstName || ''} {selectedUser.lastName || selectedUser.name || ''}</h2>
         <div class="modal__form">
-          <!-- )=- Updated edit form for first/last name split (per new requirement). Fallbacks for old data using 'name'. -->
           <label class="modal__label">First Name</label>
           <input type="text" bind:value={editFirstName} class="modal__input" />
 
@@ -248,11 +250,6 @@
             <option value="crew">Crew</option>
             <option value="admin">Admin</option>
           </select>
-
-          <label class="modal__checkbox-label">
-            <input type="checkbox" bind:checked={editForcePin} />
-            Force PIN change on next login
-          </label>
 
           <label class="modal__checkbox-label">
             <input type="checkbox" bind:checked={editForcePhoto} />

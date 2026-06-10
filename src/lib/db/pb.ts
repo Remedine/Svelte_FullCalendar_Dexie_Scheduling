@@ -1,7 +1,6 @@
 // src/lib/pb.ts
 import PocketBase from 'pocketbase';
 import { db, processSyncQueue, type User } from '$lib/db';
-import * as bcrypt from 'bcryptjs';
 import { setCurrentUser } from '$lib/stores/auth.svelte';
 
 // PocketBase client singleton
@@ -34,7 +33,8 @@ export async function loginWithEmail(email: string, password: string) {
 
 		let localUser: User;
 		if (existing) {
-			// Merge into existing local record (preserve local 'id' UUID for hybrid users, update pbId, sync fields from PB, prefer local pinHash if user has set it).
+			// Merge into existing local record (preserve local 'id' UUID for hybrid users, update pbId, sync fields from PB).
+			// )=- pinHash/forcePinUpdate/verified kept only for backward compat with old Dexie data (PIN login removed).
 			localUser = {
 				...existing,
 				id: existing.id,  // keep local key
@@ -90,6 +90,10 @@ export async function loginWithEmail(email: string, password: string) {
 		// Pull latest data from server first
 		await pullJobsFromServer();
 		await pullClientsFromServer();
+		await pullInvoicesFromServer();
+		if (localUser.role === 'admin') {
+			await pullUsersFromServer();
+		}
 
 		// Then push any pending local changes
 		if (navigator.onLine) {
@@ -100,52 +104,6 @@ export async function loginWithEmail(email: string, password: string) {
 		return authData;
 	} catch (err) {
 		console.error('Email login failed:', err);
-		throw err;
-	}
-}
-
-// Pin Login
-export async function loginWithPin(firstName: string, pin: string) {
-	try {
-		// )=- Support first-name collisions for quick login: fetch candidates by firstName, then find the one whose PIN hash matches the entered PIN.
-		// (PIN is the distinguisher; admin should ensure unique PINs per first name.)
-		const candidates = await db.users.where('firstName').equalsIgnoreCase(firstName).toArray();
-		let user = null;
-		for (const c of candidates) {
-			if (await bcrypt.compare(pin, c.pinHash)) {
-				user = c;
-				break;
-			}
-		}
-
-		if (!user || !user.pinHash) {
-			throw new Error('User not found or no PIN set');
-		}
-
-		// )=- Gate quick PIN only for users that have an email (validated creation) and verified flag.
-		if (user.email && user.verified !== true) {
-			throw new Error('Account not verified yet. Please login with email/password first to activate quick PIN access.');
-		}
-
-		if (!user.active) {
-			throw new Error('Account is inactive');
-		}
-
-		setCurrentUser(user);
-
-		// Pull latest data from server
-		await pullClientsFromServer();
-		await pullJobsFromServer();
-
-		// Then push any pending local changes
-		if (navigator.onLine) {
-			await processSyncQueue();
-		}
-
-		console.log('✅ PIN login successful (offline + sync queue processed):', firstName);
-		return { record: user };
-	} catch (err) {
-		console.error('PIN login failed:', err);
 		throw err;
 	}
 }
@@ -163,8 +121,9 @@ export async function pullJobsFromServer() {
   try {
 		const records = await pb.collection('jobs').getFullList({
 			sort: '-updatedAt',
-			expand: 'client',
-			// line 84 - FIX: disable auto-cancellation to prevent aborted requests
+			// Removed expand: 'client' because the clients collection's rules only allow superusers for expand access (causing "only superusers can view collection \"clients\" records").
+			// We fall back to rec.client for the relation id anyway.
+			// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 			$autoCancel: false
 		});
 
@@ -300,6 +259,213 @@ export async function pullClientsFromServer() {
 		console.log(`✅ Pulled and merged ${totalPulled} clients. Deleted ${totalDeleted} from Dexie.`);
 	} catch (err) {
 		console.error('❌ Pull clients failed:', err);
+	}
+}
+
+export async function pullInvoicesFromServer() {
+	if (!pb.authStore.isValid) return;
+
+	try {
+		const PAGE_SIZE = 100;
+		let page = 1;
+		let totalPages = 1;
+		const pbInvoiceIds = new Set<string>();
+		let totalPulled = 0;
+		let totalDeleted = 0;
+
+		while (page <= totalPages) {
+			const result = await pb.collection('invoices').getList(page, PAGE_SIZE, {
+				// Use system 'updated' field for sort (always present and sortable on any collection).
+				// The invoices collection created in PB may not have a custom 'updatedAt' field (unlike the users collection schema).
+				// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+				sort: '-updated'
+			});
+
+			totalPages = result.totalPages;
+
+			for (const rec of result.items) {
+				pbInvoiceIds.add(rec.id);
+
+				const existingLocal = await db.invoices.where('pbId').equals(rec.id).first();
+
+				const serverInvoice = {
+					id: existingLocal ? existingLocal.id : rec.id,
+					pbId: rec.id,
+					jobId: rec.job || rec.jobId,
+					clientId: rec.client || rec.clientId,
+					status: rec.status || 'draft',
+					dueDate: rec.dueDate ? new Date(rec.dueDate) : new Date(),
+					paidAt: rec.paidAt ? new Date(rec.paidAt) : undefined,
+					amount: Number(rec.amount) || 0,
+					billableItems: rec.billableItems || [],
+					notes: rec.notes || '',
+					importSource: rec.importSource || undefined,
+					primaryInvoiceFile: rec.primaryInvoiceFile ? { filename: rec.primaryInvoiceFile } : undefined,
+					supportingDocuments: (rec.supportingDocuments || []).map((f: any) => ({ filename: typeof f === 'string' ? f : f.filename })),
+					createdAt: new Date(rec.created || rec.createdAt),
+					updatedAt: new Date(rec.updated || rec.updatedAt)
+				};
+
+				const localInvoice = await db.invoices.get(serverInvoice.id);
+				if (localInvoice && localInvoice.updatedAt > serverInvoice.updatedAt) {
+					continue;
+				}
+
+				await db.invoices.put(serverInvoice);
+				totalPulled++;
+			}
+
+			page++;
+		}
+
+		const localInvoices = await db.invoices.toArray();
+		for (const localInvoice of localInvoices) {
+			if (localInvoice.pbId && !pbInvoiceIds.has(localInvoice.pbId)) {
+				await db.invoices.delete(localInvoice.id!);
+				totalDeleted++;
+			}
+		}
+
+		console.log(`✅ Pulled and merged ${totalPulled} invoices. Deleted ${totalDeleted} from Dexie.`);
+	} catch (err) {
+		console.error('❌ Pull invoices failed:', err);
+	}
+}
+
+// Pull users from PocketBase (for admin management views like Crew).
+// Only admins get the full roster pulled into Dexie (safety: regular crew logins intentionally stay minimal and only see self + their local data).
+// We always do a best-effort self-sync from the auth token first so the current admin is fresh (photo, role, etc.).
+// The full list attempt is best-effort; if the PB List rule on users blocks it we fall back to locally-known users (app-created ones are always in Dexie).
+// pinHash (legacy) is only populated for the *current* logged-in admin record; others get '' . force* flags are kept for compat with old rows.
+// Email/password is now the only authentication method (PIN login removed entirely).
+// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+
+// Guard to avoid spamming the server on repeated reactive loads in Crew.
+let rosterPullAttemptedThisSession = false;
+
+export async function pullUsersFromServer(force = false) {
+	if (!pb.authStore.isValid) return;
+
+	if (!force && rosterPullAttemptedThisSession) return;
+	rosterPullAttemptedThisSession = true;
+
+	// @ts-ignore
+	if ((pullUsersFromServer as any)._inFlight) return;
+	// @ts-ignore
+	(pullUsersFromServer as any)._inFlight = true;
+
+	const currentAuth = pb.authStore.model;
+	if (!currentAuth || currentAuth.role !== 'admin') {
+		// @ts-ignore
+		(pullUsersFromServer as any)._inFlight = false;
+		return;
+	}
+
+	// Always ensure the currently authenticated admin is in Dexie with up-to-date server data.
+	try {
+		const existingSelf = await db.users.where('pbId').equals(currentAuth.id).first()
+			|| (currentAuth.id ? await db.users.get(currentAuth.id) : null);
+
+		const nameForSplit = currentAuth.name || '';
+		const computedFirst = currentAuth.firstName || (nameForSplit ? nameForSplit.split(' ')[0] : '');
+		const computedLast = currentAuth.lastName || (nameForSplit ? nameForSplit.split(' ').slice(1).join(' ') : '');
+
+		const selfUser = {
+			id: existingSelf?.id || currentAuth.id,
+			pbId: currentAuth.id,
+			firstName: computedFirst,
+			lastName: computedLast,
+			name: currentAuth.name || `${computedFirst} ${computedLast}`.trim() || (currentAuth.email ? currentAuth.email.split('@')[0] : 'Admin'),
+			pinHash: currentAuth.id ? (currentAuth.pinHash || (existingSelf?.pinHash || '')) : '',
+			email: currentAuth.email || '',
+			role: currentAuth.role || 'admin',
+			photo: (existingSelf?.photo && existingSelf.photo.startsWith('data:')) ? existingSelf.photo : (currentAuth.photo || existingSelf?.photo),
+			active: currentAuth.active ?? true,
+			forcePinUpdate: existingSelf?.forcePinUpdate ?? currentAuth.forcePinUpdate ?? false,
+			forcePhotoUpdate: currentAuth.forcePhotoUpdate ?? false,
+			verified: !!currentAuth.verified,
+			createdAt: new Date(currentAuth.created || currentAuth.createdAt || existingSelf?.createdAt || Date.now()),
+			updatedAt: new Date(currentAuth.updated || currentAuth.updatedAt || existingSelf?.updatedAt || Date.now()),
+		};
+
+		await db.users.put(selfUser);
+	} catch (e) {
+		console.warn('[pullUsers] Could not upsert current admin self into Dexie', e);
+	}
+
+	try {
+		const PAGE_SIZE = 100;
+		let page = 1;
+		let totalPages = 1;
+		const pbUserIds = new Set<string>();
+		let pulled = 0;
+
+		while (page <= totalPages) {
+			const result = await pb.collection('users').getList(page, PAGE_SIZE, {
+				sort: '-updatedAt',
+				$autoCancel: false,
+			});
+
+			totalPages = result.totalPages;
+
+			for (const rec of result.items) {
+				pbUserIds.add(rec.id);
+
+				const existingLocal = await db.users.where('pbId').equals(rec.id).first();
+
+				const serverUser = {
+					id: existingLocal ? existingLocal.id : rec.id,
+					pbId: rec.id,
+					firstName: rec.firstName || '',
+					lastName: rec.lastName || '',
+					name: rec.name || `${rec.firstName || ''} ${rec.lastName || ''}`.trim(),
+					pinHash: rec.id === currentAuth.id ? (rec.pinHash || (existingLocal?.pinHash || '')) : '',
+					email: rec.email || existingLocal?.email || '',
+					role: rec.role || 'crew',
+					photo: rec.photo || (existingLocal?.photo || ''),
+					active: rec.active ?? true,
+					forcePinUpdate: existingLocal?.forcePinUpdate ?? false,
+					forcePhotoUpdate: rec.forcePhotoUpdate ?? false,
+					verified: typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
+					createdAt: new Date(rec.created || rec.createdAt),
+					updatedAt: new Date(rec.updated || rec.updatedAt),
+				};
+
+				const localUser = await db.users.get(serverUser.id);
+				if (localUser && localUser.updatedAt > serverUser.updatedAt) {
+					continue;
+				}
+
+				await db.users.put(serverUser);
+				pulled++;
+			}
+
+			page++;
+		}
+
+		const localUsers = await db.users.toArray();
+		for (const lu of localUsers) {
+			if (lu.pbId && !pbUserIds.has(lu.pbId)) {
+				await db.users.delete(lu.id!);
+				console.log(`🗑️ Removed stale user from Dexie: ${lu.name}`);
+			}
+		}
+
+		if (pulled > 0) {
+			console.log(`✅ Pulled ${pulled} users from PocketBase`);
+		}
+	} catch (err: any) {
+		if (err?.status !== 0) {
+			if (err?.status === 400 || err?.status === 403) {
+				// List on the users collection is restricted by the PB List rule.
+				// We already have the current user via the self-sync above.
+			} else {
+				console.error('❌ Pull users failed', err);
+			}
+		}
+	} finally {
+		// @ts-ignore
+		(pullUsersFromServer as any)._inFlight = false;
 	}
 }
 

@@ -257,6 +257,13 @@ $effect(() => {
 
   async function confirmCancel() {
     if (!editingJobId || !selectedCancelReason) return;
+    // )=- Extra runtime guard: do not allow cancelling completed jobs even if UI button was somehow shown.
+    // Completed jobs should only allow revert (handled in details modal) or other edits.
+    if (currentJob.status === 'completed' || currentJob.status === 'cancelled') {
+      alert('Cannot cancel a completed or already-cancelled job.');
+      showCancelConfirm = false;
+      return;
+    }
     await cancelJob(editingJobId, selectedCancelReason, currentJob.cancelNotes);
     show = false;
     showCancelConfirm = false;
@@ -431,7 +438,10 @@ $effect(() => {
 
       <!-- Sticky Footer -->
       <div class="new-job-modal__footer">
-        {#if isEditing}
+        {#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
+          <!-- )=- Prevent cancel for completed or already-cancelled jobs (mirrors the guard added to JobDetailsModal).
+               Per user feedback and consistency with quick status guards elsewhere.
+               )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (cancel flow) + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
           <button class="cancel-job-text" onclick={() => showCancelConfirm = true}>
             Cancel Job
           </button>

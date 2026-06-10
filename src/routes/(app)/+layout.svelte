@@ -5,6 +5,8 @@
 	import { goto } from '$app/navigation';
 	import { pb } from '$lib/db/pb';
 	import { processSyncQueue } from '$lib/db';
+	import { getUserPhotoSrc } from '$lib/db';
+	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
 
 	let { children } = $props();
 
@@ -12,7 +14,7 @@
 
 	// )=- Logout handler for the avatar dropdown menu. Uses dynamic import to match existing pattern in layout.
 	async function handleLogout() {
-		const { logout } = await import('$lib/stores/auth.svelte.ts');
+		const { logout } = await import('$lib/stores/auth.svelte');
 		await logout();
 		goto('/login', { replaceState: true });
 	}
@@ -34,7 +36,7 @@
 
 	// )=- Strengthened central auth guard using $effect.
 	// - Waits for loading to complete before any redirects (prevents flash/early redirect).
-	// - Single source of truth: central `auth` store (unifies PIN + PB email logins).
+	// - Single source of truth: central `auth` store (email/password via PB only; PIN login removed).
 	// - Crew users are restricted to /calendar and sub-paths only.
 	// - Uses replaceState to avoid polluting browser history.
 	// - This provides consistency across all pages under the (app) route group.
@@ -47,9 +49,9 @@
 		}
 
 		// Role-based access: non-admins (crew) can only access calendar views and their own profile.
-		// )=- Updated to allow crew self-service profile management for password, PIN, photo.
+		// )=- Updated to allow crew self-service profile management for password + photo (PIN login removed).
 		if (auth.currentUser.role !== 'admin') {
-			if (!currentPath.startsWith('/calendar') && currentPath !== '/profile' && !currentPath.startsWith('/reset-pin')) {
+			if (!currentPath.startsWith('/calendar') && currentPath !== '/profile') {
 				goto('/calendar', { replaceState: true });
 			}
 		}
@@ -114,8 +116,10 @@
 				<div class="top-nav__user-avatar-wrapper">
 					<div class="top-nav__user-avatar">
 						{#if auth.currentUser.photo}
+							<!-- )=- Use helper to normalize photo (fixes 404 for bare filenames like blob_xxx.png in top-nav avatar).
+							     The stack in logs pointed here ( +layout.svelte:132 ). -->
 							<img 
-								src={auth.currentUser.photo} 
+								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)} 
 								alt="Profile" 
 								class="top-nav__avatar-img" 
 							/>
@@ -149,6 +153,11 @@
 			{@render children()}
 		{/if}
 	</main>
+
+	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
+	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
+	     This makes the details modal (with invoice support) available from jobs page, clients related jobs, etc. -->
+	<JobDetailsModal />
 </div>
 
 <style>

@@ -1,11 +1,11 @@
 <!-- src/lib/components/NewUserModal.svelte -->
 <script lang="ts">
-  // )=- Per clarified requirements: Admin creates with firstName, lastName, email, role ONLY.
-  // No PIN or password fields for admin (user sets password via email/forgot flow on first login; sets PIN + photo themselves after verification).
-  // Auto-generate temp password for the PB auth record creation (share with user until email components added).
-  // Always set forcePinUpdate=true and forcePhotoUpdate=true on new crew (admin can toggle later to force resets).
-  // Use PB's verified field (synced locally on email login).
-  // Zod for the minimal admin creation form.
+  // )=- Admin creates crew/admin users with firstName, lastName, email, role + temp password.
+  // User logs in first time with email + temp password (verifies account), then sets their real password via /profile.
+  // forcePhotoUpdate can still be toggled by admin later via Crew edit.
+  // )=- No PIN anywhere (PIN login completely removed; only email/password auth).
+  // Zod for the admin creation form. BEM + runes used.
+  // )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
   import { createUser } from '$lib/db';
   import { z } from 'zod';
 
@@ -20,7 +20,7 @@
   let email = $state('');
   let role = $state<'admin' | 'crew'>('crew');
 
-  // )=- Zod schema for admin-only creation fields (no PIN/password - those are post-verification user actions).
+  // )=- Zod schema for admin-only creation fields (no PIN - PIN login completely removed; password is for initial email verification only).
   const NewUserSchema = z.object({
     firstName: z.string().min(1, 'First name is required'),
     lastName: z.string().min(1, 'Last name is required'),
@@ -58,15 +58,13 @@
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
-        pinHash: '',  // user sets this themselves after first verified login
         role: data.role,
         active: true,
-        forcePhotoUpdate: true,  // admin retains ability to force photo update via edit toggle
-        forcePinUpdate: true,    // admin retains ability to force PIN reset via edit toggle; user sets initial PIN post-verification
-        password: tempPass,      // temp for initial PB auth / verification (user changes it)
+        forcePhotoUpdate: true,  // admin retains ability to force photo update via edit toggle (PIN removed)
+        password: tempPass,      // temp for initial PB auth / verification (user changes it on first login)
         photo: undefined,
       });
-      tempPasswordForUser = tempPass;  // show to admin (until email components handle delivery + password set)
+      tempPasswordForUser = tempPass;  // show to admin (user changes password on first email login)
     } catch (err) {
       console.error('Failed to create new user:', err);
       errors.general = 'Failed to create user. Check console / PB rules.';
@@ -92,14 +90,14 @@
       <!-- Success view: show the auto-generated temp password once (admin shares with new crew member) -->
       <div class="modal__success">
         <h3>User created successfully!</h3>
-        <p>Share this <strong>temporary password</strong> with the new crew member (they will use the email + this password for their first login to verify and set their real password + PIN/photo):</p>
+        <p>Share this <strong>temporary password</strong> with the new crew member (they will use the email + this password for their first login to verify and set their real password + photo):</p>
         <div class="temp-pass-box">{tempPasswordForUser}</div>
-        <p class="note">They should login with email/password first (this verifies the PB account). Then they can use the quick First Name + PIN method. Admin can later force PIN or photo reset via the edit toggles.</p>
+        <p class="note">They login with email/password first (this verifies the PB account). Then they can update their password and photo in Profile. Admin can later force photo reset via the edit toggle.</p>
         <button onclick={closeModal} class="modal__btn modal__btn--save">Done</button>
       </div>
     {:else}
       <div class="modal__form">
-        <!-- Admin only enters first/last/email/role. Password auto-generated for initial verification. PIN set by user post-verification. -->
+        <!-- Admin only enters first/last/email/role. Password auto-generated for initial email verification (user sets real password after first login). -->
         <div class="modal__field">
           <label class="modal__label">First Name *</label>
           <input type="text" bind:value={firstName} class="modal__input" placeholder="John" />
@@ -127,7 +125,7 @@
         </div>
 
         <div class="modal__placeholder">
-          A temporary password will be generated automatically for the new user's initial email/password login (to verify their account and set their real password + PIN + photo).<br>
+          A temporary password will be generated automatically for the new user's initial email/password login (to verify their account and set their real password + photo).<br>
           📸 Photo upload coming soon (user self-service after verification)
         </div>
 

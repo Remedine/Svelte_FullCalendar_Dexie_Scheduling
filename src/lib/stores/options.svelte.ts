@@ -5,6 +5,7 @@ import { pb } from '$lib/db/pb';
 export let optionsStore = $state({
 	data: null as any,
 	isLoading: false,
+	pendingPull: null as Promise<boolean> | null,
 
 	async load() {
 		if (this.isLoading) return; // prevent multiple simultaneous calls
@@ -54,6 +55,21 @@ export let optionsStore = $state({
 	async pullFromPB() {
 		if (!pb?.authStore?.isValid) return false;
 
+		// )=- Guard against concurrent pulls from multiple pages/components (clients, jobs, calendar, etc.).
+		// Reuses the same promise so rapid calls don't spam PB and trigger auto-cancellations.
+		// The PB SDK auto-cancels overlapping getFirstListItem calls by default; $autoCancel: false helps
+		// but a pending guard + error filtering for aborts keeps the console clean.
+		// Reference: https://github.com/pocketbase/js-sdk#auto-cancellation
+		if (this.pendingPull) return this.pendingPull;
+
+		this.pendingPull = this._doPullFromPB().finally(() => {
+			this.pendingPull = null;
+		});
+
+		return this.pendingPull;
+	},
+
+	async _doPullFromPB() {
 		try {
 			// )=- Try to find the global options record. We no longer rely on 'key="global"' filter
 			// because the options collection schema may not have a 'key' field (old migrations).
@@ -92,10 +108,14 @@ export let optionsStore = $state({
 
 			await db.options.put(serverOptions);
 			this.data = serverOptions;
-			console.log('✅ Options pulled from PocketBase');
+			// Only log on actual changes or first load to reduce console noise (multiple components trigger load on mount/login/crew/jobs).
+			if (!this.data || this.data.lastUpdated !== serverOptions.lastUpdated) {
+				console.log('✅ Options pulled from PocketBase');
+			}
 			return true;
 		} catch (err: any) {
-			if (err.status !== 404) {
+			const isAbort = err?.status === 0 || err?.name === 'AbortError' || (err?.message || '').toLowerCase().includes('abort') || (err?.message || '').toLowerCase().includes('autocancel');
+			if (!isAbort && err.status !== 404) {
 				console.error('❌ Failed to pull options from PocketBase:', err);
 			}
 			return false;
