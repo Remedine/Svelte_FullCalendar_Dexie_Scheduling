@@ -146,13 +146,17 @@
 </script>
 
 {#if show}
-	<div class="client-form-modal">
-		<div class="client-form-modal__content">
+	<div class="client-form-modal" onclick={closeForm}>
+		<div class="client-form-modal__content" onclick={(e) => e.stopPropagation()}>
 			<h2 class="client-form-modal__title">
 				{isEditing ? 'Edit Client' : 'New Client'}
 			</h2>
 
-			<form onsubmit={handleSubmit} class="client-form-modal__form">
+			<!-- )=- Fields live in a scrollable form area. The sticky footer (below) sits outside it
+			     so Save/Cancel stay visible exactly like the JobFormModal.
+			     We use form="client-form" on the submit button so it can live in the sticky footer.
+			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
+			<form id="client-form" onsubmit={handleSubmit} class="client-form-modal__form">
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Full Name <span class="required">*</span></label>
 					<input bind:value={formData.name} class="client-form-modal__input" />
@@ -227,16 +231,27 @@
 					<label class="client-form-modal__label">Notes</label>
 					<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"></textarea>
 				</div>
-
-				<div class="client-form-modal__actions">
-					<button type="button" class="client-form-modal__btn client-form-modal__btn--cancel" onclick={closeForm}>
-						Cancel
-					</button>
-					<button type="submit" class="client-form-modal__btn client-form-modal__btn--primary">
-						{isEditing ? 'Save Changes' : 'Create Client'}
-					</button>
-				</div>
 			</form>
+
+			<!-- )=- Sticky footer bar (position: sticky + margin-top:auto inside flex column content).
+			     Matches JobFormModal__footer exactly for visual + behavior consistency.
+			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
+			<div class="client-form-modal__footer">
+				<button 
+					type="button" 
+					class="client-form-modal__btn client-form-modal__btn--cancel" 
+					onclick={closeForm}
+				>
+					Cancel
+				</button>
+				<button 
+					type="submit" 
+					form="client-form"
+					class="client-form-modal__btn client-form-modal__btn--primary"
+				>
+					{isEditing ? 'Save Changes' : 'Create Client'}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -252,26 +267,37 @@
 		z-index: 1200;
 	}
 
+	/* )=- Content is now a flex column (like new-job-modal__content) so the form can be flex:1 + overflow auto
+	     while the footer is sticky at the bottom inside the scroll container.
+	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.client-form-modal__content {
 		background: white;
 		width: 100%;
 		max-width: 560px;
 		border-radius: 16px 16px 0 0;
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
 		max-height: 95vh;
 		overflow-y: auto;
-		padding: 1.5rem 1rem;
+		display: flex;
+		flex-direction: column;
 		container-type: inline-size;
 		container-name: client-form;
 	}
 
 	.client-form-modal__title {
-		margin: 0 0 1.5rem;
+		margin: 0 0 1.5rem 0;
 		font-size: 1.4rem;
 		font-weight: 600;
 		color: #1e2937;
+		padding: 1.5rem 1rem 0;
 	}
 
+	/* )=- Scrollable fields container. Matches new-job-modal__form behavior.
+	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.client-form-modal__form {
+		flex: 1;
+		overflow-y: auto;
+		padding: 0 1rem;
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
@@ -310,14 +336,30 @@
 		margin-top: 4px;
 	}
 
-	.client-form-modal__actions {
+	/* )=- Sticky footer exactly modeled on .new-job-modal__footer (position:sticky, bottom:0, shadow, border, margin-top:auto).
+	     Buttons use the existing btn classes (now flex inside the footer).
+	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	.client-form-modal__footer {
+		position: sticky;
+		bottom: 0;
+		background: white;
+		padding: 1rem 1.25rem;
+		border-top: 1px solid #e5e7eb;
 		display: flex;
-		gap: 1rem;
-		margin-top: 2rem;
+		gap: 0.75rem;
+		justify-content: flex-end;
+		align-items: center;
+		z-index: 10;
+		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+		margin-top: auto;
+	}
+
+	/* Equal width like the previous actions row, while still inside the sticky footer */
+	.client-form-modal__footer .client-form-modal__btn {
+		flex: 1;
 	}
 
 	.client-form-modal__btn {
-		flex: 1;
 		padding: 0.85rem 1.5rem;
 		border-radius: 8px;
 		font-weight: 500;
@@ -364,7 +406,7 @@
 	@container client-form (min-width: 521px) {
 		.client-form-modal__content {
 			border-radius: 16px;
-			padding: 2rem;
+			padding: 2rem 0 0; /* top padding now handled by title; footer has its own */
 		}
 	}
 </style>

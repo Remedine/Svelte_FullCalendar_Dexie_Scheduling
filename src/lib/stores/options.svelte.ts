@@ -16,12 +16,34 @@ export let optionsStore = $state({
 			let options = await db.options.get(1);
 
 			if (!options) {
-				await this.pullFromPB();
+				const pulled = await this.pullFromPB();
+				if (!pulled) {
+					// )=- No record in PB and no local: create sensible default in Dexie
+					// so the options page always has editingOptions with .id and can save.
+					options = {
+						id: 1,
+						defaultJobDurationHours: 2,
+						taxRate: 6.5,
+						invoiceDueDays: 30,
+						areasOfTown: [],
+						defaultBillableItems: [],
+						cancelReasons: [],
+						lastUpdated: new Date(),
+						updatedBy: 'System'
+					};
+					await db.options.put(options);
+					this.data = options;
+					console.log('✅ Created default options in Dexie (no PB record found)');
+					return;
+				}
+				// If pulled succeeded, pullFromPB already set this.data
 				return;
 			}
 
+			if (!this.data) {
+				console.log('✅ Options loaded from Dexie');
+			}
 			this.data = options;
-			console.log('✅ Options loaded from Dexie');
 		} catch (err) {
 			console.error('Failed to load options:', err);
 		} finally {
@@ -33,10 +55,33 @@ export let optionsStore = $state({
 		if (!pb?.authStore?.isValid) return false;
 
 		try {
-			// )=- Disable auto-cancellation
-			const record = await pb.collection('options').getFirstListItem('key="global"', {
-				$autoCancel: false
-			});
+			// )=- Try to find the global options record. We no longer rely on 'key="global"' filter
+			// because the options collection schema may not have a 'key' field (old migrations).
+			// Fall back to first record, or create a default one on 404.
+			let record;
+			try {
+				record = await pb.collection('options').getFirstListItem('', {
+					$autoCancel: false
+				});
+			} catch (e: any) {
+				if (e.status === 404) {
+					// Create a sensible default so the page always has data with id:1
+					const defaultPayload = {
+						defaultJobDurationHours: 2,
+						taxRate: 6.5,
+						invoiceDueDays: 30,
+						areasOfTown: [],
+						defaultBillableItems: [],
+						cancelReasons: [],
+						lastUpdated: new Date().toISOString(),
+						updatedBy: 'System'
+					};
+					record = await pb.collection('options').create(defaultPayload);
+					console.log('✅ Created default options record in PocketBase');
+				} else {
+					throw e;
+				}
+			}
 
 			const serverOptions = {
 				id: 1,
@@ -88,7 +133,6 @@ export let optionsStore = $state({
 			);
 
 			const pbPayload = {
-				key: 'global',
 				defaultJobDurationHours: Number(cleanData.defaultJobDurationHours) || 2,
 				taxRate: Number(cleanData.taxRate) || 6.5,
 				invoiceDueDays: Number(cleanData.invoiceDueDays) || 30,

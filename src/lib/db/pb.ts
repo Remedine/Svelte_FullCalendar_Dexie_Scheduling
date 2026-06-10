@@ -18,22 +18,74 @@ export async function loginWithEmail(email: string, password: string) {
 
 		const pbUser = authData.record;
 
-		const localUser: User = {
-			id: pbUser.id,
-			name: pbUser.name || email.split('@')[0] || 'Admin',
-			pinHash: pbUser.pinHash || '',
-			role: pbUser.role || 'admin',
-			photo: pbUser.photo ? pbUser.photo : undefined,
-			active: pbUser.active ?? true,
-			forcePinUpdate: pbUser.forcePinUpdate ?? false,
-			forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
-			createdAt: new Date(pbUser.created || pbUser.createdAt),
-			updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
-		};
+		// )=- Find existing local Dexie record (for hybrid admin-created users that have local UUID + pbId).
+		// Prefer by email (unique), then firstName/name guess, then by pbId.
+		// This prevents duplicate records in Dexie when a locally-created crew (with local UUID id) later does email login.
+		// For pure PB users (no prior local), we'll create with PB id as key.
+		let existing = await db.users.where('email').equalsIgnoreCase(email).first();
+		if (!existing) {
+			const guess = email.split('@')[0];
+			existing = await db.users.where('firstName').equalsIgnoreCase(guess).first()
+				|| await db.users.where('name').equalsIgnoreCase(guess).first();
+		}
+		if (!existing && pbUser.id) {
+			existing = await db.users.where('pbId').equals(pbUser.id).first();
+		}
+
+		let localUser: User;
+		if (existing) {
+			// Merge into existing local record (preserve local 'id' UUID for hybrid users, update pbId, sync fields from PB, prefer local pinHash if user has set it).
+			localUser = {
+				...existing,
+				id: existing.id,  // keep local key
+				pbId: pbUser.id,
+				firstName: pbUser.firstName || existing.firstName || (pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
+				lastName: pbUser.lastName || existing.lastName || (pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
+				name: pbUser.name || `${pbUser.firstName || existing.firstName || ''} ${pbUser.lastName || existing.lastName || ''}`.trim() || email.split('@')[0] || 'Admin',
+				pinHash: existing.pinHash || pbUser.pinHash || '',
+				role: pbUser.role || existing.role || 'admin',
+				// )=- Prefer local data: URL photo (from camera upload in /profile) over PB file reference for offline <img src> support.
+				// Only fall back to PB's photo value if no local data URL.
+				photo: (existing.photo && existing.photo.startsWith('data:')) ? existing.photo : (pbUser.photo || existing.photo),
+				active: pbUser.active ?? existing.active ?? true,
+				forcePinUpdate: pbUser.forcePinUpdate ?? existing.forcePinUpdate ?? false,
+				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? existing.forcePhotoUpdate ?? false,
+				verified: !!pbUser.verified,
+				createdAt: new Date(pbUser.created || pbUser.createdAt || existing.createdAt),
+				updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt),
+			};
+		} else {
+			// Pure PB user: use PB id as Dexie key (original pattern)
+			localUser = {
+				id: pbUser.id,
+				firstName: pbUser.firstName || (pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
+				lastName: pbUser.lastName || (pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
+				name: pbUser.name || `${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() || email.split('@')[0] || 'Admin',
+				pinHash: pbUser.pinHash || '',
+				role: pbUser.role || 'admin',
+				photo: pbUser.photo ? pbUser.photo : undefined,
+				active: pbUser.active ?? true,
+				forcePinUpdate: pbUser.forcePinUpdate ?? false,
+				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
+				verified: !!pbUser.verified,
+				createdAt: new Date(pbUser.created || pbUser.createdAt),
+				updatedAt: new Date(pbUser.updated || pbUser.updatedAt),
+			};
+		}
 
 		await db.users.put(localUser);
 		setCurrentUser(localUser);
-		console.log('✅ PB super admin synced to Dexie:', localUser.name);
+		console.log('✅ PB user synced to Dexie (merged if hybrid local record existed):', localUser.name);
+
+		// )=- Cleanup any duplicate records with the same email but different Dexie key (the old loginWithEmail always-put-pb-id logic + prior admin creation could leave a local-UUID record and a PB-id record).
+		// This cleans historical dups like the two Joe Poe in Dexie. UI loads also dedup now.
+		const dups = await db.users.where('email').equalsIgnoreCase(email).toArray();
+		for (const d of dups) {
+			if (d.id !== localUser.id) {
+				await db.users.delete(d.id!);
+				console.log('🧹 Cleaned duplicate user record with same email', d.id);
+			}
+		}
 
 		// Pull latest data from server first
 		await pullJobsFromServer();
@@ -53,18 +105,26 @@ export async function loginWithEmail(email: string, password: string) {
 }
 
 // Pin Login
-export async function loginWithPin(name: string, pin: string) {
+export async function loginWithPin(firstName: string, pin: string) {
 	try {
-		const localUsers = await db.users.where('name').equals(name).toArray();
-		const user = localUsers[0];
+		// )=- Support first-name collisions for quick login: fetch candidates by firstName, then find the one whose PIN hash matches the entered PIN.
+		// (PIN is the distinguisher; admin should ensure unique PINs per first name.)
+		const candidates = await db.users.where('firstName').equalsIgnoreCase(firstName).toArray();
+		let user = null;
+		for (const c of candidates) {
+			if (await bcrypt.compare(pin, c.pinHash)) {
+				user = c;
+				break;
+			}
+		}
 
 		if (!user || !user.pinHash) {
 			throw new Error('User not found or no PIN set');
 		}
 
-		const isValid = await bcrypt.compare(pin, user.pinHash);
-		if (!isValid) {
-			throw new Error('Invalid PIN');
+		// )=- Gate quick PIN only for users that have an email (validated creation) and verified flag.
+		if (user.email && user.verified !== true) {
+			throw new Error('Account not verified yet. Please login with email/password first to activate quick PIN access.');
 		}
 
 		if (!user.active) {
@@ -82,7 +142,7 @@ export async function loginWithPin(name: string, pin: string) {
 			await processSyncQueue();
 		}
 
-		console.log('✅ PIN login successful (offline + sync queue processed):', name);
+		console.log('✅ PIN login successful (offline + sync queue processed):', firstName);
 		return { record: user };
 	} catch (err) {
 		console.error('PIN login failed:', err);
@@ -94,6 +154,11 @@ export async function loginWithPin(name: string, pin: string) {
 // line 79
 export async function pullJobsFromServer() {
   if (!pb.authStore.isValid) return;
+
+  // )=- Debounce to prevent log spam and excessive server calls from repeated effect triggers.
+  const now = Date.now();
+  if (now - (pullJobsFromServer as any)._lastCall < 800) return;
+  (pullJobsFromServer as any)._lastCall = now;
 
   try {
 		const records = await pb.collection('jobs').getFullList({
@@ -151,7 +216,10 @@ export async function pullJobsFromServer() {
 			}
 		}
 
-		console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
+		if (records.length > 0) {
+			console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
+		}
+		// )=- Reduced log noise: only log when there are actual records. 0-job case was spamming console.
 	} catch (err: any) {
     // Only log real errors, not auto-cancellations
     if (err?.status !== 0) {

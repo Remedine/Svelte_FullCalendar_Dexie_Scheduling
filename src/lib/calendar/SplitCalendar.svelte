@@ -22,6 +22,9 @@
 	let isSyncing = $state(false);
 	let currentView = $state('timeGridWeek');
 	let crewOptions = $state<string[]>([]);
+
+	// )=- Map of crew name to photo URL for rendering circular avatars on event cards.
+	let crewPhotoMap = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
 	let draggedJobId: string | null = $state(null);
 
@@ -37,17 +40,47 @@
 
 	// Load crew options
 	$effect(() => {
-		import('$lib/db').then(({ db }) => {
+		import('$lib/db').then(async ({ db, cleanupDuplicateUsers }) => {
+			await cleanupDuplicateUsers();
 			db.users.toArray().then((users: any[]) => {
-				crewOptions = users
-					.filter((u: any) => u.active)
-					.map((u: any) => u.name)
-					.sort();
+				// )=- Dedup by display name...
+				crewOptions = Array.from(new Set(
+					users
+						.filter((u: any) => u.active)
+						.map((u: any) => u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim())
+				)).sort();
 			});
 		});
 	});
 
-	
+	// )=- Load crew photos once (for circular avatars on job event cards, right edge under drag icon).
+	// )=- Use dynamic import to match the crewOptions pattern and avoid top-level db dependency.
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	$effect(() => {
+		if (Object.keys(crewPhotoMap).length === 0) {
+			import('$lib/db').then(({ db }) => {
+				db.users.toArray().then((users: any[]) => {
+					const map: Record<string, string> = {};
+					users.forEach((u: any) => {
+						if (u.name && u.photo) {
+							map[u.name] = u.photo;
+						}
+					});
+					crewPhotoMap = map;
+				});
+			});
+		}
+	});
+
+	// )=- Once crew photos loaded (or when dayApi becomes ready), refetch so eventDidMount appends the circular avatars.
+	// DayApi assignment re-runs this (reads dayApi), so if eager load in loadData already finished we get avatars on first paint too.
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	$effect(() => {
+		if (dayApi && Object.keys(crewPhotoMap).length > 0) {
+			dayApi.refetchEvents();
+		}
+	});
+
 	
 	$effect(() => {
 	const wrapper = document.querySelector('.split-calendar__day-wrapper');
@@ -80,6 +113,19 @@
 	const activeFilterCount = $derived(
 		filters.crew.length + filters.areas.length + filters.statuses.length
 	);
+
+	// )=- When area options load (or change), or when the calendar becomes ready (dayApi assignment),
+	// refetch events so getJobColor + eventDidMount pick up the real area colors immediately.
+	// Previously the .length guard + creation timing meant the initial events() + didMount often saw
+	// stale/empty optionsStore.data (gray cards) until a later explicit refetch from job add/edit.
+	// Now: dayApi set re-runs this effect (it reads dayApi), and we only require data presence (not length>0)
+	// so we always get a refetch pass with the data that loadData awaited.
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	$effect(() => {
+		if (dayApi && optionsStore.data) {
+			dayApi.refetchEvents();
+		}
+	});
 
 	const filteredJobs = $derived(
 		jobs.filter((job: any) => {
@@ -123,6 +169,33 @@
 
 	async function loadData() {
 		await optionsStore.load?.();
+		// )=- Force a pull from PB (if online) so that area colors are available immediately
+		// on calendar load. Previously colors only appeared after a job add/edit triggered refetch.
+		// This ensures getJobColor sees the real areasOfTown data before the first events() call.
+		// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+		if (navigator.onLine) {
+			await optionsStore.pullFromPB?.();
+		}
+
+		// )=- Eagerly kick off crew photo load (for the right-edge circular avatars under drag handle)
+		// before we fetch jobs and create the FullCalendar instance. This increases the chance that
+		// crewPhotoMap is populated for the *first* eventDidMount + the explicit post-render refetch.
+		// The existing top-level crewPhotoMap $effect will still handle late arrivals / updates.
+		// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+		import('$lib/db').then(({ db }) => {
+			db.users.toArray().then((users: any[]) => {
+				const map: Record<string, string> = {};
+				users.forEach((u: any) => {
+					if (u.name && u.photo) {
+						map[u.name] = u.photo;
+					}
+				});
+				if (Object.keys(map).length > 0) {
+					crewPhotoMap = map;
+				}
+			});
+		});
+
 		const includeCancelled = filters.statuses.includes('cancelled');
 
 		const start = new Date(); start.setMonth(start.getMonth() - 2);
@@ -286,6 +359,71 @@
 					`;
 
 					info.el.appendChild(handle);
+
+					// )=- Force the area color on the event element in didMount.
+					// This ensures colors show immediately even if the events function provided a default
+					// backgroundColor before optionsStore.data was ready on initial load.
+					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					const jobForColor = info.event.extendedProps;
+					const areaColor = getJobColor(jobForColor);
+					info.el.style.backgroundColor = areaColor;
+					if (areaColor !== '#6b7280') {
+						info.el.style.borderColor = areaColor;
+					}
+
+					// )=- Add circular crew avatars.
+					// - Regular timeGrid card views: placed *inside* the card at bottom-right (no overhang).
+					// - dayGridMonth view: placed inline *to the right of the text/title*.
+					// Uses crewPhotoMap (Dexie users). Letter fallback if no photo.
+					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					const crew = info.event.extendedProps?.assignedCrew || [];
+					if (crew.length > 0) {
+						// Remove any previous (on re-render / refetch)
+						const prev = info.el.querySelector('.fc-event__crew-avatars');
+						if (prev) prev.remove();
+
+						const crewEl = document.createElement('div');
+						crewEl.className = 'fc-event__crew-avatars';
+
+						const isMonthView =
+							info.view.type === 'dayGridMonth' ||
+							!!info.el.closest('.fc-dayGridMonth-view') ||
+							!!info.el.closest('.fc-daygrid-month');
+
+						if (isMonthView) {
+							crewEl.classList.add('fc-event__crew-avatars--inline');
+						}
+
+						crew.forEach((name: string) => {
+							const av = document.createElement('div');
+							av.className = 'fc-event__crew-avatar';
+							av.title = name;
+
+							const photo = crewPhotoMap[name];
+							if (photo) {
+								const img = document.createElement('img');
+								img.src = photo;
+								img.alt = name;
+								av.appendChild(img);
+							} else {
+								av.textContent = (name || '?').charAt(0).toUpperCase();
+							}
+							crewEl.appendChild(av);
+						});
+
+						if (isMonthView) {
+							// Place directly after the title so it sits to the right of the text in month list items.
+							const titleEl = info.el.querySelector('.fc-event-title');
+							if (titleEl && titleEl.parentNode) {
+								titleEl.parentNode.insertBefore(crewEl, titleEl.nextSibling);
+							} else {
+								info.el.appendChild(crewEl);
+							}
+						} else {
+							// Inside the card for timeGrid views.
+							info.el.appendChild(crewEl);
+						}
+					}
 				},
 
 				eventClassNames: (arg) => {
@@ -403,7 +541,8 @@
 
 					successCallback(visibleJobs.map((job: any) => ({
 						id: job.id,
-						title: `${job.title} — ${job.assignedCrew?.join(', ') || ''}`,
+						// )=- Title is now just the job title; crew members are shown as circular avatars on the right (see eventDidMount).
+						title: job.title,
 						start: job.start,
 						end: job.end,
 						backgroundColor: getJobColor(job),
@@ -417,6 +556,17 @@
 			requestAnimationFrame(() => {
 				dayApi?.updateSize();
 				dayApi?.gotoDate(parseLocalDate(selectedDate));
+
+				// )=- Explicit refetch immediately after the very first render.
+				// loadData already did await optionsStore.load + pullFromPB (so areasOfTown should be live),
+				// but the Calendar constructor + initial events() callback can capture a snapshot before
+				// the $state assignment from pull fully settles for derived reads + didMount.
+				// A post-render refetch guarantees a second events() + full eventDidMount cycle that
+				// calls getJobColor (for backgroundColor) and the style force + crew avatar append
+				// with the correct data. This (plus the dayApi-triggered areas refetch effect above)
+				// eliminates the "colors only appear after add or edit job" symptom.
+				// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+				dayApi?.refetchEvents();
 			});
 		});
 	});
@@ -729,4 +879,79 @@
 	:global(.event-completed .fc-event-title) { text-decoration: line-through; }
 	:global(.event-cancelled) { opacity: 0.65; border-style: dashed !important; cursor: not-allowed; }
 	:global(.event-cancelled .fc-event-title) { text-decoration: line-through; color: #991b1b; }
+
+	/* )=- Crew avatars placed *inside* the event card (no more overhanging to the right).
+	   - Time grid card views (week/day): horizontal row at bottom-right inside the card, larger 24px circles.
+	   - Month view (dayGridMonth): inline row placed to the right of the event title text, smaller 14px.
+	   Row layout for compactness on both. Larger on week/day per request while staying fully contained.
+	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	:global(.fc-event) {
+		position: relative;
+		/* overflow visible no longer required for avatars (they stay inside) */
+	}
+
+	/* Reserve space at bottom of time-grid event titles so larger avatars at bottom-right don't cover the job title text.
+	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	:global(.fc-timegrid-event .fc-event-title) {
+		padding-bottom: 26px;
+	}
+
+	/* Default: inside card (timeGrid week/day views) - bottom right, horizontal row.
+	   Larger size (24px) as requested for week and day views while staying fully inside the card.
+	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	:global(.fc-event__crew-avatars) {
+		position: absolute;
+		right: 3px;
+		bottom: 3px;
+		display: flex;
+		flex-direction: row;
+		gap: 3px;
+		z-index: 10;
+		pointer-events: none;
+	}
+
+	:global(.fc-event__crew-avatar) {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		overflow: hidden;
+		border: 1px solid #fff;
+		background: #64748b;
+		color: #fff;
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+	}
+
+	:global(.fc-event__crew-avatar img) {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	/* Month view: inline to the right of the title text (not absolute, flows naturally).
+	   Kept small (14px) so they fit nicely in the compact month list items without pushing text around too much.
+	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	:global(.fc-dayGridMonth-view .fc-event__crew-avatars),
+	:global(.fc-dayGridMonth-view .fc-event__crew-avatars--inline) {
+		position: static;
+		display: inline-flex;
+		vertical-align: middle;
+		margin-left: 4px;
+		gap: 2px;
+		z-index: auto;
+	}
+
+	:global(.fc-dayGridMonth-view .fc-event__crew-avatar) {
+		width: 14px;
+		height: 14px;
+		font-size: 8px;
+		border-width: 1px;
+		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+	}
 </style>

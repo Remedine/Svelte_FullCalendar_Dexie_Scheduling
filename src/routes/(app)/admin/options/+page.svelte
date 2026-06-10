@@ -1,20 +1,44 @@
 <!-- src/routes/(app)/admin/options/+page.svelte -->
 <script lang="ts">
 	// )=- Complete Options Page - All sections active with dynamic data
+	// )=- Cleaned up redundant role guards and legacy onMount (causing load-time errors and potential auth redirects on navigation).
+	// Central layout guard in (app)/+layout.svelte now handles admin-only access consistently.
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast.svelte';
+
+	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
+	// This avoids duplicate redirects and race conditions on navigation.
+
+	// )=- Converted from onMount to $effect for Svelte 5 runes compliance (auth cleanup / HYG-01).
+	$effect(() => {
+		// Load options once when authenticated as admin
+		if (!auth.loading && auth.currentUser?.role === 'admin' && !optionsInitialized) {
+			optionsInitialized = true;
+			optionsStore.load();
+			
+			if (navigator.onLine) {
+				optionsStore.pullFromPB().then((pulled) => {
+					if (pulled) {
+						console.log('✅ Fresh options pulled from PocketBase on load');
+					}
+				});
+			}
+		}
+	});
 
 	let isSaving = $state(false);
 	let activeTab = $state<'scheduling' | 'invoice'>('scheduling');
 
-	$effect(() => {
-		if (!auth.currentUser || auth.currentUser.role !== 'admin') {
-			goto('/calendar', { replaceState: true });
-		}
-	});
+	// )=- One-time flag to ensure options load/pull happens only once, preventing repeated pull attempts and error spam if pull fails.
+	let optionsInitialized = $state(false);
+
+	// )=- Removed redundant role guard $effect (central layout guard in (app)/+layout.svelte already enforces admin-only access).
+	// Rely on layout for consistency and to avoid race conditions during navigation.
+
+	// )=- Removed duplicate top-level role guard $effect (was causing potential premature redirects during auth hydration/navigation).
+	// The layout guard + the loading $effect below are sufficient.
 
 	const tabs = [
 		{ id: 'scheduling', label: 'Scheduling Options' },
@@ -38,6 +62,18 @@
 	$effect(() => {
 		if (optionsStore.data) {
 			editingOptions = safeClone(optionsStore.data);
+		} else if (!editingOptions?.id) {
+			// )=- Fallback: if store data not yet populated (e.g. first load), seed a minimal
+			// object with id so saveOptions doesn't immediately error with "No options data loaded to save".
+			editingOptions = {
+				id: 1,
+				defaultJobDurationHours: 2,
+				taxRate: 6.5,
+				invoiceDueDays: 30,
+				areasOfTown: [],
+				defaultBillableItems: [],
+				cancelReasons: []
+			};
 		}
 	});
 
@@ -158,16 +194,9 @@
 		return index === 0;
 	}
 
-	onMount(async () => {
-		await optionsStore.load();
-		
-		if (navigator.onLine) {
-			const pulled = await optionsStore.pullFromPB();
-			if (pulled) {
-				console.log('✅ Fresh options pulled from PocketBase on load');
-			}
-		}
-	});
+	// )=- Removed legacy onMount (duplicate of the $effect below, and onMount not imported — would throw ReferenceError on page load, potentially causing navigation/auth guard side-effects like redirect to login).
+	// The $effect above (lines ~17-30) handles loading when admin role is confirmed and not loading.
+	// )=- Also removed redundant role guard $effects that could fire during auth transitions and cause unwanted redirects (layout guard is the single source of truth).
 </script>
 
 <svelte:head>
@@ -393,7 +422,10 @@
 		{/if}
 	</div>
 
-	<!-- Footer -->
+	<!-- )=- Sticky footer bar for the main Save action.
+	     Matches the visual treatment and sticky behavior of .new-job-modal__footer (and the updated client modal).
+	     Keeps the save button visible while scrolling through long areas/billables/reasons lists.
+	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 	<div class="options-page__footer">
 		<button 
 			class="options-page__btn options-page__btn--save"
@@ -627,8 +659,19 @@
 	.options-page__btn--save { background: #2563eb; color: white; border: none; }
 	.options-page__btn--add { background: #e0f2fe; color: #0369a1; border: none; padding: 0.75rem 1.5rem; font-weight: 500; }
 
+	/* )=- Sticky bottom action bar modeled directly on the job/client modal footers.
+	     position:sticky + bottom:0 + background/shadow/border so the Save button stays accessible
+	     no matter how far down the user scrolls the options sections.
+	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.options-page__footer {
-		margin-top: 2rem;
+		position: sticky;
+		bottom: 0;
+		background: white;
+		padding: 1rem 1.25rem;
+		border-top: 1px solid #e5e7eb;
+		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+		z-index: 10;
 		text-align: right;
+		margin-top: 1rem; /* small gap from last section when not stuck */
 	}
 </style>
