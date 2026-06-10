@@ -1,7 +1,7 @@
 <!-- src/lib/components/CrewManagement.svelte -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { db, type User } from '$lib/db';
+  // )=- Removed onMount import (converted to $effect) for full Svelte 5 runes compliance in auth/user management.
+  import { db, type User, updateUser, deleteUser as deleteUserFromDb } from '$lib/db';
   import { auth } from '$lib/stores/auth.svelte';
   import NewUserModal from './NewUserModal.svelte';
   import UserJobsModal from './UserJobsModal.svelte';
@@ -15,7 +15,8 @@
   let showEmailModal = $state(false);
 
   let selectedUser = $state<User | null>(null);
-  let editName = $state('');
+  let editFirstName = $state('');
+  let editLastName = $state('');
   let editRole = $state<'admin' | 'crew'>('crew');
   let editForcePin = $state(false);
   let editForcePhoto = $state(false);
@@ -24,7 +25,17 @@
   let isAdmin = $derived(auth.currentUser?.role === 'admin');
 
   async function loadUsers() {
-    allUsers = await db.users.toArray();
+    const { cleanupDuplicateUsers } = await import('$lib/db');
+    await cleanupDuplicateUsers();
+    const raw = await db.users.toArray();
+    // )=- Dedup by email or (pbId || id) ...
+    const seen = new Set();
+    allUsers = raw.filter((u: any) => {
+      const key = u.email || u.pbId || u.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function openNewUser() {
@@ -38,7 +49,8 @@
 
   function openEdit(user: User) {
     selectedUser = user;
-    editName = user.name;
+    editFirstName = user.firstName || (user.name ? user.name.split(' ')[0] : '');
+    editLastName = user.lastName || (user.name ? user.name.split(' ').slice(1).join(' ') : '');
     editRole = user.role;
     editForcePin = user.forcePinUpdate ?? false;
     editForcePhoto = user.forcePhotoUpdate ?? false;
@@ -60,8 +72,13 @@
       return;
     }
 
-    await db.users.update(selectedUser.id!, {
-      name: editName.trim(),
+    // )=- Use updateUser helper (queues for PB sync) instead of direct db.users.update, to match jobs/clients pattern.
+    const first = editFirstName.trim();
+    const last = editLastName.trim();
+    await updateUser(selectedUser.id!, {
+      firstName: first,
+      lastName: last,
+      name: `${first} ${last}`.trim(),  // )=- Keep derived name for compat with assignedCrew strings and old code.
       role: editRole,
       forcePinUpdate: editForcePin,
       forcePhotoUpdate: editForcePhoto,
@@ -76,7 +93,8 @@
   async function saveEmailLink() {
     if (!selectedUser || !editEmail.trim()) return;
 
-    await db.users.update(selectedUser.id!, { 
+    // )=- Use updateUser for PB sync consistency.
+    await updateUser(selectedUser.id!, { 
       email: editEmail.trim(),
       updatedAt: new Date()
     });
@@ -102,7 +120,8 @@
       return;
     }
 
-    await db.users.update(user.id!, {
+    // )=- Use updateUser for PB sync.
+    await updateUser(user.id!, {
       active: !user.active,
       updatedAt: new Date()
     });
@@ -122,7 +141,8 @@
     }
 
     if (confirm('Delete this user permanently?')) {
-      await db.users.delete(id);
+      // )=- Use deleteUserFromDb (aliased) which queues the delete using pbId if present (see deleteUser in db/index.ts).
+      await deleteUserFromDb(id);
       await loadUsers();
     }
   }
@@ -130,14 +150,16 @@
   export async function setInitialPin(userId: string, newPin: string) {
     const bcrypt = await import('bcryptjs');
     const hashed = await bcrypt.hash(newPin, 10);
-    await db.users.update(userId, {
+    // )=- Use updateUser for sync consistency (though PIN reset may be local-first).
+    await updateUser(userId, {
       pinHash: hashed,
       forcePinUpdate: false,
       updatedAt: new Date()
     });
   }
 
-  onMount(() => {
+  // )=- Converted from onMount to $effect for Svelte 5 runes compliance as part of auth/user management cleanup.
+  $effect(() => {
     if (isAdmin) loadUsers();
   });
 </script>
@@ -155,16 +177,16 @@
         <div class="user-management__avatar-col">
           <div class="user-management__avatar">
             {#if user.photo}
-              <img src={user.photo} alt={user.name} class="user-management__avatar-img" />
+              <img src={user.photo} alt={`${user.firstName} ${user.lastName || user.name || ''}`} class="user-management__avatar-img" />
             {:else}
-              <span class="user-management__avatar-placeholder">{user.name.slice(0,1).toUpperCase()}</span>
+              <span class="user-management__avatar-placeholder">{(user.firstName || user.name || 'U').slice(0,1).toUpperCase()}</span>
             {/if}
           </div>
         </div>
 
         <!-- Name -->
         <div class="user-management__name-col">
-          <span class="user-management__name">{user.name}</span>
+          <span class="user-management__name">{user.firstName} {user.lastName || user.name || ''}</span>
         </div>
 
         <!-- Email -->
@@ -206,16 +228,20 @@
   {/if}
 
   {#if showJobsModal && selectedUser}
-    <UserJobsModal userId={selectedUser.id!} userName={selectedUser.name} onClose={() => showJobsModal = false} />
+    <UserJobsModal userId={selectedUser.id!} userName={`${selectedUser.firstName} ${selectedUser.lastName || selectedUser.name || ''}`.trim()} onClose={() => showJobsModal = false} />
   {/if}
 
   {#if showEditModal && selectedUser}
     <div class="modal-overlay" onclick={() => { showEditModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
-        <h2 class="modal__title">Edit {selectedUser.name}</h2>
+        <h2 class="modal__title">Edit {selectedUser.firstName || ''} {selectedUser.lastName || selectedUser.name || ''}</h2>
         <div class="modal__form">
-          <label class="modal__label">Name</label>
-          <input type="text" bind:value={editName} class="modal__input" />
+          <!-- )=- Updated edit form for first/last name split (per new requirement). Fallbacks for old data using 'name'. -->
+          <label class="modal__label">First Name</label>
+          <input type="text" bind:value={editFirstName} class="modal__input" />
+
+          <label class="modal__label">Last Name</label>
+          <input type="text" bind:value={editLastName} class="modal__input" />
 
           <label class="modal__label">Role</label>
           <select bind:value={editRole} class="modal__select">
@@ -249,7 +275,7 @@
   {#if showEmailModal && selectedUser}
     <div class="modal-overlay" onclick={() => { showEmailModal = false; selectedUser = null; }}>
       <div class="modal-content" onclick={e => e.stopPropagation()}>
-        <h2 class="modal__title">Link Email for {selectedUser.name}</h2>
+        <h2 class="modal__title">Link Email for {selectedUser.firstName} {selectedUser.lastName || selectedUser.name || ''}</h2>
         <div class="modal__form">
           <label class="modal__label">Email Address</label>
           <input 

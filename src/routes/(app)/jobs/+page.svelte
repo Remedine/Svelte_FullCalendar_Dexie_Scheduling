@@ -1,10 +1,10 @@
 <!-- src/routes/(app)/jobs/+page.svelte -->
 <script lang="ts">
   // line 1
-  import { onMount } from 'svelte';
   import { db, type Job } from '$lib/db';
   import { pullJobsFromServer, pb } from '$lib/db/pb';
   import { auth } from '$lib/stores/auth.svelte';
+  import { goto } from '$app/navigation';
 
   // line 6
   let jobs = $state<Job[]>([]);
@@ -44,11 +44,25 @@
     }
   }
 
-  // line 40
-  onMount(async () => {
-    await loadJobs();
-    if (navigator.onLine) {
-      await refreshFromServer();   // line 42 - fixed function name
+  // )=- Replaced onMount with $effect for Svelte 5 runes + auth consistency.
+  // Added defensive check so the page itself enforces login (defense in depth).
+  let jobsLoaded = $state(false);
+
+  $effect(() => {
+    if (!auth.loading && (!auth.isAuthenticated || !auth.currentUser)) {
+      goto('/login', { replaceState: true });
+      return;
+    }
+  });
+
+  $effect(() => {
+    if (!auth.loading && auth.isAuthenticated && !jobsLoaded) {
+      jobsLoaded = true;
+      loadJobs().then(() => {
+        if (navigator.onLine) {
+          refreshFromServer();
+        }
+      });
     }
   });
 

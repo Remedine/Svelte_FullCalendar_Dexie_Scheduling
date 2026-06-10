@@ -1,14 +1,14 @@
 <!-- src/routes/(app)/reset-pin/+page.svelte -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PinResetModal from '$lib/components/PinResetModal.svelte';
 
 	let showModal = $state(true);
 
-	onMount(() => {
-		// )=- Security guard: prevent bypassing forced reset
+	// )=- Converted from onMount to pure $effect for Svelte 5 runes compliance (per AGENTS.md).
+	// Security guard: prevent bypassing forced reset. Runs reactively on auth changes.
+	$effect(() => {
 		if (!auth.currentUser) {
 			goto('/login', { replaceState: true });
 			return;
@@ -18,24 +18,32 @@
 			goto('/calendar', { replaceState: true });
 			return;
 		}
+	});
 
-		// Prevent back button bypass
+	// )=- Back button bypass prevention using $effect with cleanup (replaces onMount return).
+	// Pushes state to block navigation away from forced PIN reset.
+	$effect(() => {
+		if (!auth.currentUser?.forcePinUpdate) return;
+
 		const handlePopState = () => {
 			if (auth.currentUser?.forcePinUpdate) {
-				// Push current state again to block back navigation
 				history.pushState(null, '', '/reset-pin');
 			}
 		};
 
 		window.addEventListener('popstate', handlePopState);
-		
-		// Push initial state
 		history.pushState(null, '', '/reset-pin');
 
 		return () => {
 			window.removeEventListener('popstate', handlePopState);
 		};
 	});
+
+	// )=- Define handleSuccess for the modal. Hides modal and redirects after successful PIN set.
+	function handleSuccess() {
+		showModal = false;
+		goto('/calendar', { replaceState: true });
+	}
 </script>
 
 <div class="reset-page">

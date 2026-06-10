@@ -16,7 +16,7 @@
 </script>
 
 <script lang="ts">
-  import { createJob, updateJob, cancelJob } from '$lib/db';
+  import { createJob, updateJob, cancelJob, updateClient } from '$lib/db';
   import ClientPicker from './ClientPicker.svelte';
   import BillableItemRow from './BillableItemRow.svelte';
   import { optionsStore } from '$lib/stores/options.svelte';
@@ -63,6 +63,11 @@ $effect(() => {
 
       if (!optionsStore.data) {
         await optionsStore.load?.();
+      }
+      // )=- Try to pull fresh options from PB when opening job modal (so areas, durations, billables from options page are up to date).
+      // Guarded by auth in the store; falls back to local/default if not possible.
+      if (navigator.onLine) {
+        await optionsStore.pullFromPB?.();
       }
 
       if (job) {
@@ -130,6 +135,24 @@ $effect(() => {
     });
   });
 
+  // )=- Auto-sync job's areaOfTown to the selected client's areaOfTown.
+  // In almost all cases, the client and the job are the same area of town.
+  // This $effect reacts whenever currentJob.clientId changes (from the ClientPicker bind:value
+  // or when loading an existing job for edit). We fetch from Dexie (clients are preloaded by the picker)
+  // and set the area. Manual override in the area dropdown is still possible afterward for exceptions.
+  // )=- Also wired the onSelect callback in the ClientPicker to do immediate sync on selection/create.
+  // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+  $effect(() => {
+    const clientId = currentJob.clientId;
+    if (clientId) {
+      db.clients.get(clientId).then((client: Client | undefined) => {
+        if (client?.areaOfTown) {
+          currentJob.areaOfTown = client.areaOfTown;
+        }
+      });
+    }
+  });
+
   // Scroll modal content to top when it opens
   $effect(() => {
     if (show) {
@@ -181,6 +204,21 @@ $effect(() => {
     if (!currentJob.clientId) {
       alert('Please select a client');
       return;
+    }
+
+    // )=- If the client has no areaOfTown yet but this job does, backfill the client.
+    // In almost all cases client and job share the area; this makes the job form "teach" the client
+    // its area when the client was created without one (e.g. inline creation in this modal or older data).
+    // We do this on every save (create or edit) so historical jobs can correct the client's area.
+    if (currentJob.clientId && currentJob.areaOfTown) {
+      const client = await db.clients.get(currentJob.clientId);
+      if (client && !client.areaOfTown) {
+        await updateClient(currentJob.clientId, {
+          ...client,
+          areaOfTown: currentJob.areaOfTown,
+          updatedAt: new Date()
+        });
+      }
     }
 
     const cleanPayload = {
@@ -260,12 +298,40 @@ $effect(() => {
             allowCreate={true}
             placeholder="Select or create client..."
             onSelect={(client: Client) => {
+              // )=- When client selected (existing or newly created inline), auto-set job area to client's area if present.
+              // This enforces the common case that job and client share the same areaOfTown.
+              if (client?.areaOfTown) {
+                currentJob.areaOfTown = client.areaOfTown;
+              }
               console.log('✅ Client selected:', client.name);
             }}
             onCreate={async (name: string) => {
               console.log('New client created inline:', name);
             }}
           />
+        </div>
+
+        <!-- )=- Area of Town moved immediately under the Client picker (as requested).
+             We also added backfill: on job save, if the selected client has no areaOfTown
+             but the job does, we update the client. This keeps the common "client == job area" invariant
+             without forcing the user to set it twice. -->
+        <div class="new-job-modal__field">
+          <label for="job-area" class="new-job-modal__label">Area of Town</label>
+          <div 
+            class="area-field-wrapper"
+            style="border-left: 6px solid {getAreaColor(currentJob.areaOfTown)};"
+          >
+            <select 
+              id="job-area" 
+              class="new-job-modal__input area-select"
+              bind:value={currentJob.areaOfTown}
+            >
+              <option value="">Select area...</option>
+              {#each areaOptions as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
         </div>
 
         <!-- Dates -->
@@ -296,26 +362,6 @@ $effect(() => {
                 if (val) currentJob.end = new Date(val);
               }} 
             />
-          </div>
-        </div>
-
-        <!-- Area -->
-        <div class="new-job-modal__field">
-          <label for="job-area" class="new-job-modal__label">Area of Town</label>
-          <div 
-            class="area-field-wrapper"
-            style="border-left: 6px solid {getAreaColor(currentJob.areaOfTown)};"
-          >
-            <select 
-              id="job-area" 
-              class="new-job-modal__input area-select"
-              bind:value={currentJob.areaOfTown}
-            >
-              <option value="">Select area...</option>
-              {#each areaOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
           </div>
         </div>
 

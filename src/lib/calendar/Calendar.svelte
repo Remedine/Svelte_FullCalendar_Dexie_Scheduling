@@ -31,6 +31,14 @@
 		}
 	});
 
+	// )=- Ensure colors load right away if options arrive after initial events render.
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	$effect(() => {
+		if (calendarInstance && optionsStore.data?.areasOfTown?.length) {
+			calendarInstance.refetchEvents();
+		}
+	});
+
 	function getEventColor(areaId: string): string {
 		if (!areaId || !optionsStore.data?.areasOfTown?.length) return '#6b7280';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === areaId);
@@ -98,7 +106,8 @@
 				successCallback(
 					jobs.map((job: any) => ({
 						id: job.id,
-						title: `${job.title} — ${job.assignedCrew?.join(', ')}`,
+						// )=- Title simplified (crew shown via avatars on right of card in Split view; here for compatibility).
+						title: job.title,
 						start: job.start,
 						end: job.end,
 						backgroundColor: getEventColor(job.areaOfTown),

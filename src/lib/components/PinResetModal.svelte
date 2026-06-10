@@ -1,6 +1,8 @@
 <script lang="ts">
+    // )=- Auth cleanup: use unified logout from central store. Avoid direct window.location for consistency with other auth flows (use goto where possible).
     import { auth } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
+	import { goto } from '$app/navigation';
 
     interface Props {
         onSuccess: () => void;
@@ -26,26 +28,21 @@
 		error = '';
 
 		try {
-			console.log('Starting setInitialPin...');
 			const bcrypt = await import('bcryptjs');
-			console.log('bcrypt imported');
 			
 			const hashed = await bcrypt.hash(newPin, 10);
-			console.log('PIN hashed successfully');
 			
 			await db.users.update(auth.currentUser!.id!, {
 				pinHash: hashed,
 				forcePinUpdate: false,
 				updatedAt: new Date()
 			});
-			console.log('Database updated');
 			
-			// Refresh current user
+			// Refresh current user in the central auth store
 			const updatedUser = await db.users.get(auth.currentUser!.id!);
 			if (updatedUser) {
 				auth.currentUser = updatedUser;
 			}
-			console.log('User refreshed');
 			
 			onSuccess();
 		} catch (e) {
@@ -53,7 +50,6 @@
 			error = 'Failed to set PIN. Please try again.';
 		} finally {
 			isSubmitting = false;
-			console.log('Finally block executed');
 		}
 	}
 </script>
@@ -91,7 +87,12 @@
 
       <div class="modal__actions">
         <button 
-          onclick={() => { auth.logout(); window.location.href = '/login'; }} 
+          onclick={async () => {
+            // )=- Use unified logout for auth consistency (clears store + PB). Use goto instead of window.location.
+            const { logout } = await import('$lib/stores/auth.svelte.ts');
+            await logout();
+            goto('/login', { replaceState: true });
+          }} 
           class="modal__btn modal__btn--cancel"
         >
           Cancel & Logout

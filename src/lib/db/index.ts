@@ -28,6 +28,22 @@ function safeClone<T>(obj: T): T {
 	}
 }
 
+// )=- Helper to convert data URL (from camera FileReader) back to Blob for proper PocketBase file field upload.
+// PB file fields (like 'photo' on users) expect Blob/File in the update payload, not raw base64 data URLs.
+// Without this, we get "validation_invalid_file" 400 on photo updates from profile page.
+function dataUrlToBlob(dataUrl: string): Blob {
+	const arr = dataUrl.split(',');
+	const mimeMatch = arr[0].match(/:(.*?);/);
+	const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+	const bstr = atob(arr[1]);
+	let n = bstr.length;
+	const u8arr = new Uint8Array(n);
+	while (n--) {
+		u8arr[n] = bstr.charCodeAt(n);
+	}
+	return new Blob([u8arr], { type: mime });
+}
+
 // ==================== AREA HELPER (simplified for fresh start) ====================
 // )=- Removed legacy mapping. We now trust area IDs coming directly from options table.
 // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
@@ -83,7 +99,10 @@ export interface Job {
 
 export interface User {
 	id?: string;
-	name: string;
+	pbId?: string;
+	firstName?: string;  // )=- Optional for backward compat with existing data. New records always set via createUser/edit.
+	lastName?: string;
+	name: string;  // derived or legacy full name for compat with assignedCrew arrays and old displays
 	pinHash: string;
 	email?: string;
 	role: 'admin' | 'crew';
@@ -91,6 +110,7 @@ export interface User {
 	active: boolean;
 	forcePinUpdate: boolean;
 	forcePhotoUpdate: boolean;
+	verified?: boolean;  // )=- Optional/undefined for old data; treat as false for quick PIN gating. Set true on email verification.
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -137,10 +157,10 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	options: EntityTable<AppOptions, 'id'>;
 };
 
-db.version(14).stores({
+db.version(16).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown',
-	users: 'id, name, email, role, active, forcePhotoUpdate, forcePinUpdate',
+	users: 'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',  // )=- Bumped to v16 for firstName, lastName, verified fields. Indexed for lookups (PIN login by firstName, etc.).
 	syncQueue: '++id, type, collection, recordId, createdAt',
 	options: 'id'
 });
@@ -375,6 +395,79 @@ export async function deleteClient(clientId: string) {
 	if (navigator.onLine) await processSyncQueue();
 }
 
+// )=- Updated createUser for new auth flow: requires firstName, lastName, email, password (for PB verified auth record).
+// Sets derived 'name', verified: false initially (PIN quick-login only after email verification sets it true).
+// Password is passed only in queue data for PB create (not stored in local Dexie user).
+// Follows clients/jobs pattern exactly for local id vs PB id.
+export async function createUser(
+	userData: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'pbId' | 'name' | 'verified'> & { password: string }
+): Promise<string> {
+	const { password, firstName, lastName, ...rest } = userData;
+	const newId = crypto.randomUUID();
+	const fullName = `${firstName} ${lastName}`.trim();
+
+	const newUser = safeClone({
+		...rest,
+		id: newId,
+		firstName,
+		lastName,
+		name: fullName,
+		verified: false,  // )=- New users start unverified for quick PIN; set true on successful email/password login.
+		createdAt: new Date(),
+		updatedAt: new Date()
+	});
+
+	const id = await db.users.add(newUser);
+
+	// Queue data includes password only for the PB side create (not persisted locally).
+	const queueData = {
+		...newUser,
+		password,
+	};
+
+	await addToSyncQueue({
+		type: 'create',
+		collection: 'users',
+		recordId: String(id),
+		data: queueData
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+
+	return id;
+}
+
+export async function updateUser(userId: string, updates: Partial<User>) {
+	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
+	await db.users.update(userId, safeUpdates);
+
+	await addToSyncQueue({
+		type: 'update',
+		collection: 'users',
+		recordId: userId,
+		data: safeUpdates
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+}
+
+export async function deleteUser(userId: string) {
+	const exists = await db.users.get(userId);
+	if (!exists) return;
+
+	const idToDelete = exists.pbId || userId;
+
+	await db.users.delete(userId);
+
+	await addToSyncQueue({
+		type: 'delete',
+		collection: 'users',
+		recordId: idToDelete
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+}
+
 export async function resolveClientPbId(localClientId: string): Promise<string> {
 	if (!localClientId) return localClientId;
 
@@ -534,12 +627,156 @@ export async function processSyncQueue() {
 				}
 			}
 
+			// )=- users handling inserted here (inside the per-item try, before the shared delete).
+			// This ensures every queued users item gets processed like jobs/clients.
+			if (item.collection === 'users') {
+				if (item.type === 'create') {
+					const { id, password: providedPassword, ...userData } = item.data;
+
+					// )=- Use the real password provided at creation (from admin modal) instead of random.
+					// firstName/lastName now sent to PB (assume collection has these fields or map to 'name' if needed).
+					// PB still requires password + passwordConfirm for auth record creation.
+					const password = providedPassword || crypto.randomUUID().slice(0, 16) + 'Aa1!';
+					const email = userData.email || `${(userData.firstName || userData.name || 'user').toLowerCase().replace(/\s+/g, '')}@crew.local`;
+
+					const safeUserData = safeClone({
+						...userData,
+						email,
+						password,
+						passwordConfirm: password,
+						// If your PB users collection doesn't have firstName/lastName yet, you can map:
+						// name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+					});
+
+					// )=- Also convert photo for create path (defensive).
+					if (typeof safeUserData.photo === 'string' && safeUserData.photo.startsWith('data:')) {
+						safeUserData.photo = dataUrlToBlob(safeUserData.photo);
+					}
+
+					try {
+						const record = await pb.collection('users').create(safeUserData);
+
+						const existing = await db.users.get(item.recordId);
+						if (existing) {
+							await db.users.put({ ...existing, pbId: record.id });
+						} else {
+							await db.users.update(item.recordId, { pbId: record.id });
+						}
+
+						console.log(`✅ User synced to PocketBase: ${record.id}`);
+
+						const pendingDeletes = await db.syncQueue
+							.where('recordId')
+							.equals(item.recordId)
+							.and((q) => q.type === 'delete' && q.collection === 'users')
+							.toArray();
+
+						for (const q of pendingDeletes) {
+							await db.syncQueue.update(q.id!, { recordId: record.id });
+						}
+					} catch (err: any) {
+						console.error('❌ User sync failed with 400:', err.response?.data);
+						throw err;
+					}
+				} else if (item.type === 'update') {
+					try {
+						const currentUser = await db.users.get(item.recordId);
+						const realId = currentUser?.pbId || currentUser?.id || item.recordId;
+
+						const { id, pbId, createdAt, updatedAt, ...cleanData } = item.data;
+
+						let pbPayload = safeClone(cleanData);
+
+						// )=- Convert any data URL photo to Blob so PB accepts it as a valid file upload.
+						// This fixes the 400 "validation_invalid_file" when crew uploads photo from /profile.
+						if (typeof pbPayload.photo === 'string' && pbPayload.photo.startsWith('data:')) {
+							pbPayload.photo = dataUrlToBlob(pbPayload.photo);
+						}
+
+						// )=- Never send 'email' in a generic users update payload.
+						// Direct { email: 'new@...' } on an auth collection while authenticated as that user
+						// triggers "validation_values_mismatch" (because email change confirmation is enabled by default).
+						// Email changes are handled via pb.collection('users').requestEmailChange() in the profile UI
+						// (the secure flow that sends a confirmation to the new address).
+						// We still update the email locally in Dexie for immediate app use (PIN login etc.).
+						if ('email' in pbPayload) {
+							delete (pbPayload as any).email;
+						}
+
+						// Avoid sending an empty (or only-meta) payload which can happen for email-only changes.
+						const keys = Object.keys(pbPayload);
+						if (keys.length === 0 || keys.every(k => k === 'updatedAt')) {
+							console.log(`ℹ️ Skipping empty PB user update for ${realId} (email change handled via requestEmailChange)`);
+						} else {
+							await pb.collection('users').update(realId, pbPayload);
+							console.log(`✅ User updated in PocketBase: ${realId}`);
+						}
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							console.error(
+								'❌ User update failed:',
+								JSON.stringify(err.response?.data, null, 2)
+							);
+							throw err;
+						}
+					}
+				} else if (item.type === 'delete') {
+					if (!item.recordId) {
+						await db.syncQueue.delete(item.id!);
+						continue;
+					}
+
+					const realId = item.recordId;
+
+					try {
+						await pb.collection('users').delete(realId);
+					} catch (err: any) {
+						if (err.status === 404) {
+							await db.syncQueue.delete(item.id!);
+						} else {
+							throw err;
+						}
+					}
+				}
+			}
+
 			await db.syncQueue.delete(item.id!);
 			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
 		} catch (err) {
 			console.error(`Failed to sync queue item ${item.id}`, err);
 		}
 	}
+}
+
+export async function cleanupDuplicateUsers() {
+  // )=- General dedup for users by email to handle cases where loginWithEmail created a shadow record (PB id as key) alongside a local UUID record from admin creation.
+  // Prefers keeping a record with firstName/lastName (from creation), ensures pbId is on kept, deletes others.
+  // Called from user list loads and login to keep Dexie clean. UI also has per-list dedup.
+  const allUsers = await db.users.toArray();
+  const byEmail: { [k: string]: any[] } = {};
+  for (const u of allUsers) {
+    if (u.email) {
+      (byEmail[u.email] ||= []).push(u);
+    }
+  }
+  for (const email in byEmail) {
+    const group = byEmail[email];
+    if (group.length > 1) {
+      const keep = group.find(g => g.firstName && g.lastName) || group[0];
+      console.log(`🧹 cleanupDuplicateUsers: keeping ${keep.id} for ${email}, removing ${group.length - 1} dup(s)`);
+      for (const g of group) {
+        if (g.id !== keep.id) {
+          await db.users.delete(g.id!);
+        }
+      }
+      const pbIdCandidate = group.find(g => g.pbId)?.pbId;
+      if (pbIdCandidate && !keep.pbId) {
+        await db.users.update(keep.id!, { pbId: pbIdCandidate });
+      }
+    }
+  }
 }
 
 export { db };
