@@ -47,6 +47,29 @@
 		});
 	});
 
+	
+	
+	$effect(() => {
+	const wrapper = document.querySelector('.split-calendar__day-wrapper');
+	if (!wrapper) return;
+
+	const observer = new ResizeObserver(() => {
+		setTimeout(() => {
+			if (dayApi) {
+				dayApi.updateSize();
+				dayApi.setOption('height', 'auto');
+				// Nuclear option - re-render
+				setTimeout(() => {
+					dayApi?.render();
+				}, 30);
+			}
+		}, 100);
+	});
+
+	observer.observe(wrapper);
+
+	return () => observer.disconnect();
+});
 	// === FILTERS ===
 	let filters = $state({
 		crew: [] as string[],
@@ -390,8 +413,11 @@
 			});
 
 			dayApi.render();
-			dayApi.updateSize();
-			dayApi.gotoDate(parseLocalDate(selectedDate));
+
+			requestAnimationFrame(() => {
+				dayApi?.updateSize();
+				dayApi?.gotoDate(parseLocalDate(selectedDate));
+			});
 		});
 	});
 
@@ -500,28 +526,108 @@
 </div>
 
 <style>
-	.split-calendar-container { container-type: inline-size; container-name: split-calendar; width: 100%; }
-	.split-calendar { display: flex; flex-direction: column; gap: 1rem; width: 100%; min-width: 0; }
-
-	@container split-calendar (min-width: 900px) {
-		.split-calendar { flex-direction: row; gap: 1.5rem; align-items: flex-start; }
-		.split-calendar__sidebar { flex: 0 0 340px; }
-		.split-calendar__main { flex: 1; }
+	.split-calendar-container { 
+		container-type: inline-size; 
+		container-name: split-calendar; 
+		width: 100%; 
 	}
 
-	.split-calendar__sidebar { width: 100%; }
-	.split-calendar__main { flex: 1; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+	.split-calendar { 
+		display: flex; 
+		flex-direction: column; 
+		gap: 1rem; 
+		width: 100%; 
+		min-width: 0; 
+	}
 
-	.split-calendar__view-switcher { display: none; gap: 0.25rem; }
-	@container split-calendar (min-width: 900px) { .split-calendar__view-switcher { display: flex; } }
+	/* Desktop layout */
+	@container split-calendar (min-width: 900px) {
+		.split-calendar { 
+			flex-direction: row; 
+			gap: 1.5rem; 
+			align-items: flex-start; 
+		}
 
-	.view-btn { padding: 0.4rem 1rem; border: 1px solid #e2e8f0; background: white; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
-	.view-btn:hover { background: #f8fafc; }
-	.view-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+		.split-calendar__sidebar { 
+			flex: 0 0 340px;
+			flex-shrink: 0;
+			width: auto;
+			max-width: 340px;
+		}
 
-	.split-calendar__day-wrapper { flex: 1; display: flex; flex-direction: column; background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; min-height: 650px; transition: opacity 0.2s ease; }
-	.split-calendar__day-wrapper.refreshing { opacity: 0.6; pointer-events: none; }
-	.split-calendar__day { flex: 1; min-height: 600px; min-width: 0; overflow: hidden; }
+		.split-calendar__main { 
+			flex: 1; 
+			min-width: 0;
+		}
+	}
+
+	.split-calendar__sidebar { 
+		width: 100%; 
+	}
+
+	.split-calendar__main { 
+		flex: 1; 
+		display: flex; 
+		flex-direction: column; 
+		gap: 0.75rem; 
+		min-width: 0; 
+	}
+
+	.split-calendar__view-switcher { 
+		display: none; 
+		gap: 0.25rem; 
+	}
+
+	@container split-calendar (min-width: 900px) { 
+		.split-calendar__view-switcher { 
+			display: flex; 
+		} 
+	}
+
+	.view-btn { 
+		padding: 0.4rem 1rem; 
+		border: 1px solid #e2e8f0; 
+		background: white; 
+		border-radius: 6px; 
+		font-size: 0.9rem; 
+		cursor: pointer; 
+	}
+
+	.view-btn:hover { 
+		background: #f8fafc; 
+	}
+
+	.view-btn.active { 
+		background: #3b82f6; 
+		color: white; 
+		border-color: #3b82f6; 
+	}
+
+	.split-calendar__day-wrapper { 
+		flex: 1; 
+		display: flex; 
+		flex-direction: column; 
+		background: white; 
+		border: 1px solid #e2e8f0; 
+		border-radius: 12px; 
+		overflow: hidden; 
+		min-height: 650px; 
+		transition: opacity 0.2s ease;
+		width: 100%;                    /* Helps FullCalendar detect size changes */
+	}
+
+	.split-calendar__day-wrapper.refreshing { 
+		opacity: 0.6; 
+		pointer-events: none; 
+	}
+
+	.split-calendar__day { 
+		flex: 1; 
+		min-height: 600px; 
+		min-width: 0; 
+		overflow: hidden;
+		width: 100%;                    /* Important for responsive width */
+	}
 
 	/* Filters */
 	.filters {

@@ -3,7 +3,7 @@
 ## High Priority
 [x] Add PocketBase to the stack for auth and syncing
 [x] Retool Auth utilizing Pocketbase
-[] Add security for Dexie data (encrypt, clear on logout)
+
 
 ## Dexie & Data Layer
 [x] Dexie Stores 
@@ -13,6 +13,7 @@
     [x] Options/Settings?
     [] Invoice
 [x] Pocketbase for server sync
+[] Add security for Dexie data (encrypt, clear on logout)
 
 ## Routes/Pages Views
 [] Jobs
@@ -30,13 +31,13 @@
 ## UI/UX & Styling
 
 ## Testing & Quality/Debugs
-[] On Client View - restrict deleting clients if client has jobs (archive only)
-[] Default job length is set to 30 minutes, then jumps to 4 hours on drag/drop event
+[x] On Client View - restrict deleting clients if client has jobs (archive only)
+[x] Default job length is set to 30 minutes, then jumps to 4 hours on drag/drop event
 
 ## Nice to Have / Backlog
 [] Darkmode
 [] Calendar Now Indicator to see current time
-[] business hours on calendar
+[] allow set business hours on calendar options page and calendars show only those hours
 [] Event Popovers(cards?)
 [] List View on Calendar
 [] Allow picking client from mobile device contact list
