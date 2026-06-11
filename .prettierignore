@@ -1,9 +1,18 @@
-# Package Managers
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
-bun.lock
-bun.lockb
+# Generated / data
+pb_migrations/
+pb_data/
+node_modules/
 
-# Miscellaneous
-/static/
+# Lock and config that we don't want auto-formatted in this project
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.prettierrc
+capital-city-windows.code-workspace
+
+# Large docs / specs (keep manual control)
+CHANGELOG.md
+docs/
+readme.md
+
+# Migrations are PocketBase output
+pb_migrations/**/*.js

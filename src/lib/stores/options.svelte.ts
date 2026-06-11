@@ -2,7 +2,7 @@
 import { db } from '$lib/db';
 import { pb } from '$lib/db/pb';
 
-export let optionsStore = $state({
+export const optionsStore = $state({
 	data: null as any,
 	isLoading: false,
 	pendingPull: null as Promise<boolean> | null,
@@ -14,7 +14,7 @@ export let optionsStore = $state({
 			this.isLoading = true;
 
 			// Try local first
-			let options = await db.options.get(1);
+			let options = await db.options.get('1');
 
 			if (!options) {
 				const pulled = await this.pullFromPB();
@@ -22,7 +22,7 @@ export let optionsStore = $state({
 					// )=- No record in PB and no local: create sensible default in Dexie
 					// so the options page always has editingOptions with .id and can save.
 					options = {
-						id: 1,
+						id: '1',
 						defaultJobDurationHours: 2,
 						taxRate: 6.5,
 						invoiceDueDays: 30,
@@ -99,9 +99,16 @@ export let optionsStore = $state({
 				}
 			}
 
+			// )=- Map PB record to our AppOptions shape. Strip PB's own 'id' (string) and force our stable '1'.
+			// PB record may contain collection metadata that doesn't match our Dexie/AppOptions interface.
 			const serverOptions = {
-				id: 1,
-				...record,
+				id: '1',
+				defaultJobDurationHours: record.defaultJobDurationHours ?? 2,
+				taxRate: record.taxRate ?? 0.065,
+				invoiceDueDays: record.invoiceDueDays ?? 30,
+				areasOfTown: record.areasOfTown ?? [],
+				defaultBillableItems: record.defaultBillableItems ?? [],
+				cancelReasons: record.cancelReasons ?? [],
 				lastUpdated: new Date(record.lastUpdated || record.updated),
 				updatedBy: record.updatedBy || 'System'
 			};
@@ -114,7 +121,11 @@ export let optionsStore = $state({
 			}
 			return true;
 		} catch (err: any) {
-			const isAbort = err?.status === 0 || err?.name === 'AbortError' || (err?.message || '').toLowerCase().includes('abort') || (err?.message || '').toLowerCase().includes('autocancel');
+			const isAbort =
+				err?.status === 0 ||
+				err?.name === 'AbortError' ||
+				(err?.message || '').toLowerCase().includes('abort') ||
+				(err?.message || '').toLowerCase().includes('autocancel');
 			if (!isAbort && err.status !== 404) {
 				console.error('❌ Failed to pull options from PocketBase:', err);
 			}

@@ -1,10 +1,16 @@
-// src/lib/stores/toast.svelte.ts 
+// src/lib/stores/toast.svelte.ts
 import { browser } from '$app/environment';
 
-export const toast = $state({
-	toasts: [],
+export interface ToastItem {
+	id: number;
+	message: string;
+	type: 'success' | 'error' | 'info';
+}
 
-	show(message, type = 'success', duration = 4500) {
+export const toast = $state({
+	toasts: [] as ToastItem[],
+
+	show(message: string, type: 'success' | 'error' | 'info' = 'success', duration = 4500) {
 		if (!browser) return;
 
 		const id = Date.now() + Math.random();
@@ -24,22 +30,22 @@ export const toast = $state({
 			}, duration);
 		}
 
-		return id; // ← Add this line
+		return id;
 	},
 
-	success(message, duration = 4000) {
+	success(message: string, duration = 4000) {
 		this.show(message, 'success', duration);
 	},
 
-	error(message, duration = 6000) {
+	error(message: string, duration = 6000) {
 		this.show(message, 'error', duration);
 	},
 
-	info(message, duration = 4500) {
+	info(message: string, duration = 4500) {
 		this.show(message, 'info', duration);
 	},
 
-	dismiss(id) {
+	dismiss(id: number) {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	},
 

@@ -7,7 +7,8 @@
 	const ClientSchema = z.object({
 		name: z.string().min(1, 'Full name is required'),
 		email: z.string().email('Please enter a valid email').optional().or(z.literal('')),
-		phone: z.string()
+		phone: z
+			.string()
 			.regex(/^[\d\s\-\(\)\.]*$/, 'Phone can only contain numbers and formatting characters')
 			.optional()
 			.or(z.literal('')),
@@ -26,7 +27,7 @@
 		onSaved = () => {}
 	} = $props();
 
-	let isEditing = $derived(!!client?.id);
+	const isEditing = $derived(!!client?.id);
 
 	let formData = $state<Partial<Client>>({
 		name: '',
@@ -45,7 +46,7 @@
 
 	// )=- Robust derived value supporting both array and Record shapes from optionsStore
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	let areaOptions = $derived.by(() => {
+	const areaOptions = $derived.by(() => {
 		const raw = optionsStore.data?.areasOfTown;
 		if (!raw) return [];
 		if (Array.isArray(raw)) return raw;
@@ -53,7 +54,7 @@
 	});
 
 	// )=- Explicit derived color so the left border updates instantly when user changes the dropdown
-	let selectedAreaColor = $derived.by(() => {
+	const selectedAreaColor = $derived.by(() => {
 		if (!formData.areaOfTown || !areaOptions.length) return '#64748b';
 		const area = areaOptions.find((a: any) => a.id === formData.areaOfTown);
 		return area?.color || '#64748b';
@@ -113,7 +114,7 @@
 
 		const result = ClientSchema.safeParse(formData);
 		if (!result.success) {
-			result.error.issues.forEach(issue => {
+			result.error.issues.forEach((issue) => {
 				const field = issue.path[0] as string;
 				errors[field] = issue.message;
 			});
@@ -171,10 +172,10 @@
 
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Phone</label>
-					<input 
+					<input
 						type="tel"
 						bind:value={formData.phone}
-						oninput={(e) => formData.phone = formatPhone((e.target as HTMLInputElement).value)}
+						oninput={(e) => (formData.phone = formatPhone((e.target as HTMLInputElement).value))}
 						placeholder="(503) 555-1234"
 						class="client-form-modal__input"
 					/>
@@ -193,7 +194,11 @@
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">State</label>
-						<input bind:value={formData.serviceAddressState} maxlength="2" class="client-form-modal__input" />
+						<input
+							bind:value={formData.serviceAddressState}
+							maxlength="2"
+							class="client-form-modal__input"
+						/>
 					</div>
 					<div class="client-form-modal__field">
 						<label class="client-form-modal__label">ZIP</label>
@@ -203,11 +208,10 @@
 
 				<!-- Area with Colored Left Border -->
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Area of Town <span class="required">*</span></label>
-					<div 
-						class="area-field-wrapper"
-						style="border-left: 6px solid {selectedAreaColor};"
+					<label class="client-form-modal__label"
+						>Area of Town <span class="required">*</span></label
 					>
+					<div class="area-field-wrapper" style="border-left: 6px solid {selectedAreaColor};">
 						<select bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
 							<option value="">Select area...</option>
 							{#each areaOptions as area}
@@ -229,7 +233,8 @@
 
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label">Notes</label>
-					<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"></textarea>
+					<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"
+					></textarea>
 				</div>
 			</form>
 
@@ -237,15 +242,15 @@
 			     Matches JobFormModal__footer exactly for visual + behavior consistency.
 			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 			<div class="client-form-modal__footer">
-				<button 
-					type="button" 
-					class="client-form-modal__btn client-form-modal__btn--cancel" 
+				<button
+					type="button"
+					class="client-form-modal__btn client-form-modal__btn--cancel"
 					onclick={closeForm}
 				>
 					Cancel
 				</button>
-				<button 
-					type="submit" 
+				<button
+					type="submit"
 					form="client-form"
 					class="client-form-modal__btn client-form-modal__btn--primary"
 				>

@@ -11,45 +11,34 @@
    Reference: JOBS_AND_INVOICES_SPEC.md (Phase 4)
 -->
 <script lang="ts">
-	import { db, type Job, type Invoice, type Client, createInvoice, updateInvoice, generateInvoiceDocx } from '$lib/db';
+	import {
+		db,
+		type Job,
+		type Invoice,
+		type Client,
+		createInvoice,
+		updateInvoice,
+		generateInvoiceDocx
+	} from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { saveAs } from 'file-saver';
 	import { pb } from '$lib/db/pb';
+	// )=- Date helpers extracted to a pure module in Phase 1 for testability and to eliminate duplication.
+	// All local calendar-day logic now lives in $lib/utils/dates (avoids the classic UTC vs local day shift bugs).
+	// Reference: TESTING_PLAN.md Phase 1 + JOBS_AND_INVOICES_SPEC.md
+	import { dateToInputValue, inputValueToDate } from '$lib/utils/dates';
 
 	let {
 		job = $bindable<Job | null>(null),
 		invoice = $bindable<Invoice | null>(null),
-		onStatusChange = (newInvoice: Invoice) => {},
+		onStatusChange = (newInvoice: Invoice) => {}
 	} = $props();
 
 	let isGenerating = $state(false);
 	let isUploading = $state(false);
 
-	// )=- Date input helpers to avoid the classic <input type="date"> + JS Date timezone shift bug.
-	// The browser date picker gives "YYYY-MM-DD" (local calendar date, no time).
-	// new Date('2026-07-10') is interpreted as UTC midnight in most browsers → can become July 9th in local time
-	// (e.g. for UTC-5 or during DST). toISOString().slice(0,10) on a local Date can also shift the day.
-	// We use local component getters + new Date(year, monthIndex, day) to keep the intended calendar day.
-	// This fixes the reported discrepancy where picker shows 07/10 but display shows 07/09 for dueDate (and same for paidAt).
-	// Applied to both due date override and paid date editing.
-	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md (dueDate / paidAt on Invoice)
-	function dateToInputValue(d: Date | string | undefined | null): string {
-		if (!d) return '';
-		const date = typeof d === 'string' ? new Date(d) : d;
-		const y = date.getFullYear();
-		const m = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		return `${y}-${m}-${day}`;
-	}
-
-	function inputValueToDate(val: string): Date | undefined {
-		if (!val) return undefined;
-		const [y, m, d] = val.split('-').map(Number);
-		if (!y || !m || !d) return undefined;
-		// Construct as local date at midnight (no UTC conversion)
-		return new Date(y, m - 1, d);
-	}
-
+	// )=- The two date helpers were moved to $lib/utils/dates (see import above).
+	// This component now uses the shared, tested versions.
 	async function handleGenerateDraft() {
 		if (!job) return;
 		isGenerating = true;
@@ -60,7 +49,7 @@
 
 			const blob = await generateInvoiceDocx(job, client, {
 				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: optionsStore.data?.invoiceDueDays,
+				invoiceDueDays: optionsStore.data?.invoiceDueDays
 			});
 
 			// Immediate download for the user (editable .docx)
@@ -77,7 +66,7 @@
 					amount: job.totalAmount,
 					billableItems: job.billableItems,
 					notes: job.notes,
-					importSource: job.importSource,
+					importSource: job.importSource
 				},
 				{
 					primary: { blob, filename }
@@ -191,15 +180,11 @@
 			const client = job.clientId ? await db.clients.get(job.clientId) : null;
 			const blob = await generateInvoiceDocx(job, client, {
 				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: optionsStore.data?.invoiceDueDays,
+				invoiceDueDays: optionsStore.data?.invoiceDueDays
 			});
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
-			await updateInvoice(
-				invoice.id!,
-				{ updatedAt: new Date() },
-				{ primary: { blob, filename } }
-			);
+			await updateInvoice(invoice.id!, { updatedAt: new Date() }, { primary: { blob, filename } });
 			const fresh = await db.invoices.get(invoice.id!);
 			if (fresh) {
 				invoice = fresh;
@@ -276,11 +261,7 @@
 		}));
 
 		try {
-			await updateInvoice(
-				invoice.id,
-				{ updatedAt: new Date() },
-				{ supporting: newFiles }
-			);
+			await updateInvoice(invoice.id, { updatedAt: new Date() }, { supporting: newFiles });
 			const fresh = await db.invoices.get(invoice.id);
 			if (fresh) {
 				invoice = fresh;
@@ -299,37 +280,50 @@
 <div class="job-invoice-panel">
 	{#if invoice}
 		<div class="job-invoice-panel__status">
-			<span class="job-invoice-panel__status-badge job-invoice-panel__status-badge--{invoice.status}">
+			<span
+				class="job-invoice-panel__status-badge job-invoice-panel__status-badge--{invoice.status}"
+			>
 				{invoice.status}
 			</span>
 			{#if invoice}
-				<button class="job-invoice-panel__small-btn" onclick={handleRegenerate} disabled={isGenerating}>Regenerate</button>
+				<button
+					class="job-invoice-panel__small-btn"
+					onclick={handleRegenerate}
+					disabled={isGenerating}>Regenerate</button
+				>
 				<!-- )=- Due date override UI. Always available for an existing invoice so user can adjust the due date that was set at generation time.
 				     Uses the same pattern as the paid date editor. BEM class for styling. -->
 				<span class="job-invoice-panel__due-edit">
-					Due on: 
-					<input 
-						type="date" 
-						value={dateToInputValue(invoice.dueDate)} 
-						onchange={handleEditDueDate} 
+					Due on:
+					<input
+						type="date"
+						value={dateToInputValue(invoice.dueDate)}
+						onchange={handleEditDueDate}
 					/>
 				</span>
 			{/if}
 			{#if invoice.status === 'generated'}
-				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('sent')}>Mark Sent</button>
+				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('sent')}
+					>Mark Sent</button
+				>
 			{:else if invoice.status === 'sent'}
-				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('generated')}>Set Unsent</button>
-				<button class="job-invoice-panel__small-btn job-invoice-panel__small-btn--primary" onclick={() => handleQuickStatus('paid')}>Mark Paid</button>
+				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('generated')}
+					>Set Unsent</button
+				>
+				<button
+					class="job-invoice-panel__small-btn job-invoice-panel__small-btn--primary"
+					onclick={() => handleQuickStatus('paid')}>Mark Paid</button
+				>
 			{:else if invoice.status === 'paid'}
-				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('generated')}>Set Unsent</button>
-				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('sent')}>Mark Unpaid</button>
+				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('generated')}
+					>Set Unsent</button
+				>
+				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('sent')}
+					>Mark Unpaid</button
+				>
 				<span class="job-invoice-panel__paid-edit">
-					Paid on: 
-					<input 
-						type="date" 
-						value={dateToInputValue(invoice.paidAt)} 
-						onchange={handleEditPaidAt} 
-					/>
+					Paid on:
+					<input type="date" value={dateToInputValue(invoice.paidAt)} onchange={handleEditPaidAt} />
 				</span>
 			{/if}
 		</div>
@@ -348,9 +342,9 @@
 				{/if}
 			{/if}
 			<label class="job-invoice-panel__upload-label">
-				<input 
-					type="file" 
-					accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
+				<input
+					type="file"
+					accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 					onchange={handleRevisedUpload}
 					disabled={isUploading}
 				/>
@@ -363,8 +357,8 @@
 		     This fulfills the "ability to add more for legacy imports" requirement. -->
 		<div class="job-invoice-panel__file-row">
 			<label class="job-invoice-panel__upload-label job-invoice-panel__upload-label--supporting">
-				<input 
-					type="file" 
+				<input
+					type="file"
 					multiple
 					accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword"
 					onchange={handleAddSupporting}
@@ -374,7 +368,7 @@
 			</label>
 		</div>
 	{:else}
-		<button 
+		<button
 			class="job-invoice-panel__generate-btn"
 			onclick={handleGenerateDraft}
 			disabled={isGenerating || !job}
@@ -382,7 +376,8 @@
 			{isGenerating ? 'Generating…' : 'Generate Draft Invoice'}
 		</button>
 		<p class="job-invoice-panel__hint">
-			Creates an editable .docx, downloads it immediately, and saves a copy to the job (via PocketBase).
+			Creates an editable .docx, downloads it immediately, and saves a copy to the job (via
+			PocketBase).
 		</p>
 	{/if}
 </div>
@@ -411,19 +406,51 @@
 		font-weight: 600;
 		text-transform: uppercase;
 	}
-	.job-invoice-panel__status-badge--draft { background: #fef3c7; color: #92400e; }
-	.job-invoice-panel__status-badge--generated { background: #dbeafe; color: #1e40af; }
-	.job-invoice-panel__status-badge--sent { background: #d1fae5; color: #166534; }
-	.job-invoice-panel__status-badge--paid { background: #a7f3d0; color: #065f46; }
+	.job-invoice-panel__status-badge--draft {
+		background: #fef3c7;
+		color: #92400e;
+	}
+	.job-invoice-panel__status-badge--generated {
+		background: #dbeafe;
+		color: #1e40af;
+	}
+	.job-invoice-panel__status-badge--sent {
+		background: #d1fae5;
+		color: #166534;
+	}
+	.job-invoice-panel__status-badge--paid {
+		background: #a7f3d0;
+		color: #065f46;
+	}
 
-	.job-invoice-panel__paid-edit { font-size: 0.7rem; display: flex; align-items: center; gap: 0.25rem; }
-	.job-invoice-panel__paid-edit input { padding: 0.1rem 0.2rem; border: 1px solid #cbd5e1; border-radius: 3px; font-size: 0.65rem; }
+	.job-invoice-panel__paid-edit {
+		font-size: 0.7rem;
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.job-invoice-panel__paid-edit input {
+		padding: 0.1rem 0.2rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 3px;
+		font-size: 0.65rem;
+	}
 
 	/* )=- Due date override editor style. Matches the paid-edit for visual consistency.
 	   Allows user to put in a new due date after initial generation (which used options.invoiceDueDays + job end).
 	   )=- Reference: user request + JOBS_AND_INVOICES_SPEC.md */
-	.job-invoice-panel__due-edit { font-size: 0.7rem; display: flex; align-items: center; gap: 0.25rem; }
-	.job-invoice-panel__due-edit input { padding: 0.1rem 0.2rem; border: 1px solid #cbd5e1; border-radius: 3px; font-size: 0.65rem; }
+	.job-invoice-panel__due-edit {
+		font-size: 0.7rem;
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.job-invoice-panel__due-edit input {
+		padding: 0.1rem 0.2rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 3px;
+		font-size: 0.65rem;
+	}
 
 	.job-invoice-panel__small-btn {
 		font-size: 0.7rem;

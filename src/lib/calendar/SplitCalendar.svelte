@@ -10,6 +10,11 @@
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
+	// )=- Date helpers extracted to pure $lib/utils/dates.ts in Phase 1 of the testing plan.
+	// This removes duplication with JobInvoicePanel and enables strong unit testing of the local-date logic
+	// that was the source of multiple due-date / calendar jump bugs.
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
+	import { getLocalDateString, parseLocalDate, toDateString } from '$lib/utils/dates';
 
 	let isExternalDrop = $state(false);
 	let dragMouseListener: ((e: MouseEvent) => void) | null = null;
@@ -52,11 +57,13 @@
 			await cleanupDuplicateUsers();
 			db.users.toArray().then((users: any[]) => {
 				// )=- Dedup by display name...
-				crewOptions = Array.from(new Set(
-					users
-						.filter((u: any) => u.active)
-						.map((u: any) => u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim())
-				)).sort();
+				crewOptions = Array.from(
+					new Set(
+						users
+							.filter((u: any) => u.active)
+							.map((u: any) => u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim())
+					)
+				).sort();
 			});
 		});
 	});
@@ -90,28 +97,27 @@
 		}
 	});
 
-	
 	$effect(() => {
-	const wrapper = document.querySelector('.split-calendar__day-wrapper');
-	if (!wrapper) return;
+		const wrapper = document.querySelector('.split-calendar__day-wrapper');
+		if (!wrapper) return;
 
-	const observer = new ResizeObserver(() => {
-		setTimeout(() => {
-			if (dayApi) {
-				dayApi.updateSize();
-				dayApi.setOption('height', 'auto');
-				// Nuclear option - re-render
-				setTimeout(() => {
-					dayApi?.render();
-				}, 30);
-			}
-		}, 100);
+		const observer = new ResizeObserver(() => {
+			setTimeout(() => {
+				if (dayApi) {
+					dayApi.updateSize();
+					dayApi.setOption('height', 'auto');
+					// Nuclear option - re-render
+					setTimeout(() => {
+						dayApi?.render();
+					}, 30);
+				}
+			}, 100);
+		});
+
+		observer.observe(wrapper);
+
+		return () => observer.disconnect();
 	});
-
-	observer.observe(wrapper);
-
-	return () => observer.disconnect();
-});
 	// === FILTERS ===
 	let filters = $state({
 		crew: [] as string[],
@@ -141,35 +147,14 @@
 			const matchesCrew =
 				filters.crew.length === 0 ||
 				job.assignedCrew?.some((c: string) => filters.crew.includes(c));
-			const matchesArea =
-				filters.areas.length === 0 || filters.areas.includes(job.areaOfTown);
-			const matchesStatus =
-				filters.statuses.length === 0 || filters.statuses.includes(job.status);
+			const matchesArea = filters.areas.length === 0 || filters.areas.includes(job.areaOfTown);
+			const matchesStatus = filters.statuses.length === 0 || filters.statuses.includes(job.status);
 			return matchesCrew && matchesArea && matchesStatus;
 		})
 	);
 
-	function getLocalDateString(date: Date = new Date()): string {
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		return `${year}-${month}-${day}`;
-	}
-
-	function parseLocalDate(dateStr: string): Date {
-		const [y, m, d] = dateStr.split('-').map(Number);
-		return new Date(y, m - 1, d);
-	}
-
-	function toDateString(d: any): string {
-		if (!d) return '';
-		const date = d instanceof Date ? d : new Date(d);
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		return `${year}-${month}-${day}`;
-	}
-
+	// )=- Local date functions were extracted to $lib/utils/dates (imported above).
+	// getJobColor remains local because it depends on the optionsStore (not a pure date util).
 	function getJobColor(job: any): string {
 		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#6b7280';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === job.areaOfTown);
@@ -210,8 +195,10 @@
 
 		const includeCancelled = filters.statuses.includes('cancelled');
 
-		const start = new Date(); start.setMonth(start.getMonth() - 2);
-		const end = new Date(); end.setMonth(end.getMonth() + 2);
+		const start = new Date();
+		start.setMonth(start.getMonth() - 2);
+		const end = new Date();
+		end.setMonth(end.getMonth() + 2);
 
 		jobs = await getJobsForRange(start, end, includeCancelled);
 	}
@@ -259,7 +246,7 @@
 		const wasCancelledSelected = type === 'statuses' && filters.statuses.includes('cancelled');
 
 		if (arr.includes(value)) {
-			filters[type] = arr.filter(v => v !== value);
+			filters[type] = arr.filter((v) => v !== value);
 		} else {
 			filters[type] = [...arr, value];
 		}
@@ -267,7 +254,10 @@
 		const isCancelledToggled = type === 'statuses' && value === 'cancelled';
 		const nowCancelledSelected = filters.statuses.includes('cancelled');
 
-		if (isCancelledToggled || (type === 'statuses' && wasCancelledSelected !== nowCancelledSelected)) {
+		if (
+			isCancelledToggled ||
+			(type === 'statuses' && wasCancelledSelected !== nowCancelledSelected)
+		) {
 			loadData().then(() => {
 				dayApi?.refetchEvents();
 			});
@@ -304,7 +294,7 @@
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 		if (newDate < today) {
-			toast.error("Cannot move job to a past date");
+			toast.error('Cannot move job to a past date');
 			return;
 		}
 
@@ -323,7 +313,7 @@
 			await updateJobDates(jobId, newDate, newEnd);
 			await refreshAfterUpdate();
 		} catch (e) {
-			toast.error("Failed to move job");
+			toast.error('Failed to move job');
 		}
 	}
 
@@ -346,10 +336,7 @@
 				eventDragMinDistance: 8,
 
 				dateClick: (info) => {
-					openJobModal(
-						{ start: info.date },
-						() => refreshAfterUpdate()
-					);
+					openJobModal({ start: info.date }, () => refreshAfterUpdate());
 				},
 
 				eventDidMount: (info) => {
@@ -445,8 +432,8 @@
 					return [];
 				},
 
-				eventAllow: (dropInfo, draggedEvent) => {
-					const status = draggedEvent.extendedProps?.status;
+				eventAllow: (dropInfo, draggedEvent: any) => {
+					const status = draggedEvent?.extendedProps?.status;
 					return status !== 'completed' && status !== 'cancelled';
 				},
 
@@ -454,7 +441,7 @@
 					const status = info.event.extendedProps?.status;
 
 					if (status === 'completed' || status === 'cancelled') {
-						toast.error("Cannot move cancelled or completed jobs");
+						toast.error('Cannot move cancelled or completed jobs');
 						return;
 					}
 
@@ -480,20 +467,27 @@
 					const mouseX = info.jsEvent.clientX;
 					const mouseY = info.jsEvent.clientY;
 
-					let dropTarget = document.elementFromPoint(mouseX, mouseY);
+					const dropTarget = document.elementFromPoint(mouseX, mouseY);
 					let monthPickerDay = dropTarget?.closest('.month-picker__day');
 
 					if (!monthPickerDay) {
 						const rect = monthPickerEl.getBoundingClientRect();
 						const isOverContainer =
-							mouseX >= rect.left && mouseX <= rect.right &&
-							mouseY >= rect.top && mouseY <= rect.bottom;
+							mouseX >= rect.left &&
+							mouseX <= rect.right &&
+							mouseY >= rect.top &&
+							mouseY <= rect.bottom;
 
 						if (isOverContainer) {
 							const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
 							for (const el of dayElements) {
 								const r = el.getBoundingClientRect();
-								if (mouseX >= r.left && mouseX <= r.right && mouseY >= r.top && mouseY <= r.bottom) {
+								if (
+									mouseX >= r.left &&
+									mouseX <= r.right &&
+									mouseY >= r.top &&
+									mouseY <= r.bottom
+								) {
 									monthPickerDay = el;
 									break;
 								}
@@ -551,15 +545,17 @@
 						});
 					}
 
-					successCallback(visibleJobs.map((job: any) => ({
-						id: job.id,
-						// )=- Title is now just the job title; crew members are shown as circular avatars on the right (see eventDidMount).
-						title: job.title,
-						start: job.start,
-						end: job.end,
-						backgroundColor: getJobColor(job),
-						extendedProps: job
-					})));
+					successCallback(
+						visibleJobs.map((job: any) => ({
+							id: job.id,
+							// )=- Title is now just the job title; crew members are shown as circular avatars on the right (see eventDidMount).
+							title: job.title,
+							start: job.start,
+							end: job.end,
+							backgroundColor: getJobColor(job),
+							extendedProps: job
+						}))
+					);
 				}
 			});
 
@@ -615,11 +611,7 @@
 	<div class="split-calendar">
 		<!-- Sidebar -->
 		<div class="split-calendar__sidebar">
-			<MonthPicker 
-				jobs={filteredJobs}
-				bind:selectedDate 
-				onDateSelect={handleDateSelect}
-			/>
+			<MonthPicker jobs={filteredJobs} bind:selectedDate onDateSelect={handleDateSelect} />
 
 			<!-- Filters -->
 			<div class="filters">
@@ -637,8 +629,8 @@
 						<div class="filter-options">
 							{#each crewOptions as crew}
 								<label class="filter-option">
-									<input 
-										type="checkbox" 
+									<input
+										type="checkbox"
 										checked={filters.crew.includes(crew)}
 										onchange={() => toggleFilter('crew', crew)}
 									/>
@@ -652,10 +644,10 @@
 					<div class="filter-group">
 						<div class="filter-group__label">Area</div>
 						<div class="filter-options">
-							{#each (optionsStore.data?.areasOfTown || []) as area}
+							{#each optionsStore.data?.areasOfTown || [] as area}
 								<label class="filter-option">
-									<input 
-										type="checkbox" 
+									<input
+										type="checkbox"
 										checked={filters.areas.includes(area.id)}
 										onchange={() => toggleFilter('areas', area.id)}
 									/>
@@ -671,8 +663,8 @@
 						<div class="filter-options">
 							{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
 								<label class="filter-option">
-									<input 
-										type="checkbox" 
+									<input
+										type="checkbox"
 										checked={filters.statuses.includes(status)}
 										onchange={() => toggleFilter('statuses', status)}
 									/>
@@ -683,9 +675,7 @@
 					</div>
 
 					{#if activeFilterCount > 0}
-						<button class="filters__clear-btn" onclick={clearFilters}>
-							Clear all filters
-						</button>
+						<button class="filters__clear-btn" onclick={clearFilters}> Clear all filters </button>
 					{/if}
 				</details>
 			</div>
@@ -694,9 +684,21 @@
 		<!-- Main Calendar -->
 		<div class="split-calendar__main">
 			<div class="split-calendar__view-switcher">
-				<button class="view-btn" class:active={currentView === 'timeGridDay'} onclick={() => changeView('timeGridDay')}>Day</button>
-				<button class="view-btn" class:active={currentView === 'timeGridWeek'} onclick={() => changeView('timeGridWeek')}>Week</button>
-				<button class="view-btn" class:active={currentView === 'dayGridMonth'} onclick={() => changeView('dayGridMonth')}>Month</button>
+				<button
+					class="view-btn"
+					class:active={currentView === 'timeGridDay'}
+					onclick={() => changeView('timeGridDay')}>Day</button
+				>
+				<button
+					class="view-btn"
+					class:active={currentView === 'timeGridWeek'}
+					onclick={() => changeView('timeGridWeek')}>Week</button
+				>
+				<button
+					class="view-btn"
+					class:active={currentView === 'dayGridMonth'}
+					onclick={() => changeView('dayGridMonth')}>Month</button
+				>
 			</div>
 
 			<div class="split-calendar__day-wrapper" class:refreshing={isSyncing}>
@@ -707,107 +709,107 @@
 </div>
 
 <style>
-	.split-calendar-container { 
-		container-type: inline-size; 
-		container-name: split-calendar; 
-		width: 100%; 
+	.split-calendar-container {
+		container-type: inline-size;
+		container-name: split-calendar;
+		width: 100%;
 	}
 
-	.split-calendar { 
-		display: flex; 
-		flex-direction: column; 
-		gap: 1rem; 
-		width: 100%; 
-		min-width: 0; 
+	.split-calendar {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		width: 100%;
+		min-width: 0;
 	}
 
 	/* Desktop layout */
 	@container split-calendar (min-width: 900px) {
-		.split-calendar { 
-			flex-direction: row; 
-			gap: 1.5rem; 
-			align-items: flex-start; 
+		.split-calendar {
+			flex-direction: row;
+			gap: 1.5rem;
+			align-items: flex-start;
 		}
 
-		.split-calendar__sidebar { 
+		.split-calendar__sidebar {
 			flex: 0 0 340px;
 			flex-shrink: 0;
 			width: auto;
 			max-width: 340px;
 		}
 
-		.split-calendar__main { 
-			flex: 1; 
+		.split-calendar__main {
+			flex: 1;
 			min-width: 0;
 		}
 	}
 
-	.split-calendar__sidebar { 
-		width: 100%; 
+	.split-calendar__sidebar {
+		width: 100%;
 	}
 
-	.split-calendar__main { 
-		flex: 1; 
-		display: flex; 
-		flex-direction: column; 
-		gap: 0.75rem; 
-		min-width: 0; 
+	.split-calendar__main {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		min-width: 0;
 	}
 
-	.split-calendar__view-switcher { 
-		display: none; 
-		gap: 0.25rem; 
+	.split-calendar__view-switcher {
+		display: none;
+		gap: 0.25rem;
 	}
 
-	@container split-calendar (min-width: 900px) { 
-		.split-calendar__view-switcher { 
-			display: flex; 
-		} 
+	@container split-calendar (min-width: 900px) {
+		.split-calendar__view-switcher {
+			display: flex;
+		}
 	}
 
-	.view-btn { 
-		padding: 0.4rem 1rem; 
-		border: 1px solid #e2e8f0; 
-		background: white; 
-		border-radius: 6px; 
-		font-size: 0.9rem; 
-		cursor: pointer; 
+	.view-btn {
+		padding: 0.4rem 1rem;
+		border: 1px solid #e2e8f0;
+		background: white;
+		border-radius: 6px;
+		font-size: 0.9rem;
+		cursor: pointer;
 	}
 
-	.view-btn:hover { 
-		background: #f8fafc; 
+	.view-btn:hover {
+		background: #f8fafc;
 	}
 
-	.view-btn.active { 
-		background: #3b82f6; 
-		color: white; 
-		border-color: #3b82f6; 
+	.view-btn.active {
+		background: #3b82f6;
+		color: white;
+		border-color: #3b82f6;
 	}
 
-	.split-calendar__day-wrapper { 
-		flex: 1; 
-		display: flex; 
-		flex-direction: column; 
-		background: white; 
-		border: 1px solid #e2e8f0; 
-		border-radius: 12px; 
-		overflow: hidden; 
-		min-height: 650px; 
-		transition: opacity 0.2s ease;
-		width: 100%;                    /* Helps FullCalendar detect size changes */
-	}
-
-	.split-calendar__day-wrapper.refreshing { 
-		opacity: 0.6; 
-		pointer-events: none; 
-	}
-
-	.split-calendar__day { 
-		flex: 1; 
-		min-height: 600px; 
-		min-width: 0; 
+	.split-calendar__day-wrapper {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
 		overflow: hidden;
-		width: 100%;                    /* Important for responsive width */
+		min-height: 650px;
+		transition: opacity 0.2s ease;
+		width: 100%; /* Helps FullCalendar detect size changes */
+	}
+
+	.split-calendar__day-wrapper.refreshing {
+		opacity: 0.6;
+		pointer-events: none;
+	}
+
+	.split-calendar__day {
+		flex: 1;
+		min-height: 600px;
+		min-width: 0;
+		overflow: hidden;
+		width: 100%; /* Important for responsive width */
 	}
 
 	/* Filters */
@@ -854,14 +856,38 @@
 		background: #fecaca;
 	}
 
-	.filter-group { margin-bottom: 0.85rem; }
-	.filter-group__label { font-weight: 600; font-size: 0.85rem; color: #334155; margin-bottom: 0.35rem; }
-	.filter-options { display: flex; flex-direction: column; gap: 0.25rem; }
-	.filter-option { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; padding: 0.15rem 0; cursor: pointer; }
-	.filter-option input { margin: 0; }
+	.filter-group {
+		margin-bottom: 0.85rem;
+	}
+	.filter-group__label {
+		font-weight: 600;
+		font-size: 0.85rem;
+		color: #334155;
+		margin-bottom: 0.35rem;
+	}
+	.filter-options {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.filter-option {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.9rem;
+		padding: 0.15rem 0;
+		cursor: pointer;
+	}
+	.filter-option input {
+		margin: 0;
+	}
 
-	.status-completed { color: #166534; }
-	.status-cancelled { color: #991b1b; }
+	.status-completed {
+		color: #166534;
+	}
+	.status-cancelled {
+		color: #991b1b;
+	}
 
 	/* === Visual Drag Handle (Top Right) === */
 	:global(.fc-event--draggable) {
@@ -906,10 +932,21 @@
 	}
 
 	/* Event status styling */
-	:global(.event-completed) { opacity: 0.55; }
-	:global(.event-completed .fc-event-title) { text-decoration: line-through; }
-	:global(.event-cancelled) { opacity: 0.65; border-style: dashed !important; cursor: not-allowed; }
-	:global(.event-cancelled .fc-event-title) { text-decoration: line-through; color: #991b1b; }
+	:global(.event-completed) {
+		opacity: 0.55;
+	}
+	:global(.event-completed .fc-event-title) {
+		text-decoration: line-through;
+	}
+	:global(.event-cancelled) {
+		opacity: 0.65;
+		border-style: dashed !important;
+		cursor: not-allowed;
+	}
+	:global(.event-cancelled .fc-event-title) {
+		text-decoration: line-through;
+		color: #991b1b;
+	}
 
 	/* )=- Crew avatars placed *inside* the event card (no more overhanging to the right).
 	   - Time grid card views (week/day): horizontal row at bottom-right inside the card, larger 24px circles.

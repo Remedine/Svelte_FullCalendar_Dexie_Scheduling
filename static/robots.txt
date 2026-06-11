@@ -1,3 +1,7 @@
-# allow crawling everything by default
+# Robots for Capital City Windows Scheduler (SvelteKit PWA)
+# For internal/self-hosted deployments you may want to restrict crawling:
+# User-agent: *
+# Disallow: /
+
 User-agent: *
 Disallow:

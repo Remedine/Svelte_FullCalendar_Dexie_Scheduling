@@ -14,12 +14,17 @@ export default defineConfig({
 				description: 'Window Cleaning CRM & Scheduler',
 				theme_color: '#1e3a8a',
 				background_color: '#f8fafc',
-				display: 'standalone',
-				icons: [
-					{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-					{ src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' }
-				]
-			}
+				display: 'standalone'
+				// )=- PWA icons intentionally omitted for initial staging deploy.
+				// Add 192x192 and 512x512 PNG icons to /static and re-enable before full production launch.
+				// Current favicon.svg is used for browser tab; proper PNGs improve home-screen install experience.
+				// icons: [
+				// 	{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+				// 	{ src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' }
+				// ]
+			},
+			// )=- Workbox will still generate sw.js and precache the app shell for offline use (Dexie + PWA).
+			includeAssets: ['favicon.svg']
 		})
 	],
 

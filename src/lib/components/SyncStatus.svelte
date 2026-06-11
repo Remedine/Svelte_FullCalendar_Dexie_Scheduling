@@ -1,11 +1,11 @@
 <!-- src/lib/components/SyncStatus.svelte -->
 <script lang="ts">
 	import { pb, pullJobsFromServer } from '$lib/db/pb';
-  import { processSyncQueue } from '$lib/db';   // )=- Moved here
+	import { processSyncQueue } from '$lib/db'; // )=- Moved here
 
 	let isOnline = $state(true);
 	let lastSynced = $state(new Date());
-	let isSyncing = $state(false);                    // )=- NEW
+	let isSyncing = $state(false); // )=- NEW
 	let currentSubscription: any = null;
 
 	$effect(() => {
@@ -51,20 +51,20 @@
 
 	async function manualSync() {
 		try {
-			isSyncing = true;                          // )=- Start loading
+			isSyncing = true; // )=- Start loading
 			isOnline = true;
-			
+
 			console.log('🔄 Manual sync triggered');
-			
+
 			await pullJobsFromServer();
 			await processSyncQueue();
-			
+
 			lastSynced = new Date();
 		} catch (err) {
 			isOnline = false;
 			console.error('Manual sync failed', err);
 		} finally {
-			isSyncing = false;                         // )=- End loading
+			isSyncing = false; // )=- End loading
 		}
 	}
 </script>
@@ -78,11 +78,7 @@
 			Offline — will sync when connected
 		{/if}
 	</span>
-	<button 
-		class="sync-status__btn" 
-		onclick={manualSync}
-		disabled={isSyncing}
-	>
+	<button class="sync-status__btn" onclick={manualSync} disabled={isSyncing}>
 		{isSyncing ? 'Syncing...' : 'Sync Now'}
 	</button>
 </div>
@@ -105,8 +101,12 @@
 		border-radius: 50%;
 	}
 
-	.sync-status__dot--online { background: #22c55e; }
-	.sync-status__dot--offline { background: #ef4444; }
+	.sync-status__dot--online {
+		background: #22c55e;
+	}
+	.sync-status__dot--offline {
+		background: #ef4444;
+	}
 
 	.sync-status__btn {
 		margin-left: auto;

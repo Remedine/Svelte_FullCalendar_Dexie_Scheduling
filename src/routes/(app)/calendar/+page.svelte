@@ -23,7 +23,7 @@
 
 	.schedule-page__content {
 		flex: 1;
-		min-height: 0;                    /* Important for flex children */
+		min-height: 0; /* Important for flex children */
 		overflow: hidden;
 		background: #f8fafc;
 		border-radius: 12px;
@@ -33,8 +33,8 @@
 
 	/* Make sure SplitCalendar can grow properly */
 	:global(.split-calendar__day-wrapper) {
-		min-height: 650px;                /* Base height */
-		flex: 1;                          /* Allow it to grow */
+		min-height: 650px; /* Base height */
+		flex: 1; /* Allow it to grow */
 	}
 
 	@media (max-width: 900px) {

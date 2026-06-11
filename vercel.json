@@ -1,9 +1,0 @@
-{
-    "buildCommand": "pnpm run vercel-build",
-    "installCommand": "pnpm install --frozen-lockfile",
-    "framework": "sveltekit",
-    "outputDirectory": ".svelte-kit/output",
-    "functions": {
-        "runtime": "nodejs22.x"
-    }
-}

@@ -43,7 +43,6 @@ dist/
 .env
 .env.local
 .env.*.local
-.env .example
 
 # Logs
 logs
@@ -52,6 +51,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Dev / debug artifacts (temp check/build outputs)
+build-*.txt
+check-*.txt
+check2.txt
+lint-output.txt
+*-warnings.txt
+*-after.txt
+*-final.txt
 
 # Runtime data
 pids

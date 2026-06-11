@@ -2,6 +2,9 @@
 
 import Dexie, { type EntityTable } from 'dexie';
 import { pb, pullJobsFromServer } from '$lib/db/pb';
+// )=- Import pure date helper extracted in Phase 2 so due date logic is testable and not duplicated.
+// Reference: TESTING_PLAN.md + JOBS_AND_INVOICES_SPEC.md
+import { calculateDueDate } from '$lib/utils/dates';
 // )=- bcryptjs import removed (was only for PIN hashing in login/create/setInitialPin flows). PIN login deleted; password hashing is handled by PocketBase on the server side for email auth.
 
 // Dynamic import to break circular dependency with auth.svelte.ts
@@ -11,7 +14,12 @@ import('$lib/stores/auth.svelte').then((module) => {
 });
 
 // SAFE CLONE HELPER
-function safeClone<T>(obj: T): T {
+// )=- Exported for unit testing (Phase 0 of TESTING_PLAN.md).
+// safeClone is used everywhere for optimistic writes and queue data to strip Svelte proxies
+// and normalize Dates. Having it exported lets us test the exact serialization behavior
+// that prevents "function" and proxy pollution in Dexie + sync.
+// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+export function safeClone<T>(obj: T): T {
 	if (!obj) return obj;
 	try {
 		return JSON.parse(
@@ -31,7 +39,8 @@ function safeClone<T>(obj: T): T {
 // )=- Helper to convert data URL (from camera FileReader) back to Blob for proper PocketBase file field upload.
 // PB file fields (like 'photo' on users) expect Blob/File in the update payload, not raw base64 data URLs.
 // Without this, we get "validation_invalid_file" 400 on photo updates from profile page.
-function dataUrlToBlob(dataUrl: string): Blob {
+// )=- Exported for unit testing as part of Phase 0 test infrastructure.
+export function dataUrlToBlob(dataUrl: string): Blob {
 	const arr = dataUrl.split(',');
 	const mimeMatch = arr[0].match(/:(.*?);/);
 	const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
@@ -47,7 +56,8 @@ function dataUrlToBlob(dataUrl: string): Blob {
 // ==================== AREA HELPER (simplified for fresh start) ====================
 // )=- Removed legacy mapping. We now trust area IDs coming directly from options table.
 // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-function getValidAreaOfTown(area: string | undefined): string {
+// )=- Exported for unit testing (Phase 0).
+export function getValidAreaOfTown(area: string | undefined): string {
 	return area || '';
 }
 
@@ -108,17 +118,17 @@ export interface Job {
 export interface User {
 	id?: string;
 	pbId?: string;
-	firstName?: string;  // )=- Optional for backward compat with existing data. New records always set via createUser/edit.
+	firstName?: string; // )=- Optional for backward compat with existing data. New records always set via createUser/edit.
 	lastName?: string;
-	name: string;  // derived or legacy full name for compat with assignedCrew arrays and old displays
-	pinHash: string;       // )=- Legacy only (PIN login removed). Kept so old Dexie rows with pinHash don't break on read/put. Ignored everywhere.
+	name: string; // derived or legacy full name for compat with assignedCrew arrays and old displays
+	pinHash: string; // )=- Legacy only (PIN login removed). Kept so old Dexie rows with pinHash don't break on read/put. Ignored everywhere.
 	email?: string;
 	role: 'admin' | 'crew';
 	photo?: string;
 	active: boolean;
 	forcePinUpdate: boolean; // )=- Legacy flag (PIN removed). No code paths read or act on it for auth gating anymore.
 	forcePhotoUpdate: boolean;
-	verified?: boolean;      // )=- PB email verification flag for the user record. Optional for legacy rows.
+	verified?: boolean; // )=- PB email verification flag for the user record. Optional for legacy rows.
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -224,7 +234,8 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 db.version(19).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId',
-	users: 'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified', // forcePinUpdate + pinHash/verified kept in schema for legacy row compat (PIN auth deleted)
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified', // forcePinUpdate + pinHash/verified kept in schema for legacy row compat (PIN auth deleted)
 	syncQueue: '++id, type, collection, recordId, createdAt',
 	options: 'id',
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId'
@@ -247,7 +258,7 @@ export async function createJob(jobData: any): Promise<string> {
 	}
 
 	// )=- Pull tax rate from options table instead of hardcoded value
-	const optionsRecord = await db.options.get(1);
+	const optionsRecord = await db.options.get('1');
 	const taxRate = optionsRecord?.taxRate ?? 0.08;
 
 	const newJob = safeClone({
@@ -283,7 +294,7 @@ export async function createJob(jobData: any): Promise<string> {
 
 	if (navigator.onLine) await processSyncQueue();
 
-	return id;
+	return String(id);
 }
 
 export async function updateJob(jobId: string, updates: Partial<Job>) {
@@ -401,7 +412,11 @@ export async function getJobsForRange(
 // Reference: JOBS_AND_INVOICES_SPEC.md
 export async function getPaginatedJobsForClient(
 	clientId: string,
-	{ limit = 10, offset = 0, includeCancelled = false }: { limit?: number; offset?: number; includeCancelled?: boolean } = {}
+	{
+		limit = 10,
+		offset = 0,
+		includeCancelled = false
+	}: { limit?: number; offset?: number; includeCancelled?: boolean } = {}
 ): Promise<Job[]> {
 	const client = await db.clients.get(clientId);
 	const possibleIds = new Set<string>();
@@ -472,12 +487,16 @@ export async function createInvoice(
 		status: invoiceData.status || 'draft',
 		dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : new Date(),
 		amount: Number(invoiceData.amount) || 0,
-		billableItems: invoiceData.billableItems ? invoiceData.billableItems.map((item: any) => ({ ...item })) : undefined,
+		billableItems: invoiceData.billableItems
+			? invoiceData.billableItems.map((item: any) => ({ ...item }))
+			: undefined,
 		// Store only filenames in the persistent Dexie record
-		primaryInvoiceFile: files?.primary ? { filename: files.primary.filename } : invoiceData.primaryInvoiceFile,
-		supportingDocuments: files?.supporting 
-			? files.supporting.map(s => ({ filename: s.filename, type: s.type })) 
-			: invoiceData.supportingDocuments,
+		primaryInvoiceFile: files?.primary
+			? { filename: files.primary.filename }
+			: invoiceData.primaryInvoiceFile,
+		supportingDocuments: files?.supporting
+			? files.supporting.map((s) => ({ filename: s.filename, type: s.type }))
+			: invoiceData.supportingDocuments
 	});
 
 	const id = await db.invoices.add(newInvoice);
@@ -506,7 +525,7 @@ export async function createInvoice(
 }
 
 export async function updateInvoice(
-	invoiceId: string, 
+	invoiceId: string,
 	updates: Partial<Invoice>,
 	files?: {
 		primary?: { blob: Blob; filename: string };
@@ -538,7 +557,7 @@ export async function updateInvoice(
 	if (files?.supporting?.length) {
 		const current = await db.invoices.get(invoiceId);
 		const prev = current?.supportingDocuments || [];
-		const added = files.supporting.map(s => ({ filename: s.filename, type: s.type }));
+		const added = files.supporting.map((s) => ({ filename: s.filename, type: s.type }));
 		safeUpdates.supportingDocuments = [...prev, ...added];
 	}
 
@@ -646,102 +665,203 @@ export async function generateInvoiceDocx(
 	opts: { taxRate?: number; invoiceDueDays?: number; businessName?: string } = {}
 ): Promise<Blob> {
 	// Dynamic import so we don't pull docx into every bundle that imports db
-	const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, BorderStyle } = await import('docx');
+	const {
+		Document,
+		Packer,
+		Paragraph,
+		Table,
+		TableRow,
+		TableCell,
+		TextRun,
+		AlignmentType,
+		BorderStyle
+	} = await import('docx');
 
 	const businessName = opts.businessName || 'Capital City Windows';
-	const dueDate = job.end ? new Date(new Date(job.end).getTime() + (opts.invoiceDueDays ?? 30) * 86400000) : null;
+	const dueDate = job.end
+		? new Date(new Date(job.end).getTime() + (opts.invoiceDueDays ?? 30) * 86400000)
+		: null;
 
-	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
-		new TableRow({
-			children: [
-				new TableCell({ 
-					children: [new Paragraph({ 
-						children: [new TextRun({ text: item.title || `Item ${idx + 1}` })] 
-					})] 
-				}),
-				new TableCell({ 
-					children: [new Paragraph({ 
-						alignment: AlignmentType.RIGHT,
-						children: [new TextRun({ text: String(item.quantity || 1) })] 
-					})] 
-				}),
-				new TableCell({ 
-					children: [new Paragraph({ 
-						alignment: AlignmentType.RIGHT,
-						children: [new TextRun({ text: `$${(item.price || 0).toFixed(2)}` })] 
-					})] 
-				}),
-				new TableCell({ 
-					children: [new Paragraph({ 
-						alignment: AlignmentType.RIGHT,
-						children: [new TextRun({ text: `$${(item.total || 0).toFixed(2)}` })] 
-					})] 
-				}),
-			]
-		})
+	const billableRows = (job.billableItems || []).map(
+		(item: any, idx: number) =>
+			new TableRow({
+				children: [
+					new TableCell({
+						children: [
+							new Paragraph({
+								children: [new TextRun({ text: item.title || `Item ${idx + 1}` })]
+							})
+						]
+					}),
+					new TableCell({
+						children: [
+							new Paragraph({
+								alignment: AlignmentType.RIGHT,
+								children: [new TextRun({ text: String(item.quantity || 1) })]
+							})
+						]
+					}),
+					new TableCell({
+						children: [
+							new Paragraph({
+								alignment: AlignmentType.RIGHT,
+								children: [new TextRun({ text: `$${(item.price || 0).toFixed(2)}` })]
+							})
+						]
+					}),
+					new TableCell({
+						children: [
+							new Paragraph({
+								alignment: AlignmentType.RIGHT,
+								children: [new TextRun({ text: `$${(item.total || 0).toFixed(2)}` })]
+							})
+						]
+					})
+				]
+			})
 	);
 
 	const doc = new Document({
-		sections: [{
-			properties: {},
-			children: [
-				new Paragraph({
-					alignment: AlignmentType.CENTER,
-					children: [new TextRun({ text: businessName, bold: true, size: 36 })]
-				}),
-				new Paragraph({
-					alignment: AlignmentType.CENTER,
-					children: [new TextRun({ text: 'INVOICE', bold: true, size: 28, color: '1e40af' })]
-				}),
-				new Paragraph({ text: '' }),
-				new Paragraph({ children: [new TextRun({ text: `Job: ${job.title || 'Untitled'}`, bold: true })] }),
-				new Paragraph({ children: [new TextRun({ text: `Date: ${new Date(job.start).toLocaleDateString()}` })] }),
-				new Paragraph({ children: [new TextRun({ text: `Client: ${client?.name || job.clientId}` })] }),
-				new Paragraph({ text: '' }),
-				new Table({
-					rows: [
-						new TableRow({
-							children: [
-								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Description', bold: true })] })] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Qty', bold: true })] })] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Unit', bold: true })] })] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Total', bold: true })] })] }),
-							]
-						}),
-						...billableRows,
-						new TableRow({
-							children: [
-								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Subtotal', bold: true })] })] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.subtotal || 0).toFixed(2)}`, bold: true })] })] }),
-							]
-						}),
-						new TableRow({
-							children: [
-								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `Tax (${(job.taxRate || 0).toFixed(1)}%)` })] })] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.taxAmount || 0).toFixed(2)}` })] })] }),
-							]
-						}),
-						new TableRow({
-							children: [
-								new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true })] })] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [] }),
-								new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `$${(job.totalAmount || 0).toFixed(2)}`, bold: true })] })] }),
-							]
-						}),
-					]
-				}),
-				new Paragraph({ text: '' }),
-				new Paragraph({ children: [new TextRun({ text: `Due Date: ${dueDate ? dueDate.toLocaleDateString() : '—'}` })] }),
-				new Paragraph({ text: '' }),
-				new Paragraph({ children: [new TextRun({ text: job.notes ? `Notes: ${job.notes}` : '' })] }),
-				new Paragraph({ text: 'Thank you for your business!' }),
-			]
-		}]
+		sections: [
+			{
+				properties: {},
+				children: [
+					new Paragraph({
+						alignment: AlignmentType.CENTER,
+						children: [new TextRun({ text: businessName, bold: true, size: 36 })]
+					}),
+					new Paragraph({
+						alignment: AlignmentType.CENTER,
+						children: [new TextRun({ text: 'INVOICE', bold: true, size: 28, color: '1e40af' })]
+					}),
+					new Paragraph({ text: '' }),
+					new Paragraph({
+						children: [new TextRun({ text: `Job: ${job.title || 'Untitled'}`, bold: true })]
+					}),
+					new Paragraph({
+						children: [new TextRun({ text: `Date: ${new Date(job.start).toLocaleDateString()}` })]
+					}),
+					new Paragraph({
+						children: [new TextRun({ text: `Client: ${client?.name || job.clientId}` })]
+					}),
+					new Paragraph({ text: '' }),
+					new Table({
+						rows: [
+							new TableRow({
+								children: [
+									new TableCell({
+										children: [
+											new Paragraph({
+												children: [new TextRun({ text: 'Description', bold: true })]
+											})
+										]
+									}),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [new TextRun({ text: 'Qty', bold: true })]
+											})
+										]
+									}),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [new TextRun({ text: 'Unit', bold: true })]
+											})
+										]
+									}),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [new TextRun({ text: 'Total', bold: true })]
+											})
+										]
+									})
+								]
+							}),
+							...billableRows,
+							new TableRow({
+								children: [
+									new TableCell({
+										children: [
+											new Paragraph({ children: [new TextRun({ text: 'Subtotal', bold: true })] })
+										]
+									}),
+									new TableCell({ children: [] }),
+									new TableCell({ children: [] }),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [
+													new TextRun({ text: `$${(job.subtotal || 0).toFixed(2)}`, bold: true })
+												]
+											})
+										]
+									})
+								]
+							}),
+							new TableRow({
+								children: [
+									new TableCell({
+										children: [
+											new Paragraph({
+												children: [new TextRun({ text: `Tax (${(job.taxRate || 0).toFixed(1)}%)` })]
+											})
+										]
+									}),
+									new TableCell({ children: [] }),
+									new TableCell({ children: [] }),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [new TextRun({ text: `$${(job.taxAmount || 0).toFixed(2)}` })]
+											})
+										]
+									})
+								]
+							}),
+							new TableRow({
+								children: [
+									new TableCell({
+										children: [
+											new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true })] })
+										]
+									}),
+									new TableCell({ children: [] }),
+									new TableCell({ children: [] }),
+									new TableCell({
+										children: [
+											new Paragraph({
+												alignment: AlignmentType.RIGHT,
+												children: [
+													new TextRun({ text: `$${(job.totalAmount || 0).toFixed(2)}`, bold: true })
+												]
+											})
+										]
+									})
+								]
+							})
+						]
+					}),
+					new Paragraph({ text: '' }),
+					new Paragraph({
+						children: [
+							new TextRun({ text: `Due Date: ${dueDate ? dueDate.toLocaleDateString() : '—'}` })
+						]
+					}),
+					new Paragraph({ text: '' }),
+					new Paragraph({
+						children: [new TextRun({ text: job.notes ? `Notes: ${job.notes}` : '' })]
+					}),
+					new Paragraph({ text: 'Thank you for your business!' })
+				]
+			}
+		]
 	});
 
 	const blob = await Packer.toBlob(doc);
@@ -755,7 +875,10 @@ export async function generateInvoiceDocx(
 // )=- Convenience helper used by "Mark Complete" flow and draft generation.
 // Creates (or returns existing) invoice linked to the job, with proper dueDate from options.
 // Does NOT generate the .docx here — that will live in the UI layer / dedicated helper (Phase 4).
-export async function ensureInvoiceForJob(job: Job, status: Invoice['status'] = 'generated'): Promise<string> {
+export async function ensureInvoiceForJob(
+	job: Job,
+	status: Invoice['status'] = 'generated'
+): Promise<string> {
 	const existing = await getInvoiceForJob(job.id!);
 	if (existing) {
 		// If we are "completing" a job that only had a draft, bump the status
@@ -765,9 +888,11 @@ export async function ensureInvoiceForJob(job: Job, status: Invoice['status'] = 
 		return existing.id!;
 	}
 
-	const optionsRecord = await db.options.get(1);
+	const optionsRecord = await db.options.get('1');
 	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
-	const dueDate = new Date(new Date(job.end).getTime() + dueDays * 24 * 60 * 60 * 1000);
+	// )=- Now uses the extracted pure calculateDueDate (Phase 2 improvement for testability).
+	// The math itself is covered by dedicated unit tests in dates.test.ts.
+	const dueDate = calculateDueDate(new Date(job.end), dueDays);
 
 	const invoiceData: Partial<Invoice> = {
 		jobId: job.id,
@@ -777,7 +902,7 @@ export async function ensureInvoiceForJob(job: Job, status: Invoice['status'] = 
 		amount: job.totalAmount,
 		billableItems: job.billableItems ? job.billableItems.map((i: any) => ({ ...i })) : undefined,
 		notes: job.notes,
-		importSource: job.importSource,
+		importSource: job.importSource
 	};
 
 	return await createInvoice(invoiceData);
@@ -786,7 +911,7 @@ export async function ensureInvoiceForJob(job: Job, status: Invoice['status'] = 
 // ==================== CLIENT FUNCTIONS ====================
 
 export async function createClient(
-	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>
+	clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
 ): Promise<string> {
 	const newId = clientData.id || crypto.randomUUID();
 
@@ -809,7 +934,7 @@ export async function createClient(
 
 	if (navigator.onLine) await processSyncQueue();
 
-	return id;
+	return String(id);
 }
 
 export async function updateClient(clientId: string, updates: Partial<Client>) {
@@ -855,7 +980,9 @@ export async function deleteClient(clientId: string) {
 // Follows clients/jobs pattern exactly for local id vs PB id.
 export async function createUser(
 	// )=- PIN login removed; creation no longer emits verified/forcePinUpdate/pinHash.
-	userData: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'pbId' | 'name' | 'verified'> & { password: string }
+	userData: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'pbId' | 'name' | 'verified'> & {
+		password: string;
+	}
 ): Promise<string> {
 	const { password, firstName, lastName, ...rest } = userData;
 	const newId = crypto.randomUUID();
@@ -878,7 +1005,7 @@ export async function createUser(
 	// Queue data includes password only for the PB side create (not persisted locally).
 	const queueData = {
 		...newUser,
-		password,
+		password
 	};
 
 	await addToSyncQueue({
@@ -890,7 +1017,7 @@ export async function createUser(
 
 	if (navigator.onLine) await processSyncQueue();
 
-	return id;
+	return String(id);
 }
 
 export async function updateUser(userId: string, updates: Partial<User>) {
@@ -1043,7 +1170,7 @@ export async function processSyncQueue() {
 						const currentClient = await db.clients.get(item.recordId);
 						const realId = currentClient?.pbId || currentClient?.id || item.recordId;
 
-						const { id, pbId, createdAt, updatedAt, ...cleanData } = item.data;
+						const { id, pbId, createdAt: _createdAt, updatedAt: _updatedAt, ...cleanData } = item.data;
 
 						const safeCleanData = safeClone({
 							...cleanData,
@@ -1093,13 +1220,15 @@ export async function processSyncQueue() {
 					// firstName/lastName now sent to PB (assume collection has these fields or map to 'name' if needed).
 					// PB still requires password + passwordConfirm for auth record creation.
 					const password = providedPassword || crypto.randomUUID().slice(0, 16) + 'Aa1!';
-					const email = userData.email || `${(userData.firstName || userData.name || 'user').toLowerCase().replace(/\s+/g, '')}@crew.local`;
+					const email =
+						userData.email ||
+						`${(userData.firstName || userData.name || 'user').toLowerCase().replace(/\s+/g, '')}@crew.local`;
 
 					const safeUserData = safeClone({
 						...userData,
 						email,
 						password,
-						passwordConfirm: password,
+						passwordConfirm: password
 						// If your PB users collection doesn't have firstName/lastName yet, you can map:
 						// name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
 					});
@@ -1139,9 +1268,9 @@ export async function processSyncQueue() {
 						const currentUser = await db.users.get(item.recordId);
 						const realId = currentUser?.pbId || currentUser?.id || item.recordId;
 
-						const { id, pbId, createdAt, updatedAt, ...cleanData } = item.data;
+						const { id, pbId, createdAt: _createdAt, updatedAt: _updatedAt, ...cleanData } = item.data;
 
-						let pbPayload = safeClone(cleanData);
+						const pbPayload = safeClone(cleanData);
 
 						// )=- Convert any data URL photo to Blob so PB accepts it as a valid file upload.
 						// This fixes the 400 "validation_invalid_file" when crew uploads photo from /profile.
@@ -1161,8 +1290,10 @@ export async function processSyncQueue() {
 
 						// Avoid sending an empty (or only-meta) payload which can happen for email-only changes.
 						const keys = Object.keys(pbPayload);
-						if (keys.length === 0 || keys.every(k => k === 'updatedAt')) {
-							console.log(`ℹ️ Skipping empty PB user update for ${realId} (email change handled via requestEmailChange)`);
+						if (keys.length === 0 || keys.every((k) => k === 'updatedAt')) {
+							console.log(
+								`ℹ️ Skipping empty PB user update for ${realId} (email change handled via requestEmailChange)`
+							);
 						} else {
 							await pb.collection('users').update(realId, pbPayload);
 							console.log(`✅ User updated in PocketBase: ${realId}`);
@@ -1171,10 +1302,7 @@ export async function processSyncQueue() {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
 						} else {
-							console.error(
-								'❌ User update failed:',
-								JSON.stringify(err.response?.data, null, 2)
-							);
+							console.error('❌ User update failed:', JSON.stringify(err.response?.data, null, 2));
 							throw err;
 						}
 					}
@@ -1225,23 +1353,40 @@ export async function processSyncQueue() {
 									const val = data[key];
 									if (val == null) return;
 									if (val instanceof Date) formData.append(key, val.toISOString());
-									else if (typeof val === 'object' && !Array.isArray(val)) formData.append(key, JSON.stringify(val));
+									else if (typeof val === 'object' && !Array.isArray(val))
+										formData.append(key, JSON.stringify(val));
 									else formData.append(key, String(val));
 								});
 								if (data._files?.primary) {
 									const f = data._files.primary;
-									formData.append('primaryInvoiceFile', new File([f.blob], f.filename, { type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+									formData.append(
+										'primaryInvoiceFile',
+										new File([f.blob], f.filename, {
+											type:
+												f.blob.type ||
+												'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+										})
+									);
 								}
 								if (data._files?.supporting?.length) {
 									for (const s of data._files.supporting) {
-										formData.append('supportingDocuments', new File([s.blob], s.filename, { type: s.type || s.blob.type || 'application/octet-stream' }));
+										formData.append(
+											'supportingDocuments',
+											new File([s.blob], s.filename, {
+												type: s.type || s.blob.type || 'application/octet-stream'
+											})
+										);
 									}
 								}
 								await pb.collection('invoices').update(realId, formData);
-								console.log(`✅ Invoice (with files) updated in PocketBase (create item promoted to update): ${realId}`);
+								console.log(
+									`✅ Invoice (with files) updated in PocketBase (create item promoted to update): ${realId}`
+								);
 							} else {
 								await pb.collection('invoices').update(realId, data);
-								console.log(`✅ Invoice updated in PocketBase (create item promoted to update): ${realId}`);
+								console.log(
+									`✅ Invoice updated in PocketBase (create item promoted to update): ${realId}`
+								);
 							}
 						} else {
 							const hasFiles = !!data._files;
@@ -1254,18 +1399,29 @@ export async function processSyncQueue() {
 								if (data.jobId) formData.append('job', data.jobId);
 								if (data.clientId) formData.append('client', data.clientId);
 								if (data.status) formData.append('status', data.status);
-								if (data.dueDate) formData.append('dueDate', data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate);
-								if (data.paidAt) formData.append('paidAt', data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt);
+								if (data.dueDate)
+									formData.append(
+										'dueDate',
+										data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate
+									);
+								if (data.paidAt)
+									formData.append(
+										'paidAt',
+										data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt
+									);
 								if (data.amount != null) formData.append('amount', String(data.amount));
-								if (data.billableItems) formData.append('billableItems', JSON.stringify(data.billableItems));
+								if (data.billableItems)
+									formData.append('billableItems', JSON.stringify(data.billableItems));
 								if (data.notes) formData.append('notes', data.notes);
 								if (data.importSource) formData.append('importSource', data.importSource);
 
 								// Primary .docx (the editable one)
 								if (data._files.primary) {
 									const f = data._files.primary;
-									const file = new File([f.blob], f.filename, { 
-										type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+									const file = new File([f.blob], f.filename, {
+										type:
+											f.blob.type ||
+											'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 									});
 									formData.append('primaryInvoiceFile', file);
 								}
@@ -1273,8 +1429,8 @@ export async function processSyncQueue() {
 								// Supporting scans / other docs (multiple)
 								if (data._files.supporting?.length) {
 									for (const s of data._files.supporting) {
-										const file = new File([s.blob], s.filename, { 
-											type: s.type || s.blob.type || 'application/octet-stream' 
+										const file = new File([s.blob], s.filename, {
+											type: s.type || s.blob.type || 'application/octet-stream'
 										});
 										formData.append('supportingDocuments', file);
 									}
@@ -1290,7 +1446,11 @@ export async function processSyncQueue() {
 									client: data.clientId,
 									status: data.status || 'draft',
 									dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
-									paidAt: data.paidAt ? (data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt) : null,
+									paidAt: data.paidAt
+										? data.paidAt instanceof Date
+											? data.paidAt.toISOString()
+											: data.paidAt
+										: null,
 									amount: Number(data.amount) || 0,
 									billableItems: data.billableItems || [],
 									notes: data.notes || undefined,
@@ -1313,7 +1473,10 @@ export async function processSyncQueue() {
 						if (!localInvoice) {
 							// Local record disappeared between queuing and processing — drop the item.
 							await db.syncQueue.delete(item.id!);
-							throw { __intentionallyDropped: true, reason: 'local invoice record missing during sync' };
+							throw {
+								__intentionallyDropped: true,
+								reason: 'local invoice record missing during sync'
+							};
 						}
 
 						if (!localInvoice.pbId) {
@@ -1335,25 +1498,42 @@ export async function processSyncQueue() {
 								if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
 								if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
 								if (localInvoice.status) formData.append('status', localInvoice.status);
-								if (localInvoice.dueDate) formData.append('dueDate', localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate);
-								if (localInvoice.paidAt) formData.append('paidAt', localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt);
-								if (localInvoice.amount != null) formData.append('amount', String(localInvoice.amount));
-								if (localInvoice.billableItems) formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
+								if (localInvoice.dueDate)
+									formData.append(
+										'dueDate',
+										localInvoice.dueDate instanceof Date
+											? localInvoice.dueDate.toISOString()
+											: localInvoice.dueDate
+									);
+								if (localInvoice.paidAt)
+									formData.append(
+										'paidAt',
+										localInvoice.paidAt instanceof Date
+											? localInvoice.paidAt.toISOString()
+											: localInvoice.paidAt
+									);
+								if (localInvoice.amount != null)
+									formData.append('amount', String(localInvoice.amount));
+								if (localInvoice.billableItems)
+									formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
 								if (localInvoice.notes) formData.append('notes', localInvoice.notes);
-								if (localInvoice.importSource) formData.append('importSource', localInvoice.importSource);
+								if (localInvoice.importSource)
+									formData.append('importSource', localInvoice.importSource);
 
 								// The delta files from this update (e.g. the regenerated primary docx)
 								if (data._files.primary) {
 									const f = data._files.primary;
-									const file = new File([f.blob], f.filename, { 
-										type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+									const file = new File([f.blob], f.filename, {
+										type:
+											f.blob.type ||
+											'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 									});
 									formData.append('primaryInvoiceFile', file);
 								}
 								if (data._files.supporting?.length) {
 									for (const s of data._files.supporting) {
-										const file = new File([s.blob], s.filename, { 
-											type: s.type || s.blob.type || 'application/octet-stream' 
+										const file = new File([s.blob], s.filename, {
+											type: s.type || s.blob.type || 'application/octet-stream'
 										});
 										formData.append('supportingDocuments', file);
 									}
@@ -1361,14 +1541,23 @@ export async function processSyncQueue() {
 
 								const record = await pb.collection('invoices').create(formData);
 								await db.invoices.update(item.recordId, { pbId: record.id });
-								console.log(`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback): ${record.id}`);
+								console.log(
+									`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback): ${record.id}`
+								);
 							} else {
 								const pbPayload: any = {
 									job: localInvoice.jobId,
 									client: localInvoice.clientId,
 									status: localInvoice.status || 'draft',
-									dueDate: localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate,
-									paidAt: localInvoice.paidAt ? (localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt) : null,
+									dueDate:
+										localInvoice.dueDate instanceof Date
+											? localInvoice.dueDate.toISOString()
+											: localInvoice.dueDate,
+									paidAt: localInvoice.paidAt
+										? localInvoice.paidAt instanceof Date
+											? localInvoice.paidAt.toISOString()
+											: localInvoice.paidAt
+										: null,
 									amount: Number(localInvoice.amount) || 0,
 									billableItems: localInvoice.billableItems || [],
 									notes: localInvoice.notes || undefined,
@@ -1376,11 +1565,13 @@ export async function processSyncQueue() {
 								};
 								const record = await pb.collection('invoices').create(pbPayload);
 								await db.invoices.update(item.recordId, { pbId: record.id });
-								console.log(`✅ Invoice pushed to PocketBase (regenerate/create fallback): ${record.id}`);
+								console.log(
+									`✅ Invoice pushed to PocketBase (regenerate/create fallback): ${record.id}`
+								);
 							}
 						} else {
 							// Normal update path — we have a pbId so the record should exist on PB.
-							let realId = localInvoice.pbId;
+							const realId = localInvoice.pbId;
 							let updateSucceeded = false;
 
 							try {
@@ -1403,15 +1594,17 @@ export async function processSyncQueue() {
 
 									if (data._files.primary) {
 										const f = data._files.primary;
-										const file = new File([f.blob], f.filename, { 
-											type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+										const file = new File([f.blob], f.filename, {
+											type:
+												f.blob.type ||
+												'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 										});
 										formData.append('primaryInvoiceFile', file);
 									}
 									if (data._files.supporting?.length) {
 										for (const s of data._files.supporting) {
-											const file = new File([s.blob], s.filename, { 
-												type: s.type || s.blob.type || 'application/octet-stream' 
+											const file = new File([s.blob], s.filename, {
+												type: s.type || s.blob.type || 'application/octet-stream'
 											});
 											formData.append('supportingDocuments', file);
 										}
@@ -1425,7 +1618,10 @@ export async function processSyncQueue() {
 								}
 								updateSucceeded = true;
 							} catch (updateErr: any) {
-								const is404 = updateErr?.status === 404 || updateErr?.response?.status === 404 || updateErr?.statusCode === 404;
+								const is404 =
+									updateErr?.status === 404 ||
+									updateErr?.response?.status === 404 ||
+									updateErr?.statusCode === 404;
 								if (is404) {
 									// )=- The PB record for this pbId no longer exists on the server (was deleted in Admin UI,
 									// or create never fully committed, or collection was reset), but we have a stale pbId locally
@@ -1435,7 +1631,9 @@ export async function processSyncQueue() {
 									// no row (anymore) on PocketBase.
 									// After create we will overwrite the (stale) pbId.
 									// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-									console.warn(`Invoice ${realId} 404 on update — falling back to create from current local state + delta files`);
+									console.warn(
+										`Invoice ${realId} 404 on update — falling back to create from current local state + delta files`
+									);
 									// proceed to fallback create below by setting flag
 								} else {
 									throw updateErr;
@@ -1450,24 +1648,41 @@ export async function processSyncQueue() {
 									if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
 									if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
 									if (localInvoice.status) formData.append('status', localInvoice.status);
-									if (localInvoice.dueDate) formData.append('dueDate', localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate);
-									if (localInvoice.paidAt) formData.append('paidAt', localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt);
-									if (localInvoice.amount != null) formData.append('amount', String(localInvoice.amount));
-									if (localInvoice.billableItems) formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
+									if (localInvoice.dueDate)
+										formData.append(
+											'dueDate',
+											localInvoice.dueDate instanceof Date
+												? localInvoice.dueDate.toISOString()
+												: localInvoice.dueDate
+										);
+									if (localInvoice.paidAt)
+										formData.append(
+											'paidAt',
+											localInvoice.paidAt instanceof Date
+												? localInvoice.paidAt.toISOString()
+												: localInvoice.paidAt
+										);
+									if (localInvoice.amount != null)
+										formData.append('amount', String(localInvoice.amount));
+									if (localInvoice.billableItems)
+										formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
 									if (localInvoice.notes) formData.append('notes', localInvoice.notes);
-									if (localInvoice.importSource) formData.append('importSource', localInvoice.importSource);
+									if (localInvoice.importSource)
+										formData.append('importSource', localInvoice.importSource);
 
 									if (data._files.primary) {
 										const f = data._files.primary;
-										const file = new File([f.blob], f.filename, { 
-											type: f.blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+										const file = new File([f.blob], f.filename, {
+											type:
+												f.blob.type ||
+												'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 										});
 										formData.append('primaryInvoiceFile', file);
 									}
 									if (data._files.supporting?.length) {
 										for (const s of data._files.supporting) {
-											const file = new File([s.blob], s.filename, { 
-												type: s.type || s.blob.type || 'application/octet-stream' 
+											const file = new File([s.blob], s.filename, {
+												type: s.type || s.blob.type || 'application/octet-stream'
 											});
 											formData.append('supportingDocuments', file);
 										}
@@ -1475,14 +1690,23 @@ export async function processSyncQueue() {
 
 									const record = await pb.collection('invoices').create(formData);
 									await db.invoices.update(item.recordId, { pbId: record.id });
-									console.log(`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`);
+									console.log(
+										`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`
+									);
 								} else {
 									const pbPayload: any = {
 										job: localInvoice.jobId,
 										client: localInvoice.clientId,
 										status: localInvoice.status || 'draft',
-										dueDate: localInvoice.dueDate instanceof Date ? localInvoice.dueDate.toISOString() : localInvoice.dueDate,
-										paidAt: localInvoice.paidAt ? (localInvoice.paidAt instanceof Date ? localInvoice.paidAt.toISOString() : localInvoice.paidAt) : null,
+										dueDate:
+											localInvoice.dueDate instanceof Date
+												? localInvoice.dueDate.toISOString()
+												: localInvoice.dueDate,
+										paidAt: localInvoice.paidAt
+											? localInvoice.paidAt instanceof Date
+												? localInvoice.paidAt.toISOString()
+												: localInvoice.paidAt
+											: null,
 										amount: Number(localInvoice.amount) || 0,
 										billableItems: localInvoice.billableItems || [],
 										notes: localInvoice.notes || undefined,
@@ -1490,7 +1714,9 @@ export async function processSyncQueue() {
 									};
 									const record = await pb.collection('invoices').create(pbPayload);
 									await db.invoices.update(item.recordId, { pbId: record.id });
-									console.log(`✅ Invoice pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`);
+									console.log(
+										`✅ Invoice pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`
+									);
 								}
 							}
 						}
@@ -1534,32 +1760,34 @@ export async function processSyncQueue() {
 }
 
 export async function cleanupDuplicateUsers() {
-  // )=- General dedup for users by email to handle cases where loginWithEmail created a shadow record (PB id as key) alongside a local UUID record from admin creation.
-  // Prefers keeping a record with firstName/lastName (from creation), ensures pbId is on kept, deletes others.
-  // Called from user list loads and login to keep Dexie clean. UI also has per-list dedup.
-  const allUsers = await db.users.toArray();
-  const byEmail: { [k: string]: any[] } = {};
-  for (const u of allUsers) {
-    if (u.email) {
-      (byEmail[u.email] ||= []).push(u);
-    }
-  }
-  for (const email in byEmail) {
-    const group = byEmail[email];
-    if (group.length > 1) {
-      const keep = group.find(g => g.firstName && g.lastName) || group[0];
-      console.log(`🧹 cleanupDuplicateUsers: keeping ${keep.id} for ${email}, removing ${group.length - 1} dup(s)`);
-      for (const g of group) {
-        if (g.id !== keep.id) {
-          await db.users.delete(g.id!);
-        }
-      }
-      const pbIdCandidate = group.find(g => g.pbId)?.pbId;
-      if (pbIdCandidate && !keep.pbId) {
-        await db.users.update(keep.id!, { pbId: pbIdCandidate });
-      }
-    }
-  }
+	// )=- General dedup for users by email to handle cases where loginWithEmail created a shadow record (PB id as key) alongside a local UUID record from admin creation.
+	// Prefers keeping a record with firstName/lastName (from creation), ensures pbId is on kept, deletes others.
+	// Called from user list loads and login to keep Dexie clean. UI also has per-list dedup.
+	const allUsers = await db.users.toArray();
+	const byEmail: { [k: string]: any[] } = {};
+	for (const u of allUsers) {
+		if (u.email) {
+			(byEmail[u.email] ||= []).push(u);
+		}
+	}
+	for (const email in byEmail) {
+		const group = byEmail[email];
+		if (group.length > 1) {
+			const keep = group.find((g) => g.firstName && g.lastName) || group[0];
+			console.log(
+				`🧹 cleanupDuplicateUsers: keeping ${keep.id} for ${email}, removing ${group.length - 1} dup(s)`
+			);
+			for (const g of group) {
+				if (g.id !== keep.id) {
+					await db.users.delete(g.id!);
+				}
+			}
+			const pbIdCandidate = group.find((g) => g.pbId)?.pbId;
+			if (pbIdCandidate && !keep.pbId) {
+				await db.users.update(keep.id!, { pbId: pbIdCandidate });
+			}
+		}
+	}
 }
 
 export { db };
@@ -1586,4 +1814,3 @@ export function getUserPhotoSrc(photo: string | undefined, user: any): string | 
 		return photo;
 	}
 }
-

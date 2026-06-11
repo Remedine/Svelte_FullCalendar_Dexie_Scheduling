@@ -19,8 +19,21 @@
 	let currentYear = $state(new Date().getFullYear());
 	let dragOverDay: any = $state(null);
 
-	const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-	const weekdays = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+	const monthNames = [
+		'January',
+		'February',
+		'March',
+		'April',
+		'May',
+		'June',
+		'July',
+		'August',
+		'September',
+		'October',
+		'November',
+		'December'
+	];
+	const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
 	function getLocalDateString(date: Date = new Date()): string {
 		const year = date.getFullYear();
@@ -82,8 +95,14 @@
 
 	function changeMonth(delta: number) {
 		currentMonth += delta;
-		if (currentMonth > 11) { currentMonth = 0; currentYear++; }
-		if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+		if (currentMonth > 11) {
+			currentMonth = 0;
+			currentYear++;
+		}
+		if (currentMonth < 0) {
+			currentMonth = 11;
+			currentYear--;
+		}
 		dragOverDay = null;
 	}
 
@@ -97,11 +116,12 @@
 <div class="month-picker">
 	<div class="month-picker__header">
 		<button class="month-picker__nav" onclick={() => changeMonth(-1)}>←</button>
-		
+
 		<div class="month-picker__title">
-			{monthNames[currentMonth]} {currentYear}
+			{monthNames[currentMonth]}
+			{currentYear}
 		</div>
-		
+
 		<div class="month-picker__header-actions">
 			<button class="month-picker__today-btn" onclick={goToToday}>Today</button>
 			<button class="month-picker__nav" onclick={() => changeMonth(1)}>→</button>
@@ -116,7 +136,7 @@
 		{#each days as day}
 			{@const dayJobs = getJobsForDay(day.date)}
 
-			<button 
+			<button
 				class="month-picker__day"
 				class:month-picker__day--other={!day.isCurrent}
 				class:month-picker__day--selected={toDateString(day.date) === selectedDate}
@@ -124,12 +144,11 @@
 				class:month-picker__day--drag-over={dragOverDay === day}
 				data-date={toDateString(day.date)}
 				onclick={() => selectDay(day)}
-
 				ondragover={(e) => {
 					e.preventDefault();
 					dragOverDay = day;
 				}}
-				ondragleave={() => dragOverDay = null}
+				ondragleave={() => (dragOverDay = null)}
 			>
 				<span class="month-picker__number">{day.date.getDate()}</span>
 
@@ -224,9 +243,16 @@
 		font-size: 0.85rem;
 	}
 
-	.month-picker__day:hover { background: #f8fafc; }
-	.month-picker__day--other { color: #94a3b8; }
-	.month-picker__day--selected { background: #dbeafe; font-weight: 600; }
+	.month-picker__day:hover {
+		background: #f8fafc;
+	}
+	.month-picker__day--other {
+		color: #94a3b8;
+	}
+	.month-picker__day--selected {
+		background: #dbeafe;
+		font-weight: 600;
+	}
 	.month-picker__day--today {
 		border: 2px solid #3b82f6;
 		font-weight: 700;

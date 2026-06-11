@@ -1,0 +1,22 @@
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm test
+      # E2E note: add playwright install and possibly a test PB or more mocks for full runs
+      # - run: pnpm exec playwright install --with-deps
+      # - run: pnpm test:e2e
+# )=- Phase 6 starter CI for the testing plan. Unit tests on every PR/push.
+# E2E can be expanded with more setup (browsers, optional test PB instance or heavy mocking).
+# Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
