@@ -7,7 +7,7 @@
 	{#each toast.toasts as t (t.id)}
 		<div class="toast toast--{t.type}">
 			<span class="toast__message">{t.message}</span>
-			<button 
+			<button
 				class="toast__close"
 				onclick={() => toast.dismiss(t.id)}
 				aria-label="Close notification"
@@ -49,9 +49,15 @@
 		color: white;
 	}
 
-	.toast--success { background: #10b981; }
-	.toast--error   { background: #ef4444; }
-	.toast--info    { background: #3b82f6; }
+	.toast--success {
+		background: #10b981;
+	}
+	.toast--error {
+		background: #ef4444;
+	}
+	.toast--info {
+		background: #3b82f6;
+	}
 
 	.toast__message {
 		flex: 1;

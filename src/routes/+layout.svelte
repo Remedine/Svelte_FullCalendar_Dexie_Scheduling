@@ -4,7 +4,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import Toast from '$lib/components/Toast.svelte';
 
-	let { children } = $props();
+	const { children } = $props();
 </script>
 
 <svelte:head>
@@ -47,6 +47,8 @@
 	}
 
 	@keyframes spin {
-		to { transform: rotate(360deg); }
+		to {
+			transform: rotate(360deg);
+		}
 	}
 </style>

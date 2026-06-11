@@ -68,13 +68,10 @@
 			},
 
 			select: (info) => {
-				openJobModal(
-					{ start: info.start },
-					() => calendarInstance?.refetchEvents()
-				);
+				openJobModal({ start: info.start }, () => calendarInstance?.refetchEvents());
 			},
 
-			eventDrop: async (info) => {
+			eventDrop: async (info: any) => {
 				try {
 					await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
 					setTimeout(() => calendarInstance?.refetchEvents(), 400);
@@ -136,7 +133,9 @@
 				class:calendar__role-badge--admin={auth.currentUser.role === 'admin'}
 				class:calendar__role-badge--crew={auth.currentUser.role === 'crew'}
 			>
-				{auth.currentUser.role === 'admin' ? '👑 Admin - All Jobs' : `👷 Crew View - ${auth.currentUser.name}`}
+				{auth.currentUser.role === 'admin'
+					? '👑 Admin - All Jobs'
+					: `👷 Crew View - ${auth.currentUser.name}`}
 			</span>
 		{/if}
 	</div>
@@ -149,7 +148,7 @@
 <style>
 	.calendar__wrapper {
 		flex: 1;
-		min-height: 2000px;           /* Safety net so it never collapses */
+		min-height: 2000px; /* Safety net so it never collapses */
 		display: flex;
 		flex-direction: column;
 		padding: 0.5rem;
@@ -173,8 +172,14 @@
 		font-weight: 600;
 	}
 
-	.calendar__role-badge--admin { background: #1e40af; color: white; }
-	.calendar__role-badge--crew { background: #166534; color: white; }
+	.calendar__role-badge--admin {
+		background: #1e40af;
+		color: white;
+	}
+	.calendar__role-badge--crew {
+		background: #166534;
+		color: white;
+	}
 
 	.calendar__container {
 		flex: 1;
@@ -183,5 +188,4 @@
 		max-width: 98vw;
 		height: 2000px;
 	}
-	
 </style>

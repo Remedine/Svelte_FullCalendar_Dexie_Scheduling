@@ -54,7 +54,7 @@ export const BUSINESS_CONFIG = {
 			color: '#1e40af',
 			sortOrder: 7
 		},
-		'deharts': {
+		deharts: {
 			label: "DeHart's",
 			color: '#1e3a8a',
 			sortOrder: 8
@@ -74,7 +74,12 @@ export const BUSINESS_CONFIG = {
 
 	// === Default Billable Item Templates ===
 	commonBillableItems: [
-		{ title: 'Full Exterior Window Cleaning', price: null, quantity: 1, description: 'Standard residential or small commercial'},
+		{
+			title: 'Full Exterior Window Cleaning',
+			price: null,
+			quantity: 1,
+			description: 'Standard residential or small commercial'
+		},
 		{ title: 'Interior Window Cleaning', price: null, quantity: 1, description: '' },
 		{ title: 'High Windows / Skylights', price: null, quantity: 1, description: '' },
 		{ title: 'Roof Moss Cleaning', price: null, quantity: 1, description: '' },
@@ -100,8 +105,6 @@ export const BUSINESS_CONFIG = {
 	invoiceDueDays: 15,
 	currency: 'USD'
 } as const;
-
-
 
 // ========================
 // DERIVED TYPES

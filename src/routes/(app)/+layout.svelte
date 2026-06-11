@@ -3,14 +3,13 @@
 	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { pb } from '$lib/db/pb';
 	import { processSyncQueue } from '$lib/db';
 	import { getUserPhotoSrc } from '$lib/db';
 	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
 
-	let { children } = $props();
+	const { children } = $props();
 
-	let currentPath = $derived(page.url.pathname);
+	const currentPath = $derived(page.url.pathname);
 
 	// )=- Logout handler for the avatar dropdown menu. Uses dynamic import to match existing pattern in layout.
 	async function handleLogout() {
@@ -66,8 +65,8 @@
 		</div>
 
 		<nav class="top-nav__menu">
-			<a 
-				href="/calendar" 
+			<a
+				href="/calendar"
 				class="top-nav__link"
 				class:active={currentPath === '/calendar' || currentPath === '/'}
 			>
@@ -77,29 +76,21 @@
 			     Crew users are restricted by the auth guard above and only need Schedule.
 			     This improves consistency and prevents UI confusion for restricted roles. -->
 			{#if auth.currentUser?.role === 'admin'}
-				<a 
-					href="/clients" 
-					class="top-nav__link"
-					class:active={currentPath.startsWith('/clients')}
-				>
+				<a href="/clients" class="top-nav__link" class:active={currentPath.startsWith('/clients')}>
 					👥 Clients
 				</a>
-				<a 
-					href="/jobs" 
-					class="top-nav__link"
-					class:active={currentPath.startsWith('/jobs')}
-				>
+				<a href="/jobs" class="top-nav__link" class:active={currentPath.startsWith('/jobs')}>
 					📋 Jobs
 				</a>
-				<a 
-					href="/admin/crew" 
+				<a
+					href="/admin/crew"
 					class="top-nav__link"
 					class:active={currentPath.startsWith('/admin/crew')}
 				>
 					Crew
 				</a>
-				<a 
-					href="/admin/options" 
+				<a
+					href="/admin/options"
 					class="top-nav__link"
 					class:active={currentPath.startsWith('/admin/options')}
 				>
@@ -118,20 +109,22 @@
 						{#if auth.currentUser.photo}
 							<!-- )=- Use helper to normalize photo (fixes 404 for bare filenames like blob_xxx.png in top-nav avatar).
 							     The stack in logs pointed here ( +layout.svelte:132 ). -->
-							<img 
-								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)} 
-								alt="Profile" 
-								class="top-nav__avatar-img" 
+							<img
+								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+								alt="Profile"
+								class="top-nav__avatar-img"
 							/>
 						{:else}
 							<span class="top-nav__avatar-placeholder">
-								{(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0,1).toUpperCase()}
+								{(auth.currentUser.firstName || auth.currentUser.name || 'U')
+									.slice(0, 1)
+									.toUpperCase()}
 							</span>
 						{/if}
 					</div>
 					<div class="top-nav__user-menu">
 						<a href="/profile" class="top-nav__user-menu-item">Profile</a>
-						<button 
+						<button
 							onclick={handleLogout}
 							class="top-nav__user-menu-item top-nav__user-menu-item--logout"
 						>
@@ -236,21 +229,7 @@
 		color: #475569;
 	}
 
-	/* Old logout button styles kept for compatibility (not used in avatar menu) */
-	.top-nav__logout-btn {
-		background: #ef4444;
-		color: white;
-		border: none;
-		padding: 0.4rem 0.9rem;
-		border-radius: 6px;
-		font-size: 0.9rem;
-		cursor: pointer;
-		transition: background 0.2s;
-	}
-
-	.top-nav__logout-btn:hover {
-		background: #dc2626;
-	}
+	/* )=- Removed unused .top-nav__logout-btn styles (replaced by avatar dropdown menu). */
 
 	/* )=- Avatar dropdown for profile access. Wrapper is relative for positioning the menu on hover.
 	   Avatar is small circle with photo or placeholder initial. Menu appears below on hover.
@@ -298,7 +277,9 @@
 		background: white;
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
-		box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+		box-shadow:
+			0 4px 6px -1px rgb(0 0 0 / 0.1),
+			0 2px 4px -2px rgb(0 0 0 / 0.1);
 		min-width: 130px;
 		z-index: 100;
 		padding: 0.25rem 0;
@@ -337,7 +318,7 @@
 		background: #fef2f2;
 		color: #dc2626;
 	}
-		.loading-screen {
+	.loading-screen {
 		display: flex;
 		align-items: center;
 		justify-content: center;

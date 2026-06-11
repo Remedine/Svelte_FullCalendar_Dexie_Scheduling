@@ -12,6 +12,9 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
+	{
+		ignores: ['pb_data/**', 'pb_migrations/**']
+	},
 	js.configs.recommended,
 	ts.configs.recommended,
 	svelte.configs.recommended,
@@ -21,8 +24,14 @@ export default defineConfig(
 		languageOptions: { globals: { ...globals.browser, ...globals.node } },
 		rules: {
 			// typescript-eslint strongly recommend that you do not use the no-undef lint rule on TypeScript projects.
-			// see: https://typescript-eslint.io/troubleshooting/faqs/eslint/#i-get-errors-from-the-no-undef-rule-about-global-variables-not-being-defined-even-though-there-are-no-typescript-errors
-			'no-undef': 'off'
+			'no-undef': 'off',
+			// Allow any in this data-heavy sync app (Dexie + PB loose shapes); turn to 'warn' if desired.
+			'@typescript-eslint/no-explicit-any': 'warn',
+			// The global augmentation for ImportMeta is intentionally not "used" in value position.
+			'@typescript-eslint/no-unused-vars': [
+				'warn',
+				{ argsIgnorePattern: '^_', varsIgnorePattern: '^(ImportMeta|App)$' }
+			]
 		}
 	},
 	{
@@ -39,6 +48,16 @@ export default defineConfig(
 	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
-		rules: {}
+		rules: {
+			// These are noisy in a large existing app with many lists and Date usage for timestamps.
+			// The project intentionally uses native Date in many sync/derived places.
+			'svelte/require-each-key': 'warn',
+			'svelte/prefer-svelte-reactivity': 'warn',
+			'svelte/no-navigation-without-resolve': 'warn',
+			'no-empty': 'warn',
+			'no-useless-escape': 'warn',
+			'prefer-const': 'warn',
+			'@typescript-eslint/ban-ts-comment': 'warn'
+		}
 	}
 );

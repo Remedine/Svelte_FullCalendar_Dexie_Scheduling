@@ -33,9 +33,12 @@
 	$effect(() => {
 		if (!hasInitialized) {
 			hasInitialized = true;
-			db.clients.orderBy('name').toArray().then(data => {
-				clients = data;
-			});
+			db.clients
+				.orderBy('name')
+				.toArray()
+				.then((data) => {
+					clients = data;
+				});
 		}
 	});
 
@@ -65,20 +68,21 @@
 		}
 	});
 
-	let options = $derived.by<Option[]>(() => {
+	const options = $derived.by<Option[]>(() => {
 		const term = searchTerm.toLowerCase().trim();
 		let result: Option[] = [...clients];
 
 		if (term) {
-			result = clients.filter(c =>
-				c.name.toLowerCase().includes(term) ||
-				(c.email && c.email.toLowerCase().includes(term)) ||
-				(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
+			result = clients.filter(
+				(c) =>
+					c.name.toLowerCase().includes(term) ||
+					(c.email && c.email.toLowerCase().includes(term)) ||
+					(c.serviceAddressCity && c.serviceAddressCity.toLowerCase().includes(term))
 			);
 		}
 
-		const showCreate = allowCreate && term &&
-			!clients.some(c => c.name.trim().toLowerCase() === term);
+		const showCreate =
+			allowCreate && term && !clients.some((c) => c.name.trim().toLowerCase() === term);
 
 		if (showCreate) {
 			result = [{ id: '__create__', name: term }, ...result];
@@ -87,16 +91,16 @@
 		return result;
 	});
 
-	let selectedClient = $derived.by(() => {
+	const selectedClient = $derived.by(() => {
 		if (!value || clients.length === 0) return null;
-		return clients.find(c => c.id === value || c.pbId === value) || null;
+		return clients.find((c) => c.id === value || c.pbId === value) || null;
 	});
 
-	let showCreateHint = $derived.by(() => {
+	const showCreateHint = $derived.by(() => {
 		return options.length > 0 && isCreateOption(options[0]);
 	});
 
-	let displayValue = $derived.by(() => {
+	const displayValue = $derived.by(() => {
 		if (isOpen) return searchTerm;
 		return selectedClient?.name ?? '';
 	});
@@ -223,10 +227,7 @@
 
 	function handleClickOutside(e: PointerEvent) {
 		const path = e.composedPath();
-		if (
-			(!inputEl || !path.includes(inputEl)) &&
-			(!dropdownEl || !path.includes(dropdownEl))
-		) {
+		if ((!inputEl || !path.includes(inputEl)) && (!dropdownEl || !path.includes(dropdownEl))) {
 			isOpen = false;
 			activeIndex = -1;
 		}
@@ -247,11 +248,11 @@
 			{id}
 			type="text"
 			value={displayValue}
-			oninput={(e) => searchTerm = (e.currentTarget as HTMLInputElement).value}
+			oninput={(e) => (searchTerm = (e.currentTarget as HTMLInputElement).value)}
 			onfocus={handleInputFocus}
 			onkeydown={handleKeydown}
 			onblur={handleBlur}
-			placeholder={placeholder}
+			{placeholder}
 			class="client-picker__input"
 			role="combobox"
 			aria-expanded={isOpen}
@@ -264,7 +265,10 @@
 			<button
 				type="button"
 				class="client-picker__clear"
-				onclick={(e) => { e.stopPropagation(); clearSelection(); }}
+				onclick={(e) => {
+					e.stopPropagation();
+					clearSelection();
+				}}
 				aria-label="Clear selection"
 			>
 				×
@@ -273,12 +277,7 @@
 	</div>
 
 	{#if isOpen}
-		<div 
-			bind:this={dropdownEl}
-			class="client-picker__dropdown" 
-			id="client-listbox" 
-			role="listbox"
-		>
+		<div bind:this={dropdownEl} class="client-picker__dropdown" id="client-listbox" role="listbox">
 			{#each options as option, index (option.id)}
 				{@const isCreate = isCreateOption(option)}
 				{@const isActive = index === activeIndex}
@@ -290,8 +289,9 @@
 					class:client-picker__option--create={isCreate}
 					class:client-picker__option--loading={isCreate && isCreating}
 					role="option"
+					tabindex="0"
 					aria-selected={!isCreate && option.id === value}
-					onmouseenter={() => activeIndex = index}
+					onmouseenter={() => (activeIndex = index)}
 					onmousedown={(e) => {
 						e.stopPropagation();
 						if (isCreate) {
@@ -313,7 +313,9 @@
 						<strong>{option.name}</strong>
 						{#if option.serviceAddressCity || option.email}
 							<small>
-								{option.serviceAddressCity || ''}{option.serviceAddressCity && option.email ? ' • ' : ''}
+								{option.serviceAddressCity || ''}{option.serviceAddressCity && option.email
+									? ' • '
+									: ''}
 								{option.email || ''}
 							</small>
 						{/if}
@@ -329,8 +331,16 @@
 </div>
 
 <style>
-	.client-picker { font-family: inherit; width: 100%; position: relative; }
-	.client-picker__input-wrapper { position: relative; display: flex; align-items: center; }
+	.client-picker {
+		font-family: inherit;
+		width: 100%;
+		position: relative;
+	}
+	.client-picker__input-wrapper {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
 	.client-picker__input {
 		width: 100%;
 		padding: 0.75rem 2.5rem 0.75rem 1rem;
@@ -353,7 +363,9 @@
 		font-size: 1.2rem;
 		cursor: pointer;
 	}
-	.client-picker__clear:hover { color: #ef4444; }
+	.client-picker__clear:hover {
+		color: #ef4444;
+	}
 	.client-picker__dropdown {
 		position: absolute;
 		top: 100%;
@@ -374,16 +386,36 @@
 		border-bottom: 1px solid #f1f5f9;
 	}
 	.client-picker__option:hover,
-	.client-picker__option--active { background: #f8fafc; }
+	.client-picker__option--active {
+		background: #f8fafc;
+	}
 	.client-picker__option--create {
 		background: #f0fdf4;
 		border-bottom: 2px solid #86efac;
 		font-weight: 600;
 	}
 	.client-picker__option--create:hover,
-	.client-picker__option--create.client-picker__option--active { background: #dcfce7; }
-	.client-picker__option--loading { opacity: 0.7; pointer-events: none; }
-	.client-picker__hint { display: block; margin-top: 4px; font-size: 0.75rem; color: #16a34a; }
-	.client-picker__loading { font-size: 0.85rem; color: #16a34a; margin-left: 0.5rem; }
-	.client-picker__no-results { padding: 1rem; text-align: center; color: #64748b; }
+	.client-picker__option--create.client-picker__option--active {
+		background: #dcfce7;
+	}
+	.client-picker__option--loading {
+		opacity: 0.7;
+		pointer-events: none;
+	}
+	.client-picker__hint {
+		display: block;
+		margin-top: 4px;
+		font-size: 0.75rem;
+		color: #16a34a;
+	}
+	.client-picker__loading {
+		font-size: 0.85rem;
+		color: #16a34a;
+		margin-left: 0.5rem;
+	}
+	.client-picker__no-results {
+		padding: 1rem;
+		text-align: center;
+		color: #64748b;
+	}
 </style>

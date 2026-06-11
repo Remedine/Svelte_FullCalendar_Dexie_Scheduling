@@ -1,13 +1,24 @@
 <!-- src/routes/(app)/clients/+page.svelte -->
 <script lang="ts">
-	import { db, type Client, getPaginatedJobsForClient, type Job, getInvoiceForJob, isInvoiceOverdue } from '$lib/db';
+	import {
+		db,
+		type Client,
+		getPaginatedJobsForClient,
+		type Job,
+		getInvoiceForJob,
+		isInvoiceOverdue
+	} from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import ClientForm from '$lib/components/ClientForm.svelte';
 	import { deleteClient as deleteClientFromDb } from '$lib/db';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
-	import { pullJobsFromServer, pullClientsFromServer, pullInvoicesFromServer, pb } from '$lib/db/pb';
+	import {
+		pullJobsFromServer,
+		pullClientsFromServer,
+		pullInvoicesFromServer
+	} from '$lib/db/pb';
 
 	let showForm = $state(false);
 	let editingClient = $state<Client | null>(null);
@@ -19,7 +30,7 @@
 	let enhancedClients = $state<any[]>([]);
 
 	// Dynamic areas from options store (already reactive)
-	let areaOptions = $derived.by(() => {
+	const areaOptions = $derived.by(() => {
 		return optionsStore.data?.areasOfTown ?? [];
 	});
 
@@ -27,28 +38,32 @@
 		console.log('🟢 areaOptions updated →', areaOptions.length, 'areas loaded');
 	});
 
-	let displayedClients = $derived.by(() => {
+	const displayedClients = $derived.by(() => {
 		let result = [...enhancedClients];
 
 		const term = searchTerm.toLowerCase().trim();
 		if (term) {
-			result = result.filter(c =>
-				c.name?.toLowerCase().includes(term) ||
-				c.email?.toLowerCase().includes(term) ||
-				c.serviceAddressCity?.toLowerCase().includes(term)
+			result = result.filter(
+				(c) =>
+					c.name?.toLowerCase().includes(term) ||
+					c.email?.toLowerCase().includes(term) ||
+					c.serviceAddressCity?.toLowerCase().includes(term)
 			);
 		}
 
 		if (selectedAreas.length > 0) {
-			result = result.filter(c => selectedAreas.includes(c.areaOfTown));
+			result = result.filter((c) => selectedAreas.includes(c.areaOfTown));
 		}
 
 		if (sortMode === 'recent') {
-			result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+			result.sort(
+				(a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+			);
 		} else if (sortMode === 'upcoming') {
 			// )=- Sort by soonest next job (nulls last), fallback to name
 			result.sort((a, b) => {
-				if (a.nextJobDate && b.nextJobDate) return a.nextJobDate.getTime() - b.nextJobDate.getTime();
+				if (a.nextJobDate && b.nextJobDate)
+					return a.nextJobDate.getTime() - b.nextJobDate.getTime();
 				if (a.nextJobDate) return -1;
 				if (b.nextJobDate) return 1;
 				return a.name.localeCompare(b.name);
@@ -93,18 +108,17 @@
 		const allClients = await db.clients.orderBy('name').toArray();
 		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
 
-		enhancedClients = allClients.map(client => {
+		enhancedClients = allClients.map((client) => {
 			// )=- Match jobs by local id OR pbId (handles post-sync state correctly)
 			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-			const clientJobs = allJobs.filter(j => 
-				j.clientId === client.id || 
-				(client.pbId && j.clientId === client.pbId)
+			const clientJobs = allJobs.filter(
+				(j) => j.clientId === client.id || (client.pbId && j.clientId === client.pbId)
 			);
 			const lastJob = clientJobs[0] || null;
 
 			// )=- Compute next upcoming job for 'upcoming' sort and display (future jobs only, soonest first)
 			const futureJobs = clientJobs
-				.filter(j => new Date(j.start) > new Date())
+				.filter((j) => new Date(j.start) > new Date())
 				.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 			const nextJob = futureJobs[0] || null;
 
@@ -151,9 +165,11 @@
 	async function deleteClient(id: string) {
 		// )=- Prevent deletion if client has any jobs (protects data integrity)
 		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		const clientWithJobs = enhancedClients.find(c => c.id === id);
+		const clientWithJobs = enhancedClients.find((c) => c.id === id);
 		if (clientWithJobs && (clientWithJobs.totalJobs ?? 0) > 0) {
-			alert('Cannot delete this client because they have existing job records.\n\nPlease cancel or delete the associated jobs first.');
+			alert(
+				'Cannot delete this client because they have existing job records.\n\nPlease cancel or delete the associated jobs first.'
+			);
 			return;
 		}
 
@@ -165,7 +181,7 @@
 
 	function toggleArea(areaKey: string) {
 		if (selectedAreas.includes(areaKey)) {
-			selectedAreas = selectedAreas.filter(a => a !== areaKey);
+			selectedAreas = selectedAreas.filter((a) => a !== areaKey);
 		} else {
 			selectedAreas = [...selectedAreas, areaKey];
 		}
@@ -186,7 +202,9 @@
 	// Local enrichment type to carry invoice badges without polluting the base Job interface.
 	// )=- Extended for Phase 7 overdue visuals on related jobs rows (red tint on badge or row when overdue).
 	type EnrichedJob = Job & { _hasInvoice?: boolean; _invoiceStatus?: string; _isOverdue?: boolean };
-	let expandedClients = $state<Record<string, { jobs: EnrichedJob[]; offset: number; loading: boolean }>>({});
+	let expandedClients = $state<
+		Record<string, { jobs: EnrichedJob[]; offset: number; loading: boolean }>
+	>({});
 
 	async function toggleRelatedJobs(client: any) {
 		const id = client.id!;
@@ -201,16 +219,20 @@
 		expandedClients = { ...expandedClients };
 
 		try {
-			const loaded = await getPaginatedJobsForClient(id, { limit: 10, offset: 0, includeCancelled: true });
+			const loaded = await getPaginatedJobsForClient(id, {
+				limit: 10,
+				offset: 0,
+				includeCancelled: true
+			});
 			// )=- Enrich each with invoice status + overdue for the badge in the related list (Phase 6 + Phase 7 overdue visuals).
 			// Uses the shared isInvoiceOverdue + EnrichedJob local type. Overdue = not paid + past dueDate.
 			// )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (overdue visual treatment everywhere)
 			const enriched: EnrichedJob[] = [];
 			for (const j of loaded) {
 				const inv = j.id ? await getInvoiceForJob(j.id) : null;
-				enriched.push({ 
-					...j, 
-					_hasInvoice: !!inv, 
+				enriched.push({
+					...j,
+					_hasInvoice: !!inv,
 					_invoiceStatus: inv?.status,
 					_isOverdue: isInvoiceOverdue(inv)
 				});
@@ -232,15 +254,19 @@
 		expandedClients = { ...expandedClients };
 
 		try {
-			const moreRaw = await getPaginatedJobsForClient(clientId, { limit: 10, offset: current.offset, includeCancelled: true });
+			const moreRaw = await getPaginatedJobsForClient(clientId, {
+				limit: 10,
+				offset: current.offset,
+				includeCancelled: true
+			});
 			// )=- Enrich the additional page too so invoice + overdue badges appear on "Load more".
 			// Uses isInvoiceOverdue for consistent Phase 7 visuals.
 			const moreEnriched: EnrichedJob[] = [];
 			for (const j of moreRaw) {
 				const inv = j.id ? await getInvoiceForJob(j.id) : null;
-				moreEnriched.push({ 
-					...j, 
-					_hasInvoice: !!inv, 
+				moreEnriched.push({
+					...j,
+					_hasInvoice: !!inv,
 					_invoiceStatus: inv?.status,
 					_isOverdue: isInvoiceOverdue(inv)
 				});
@@ -264,9 +290,7 @@
 <div class="clients-page">
 	<header class="clients-page__header">
 		<h1 class="clients-page__title">Client CRM</h1>
-		<button onclick={openNewClient} class="clients-page__btn-add">
-			+ New Client
-		</button>
+		<button onclick={openNewClient} class="clients-page__btn-add"> + New Client </button>
 	</header>
 
 	<div class="clients-page__filters">
@@ -305,8 +329,12 @@
 				<div class="client-card__main">
 					<div class="client-card__header">
 						<h3 class="client-card__name">{client.name}</h3>
-						<span class="area-badge"
-							style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(client.areaOfTown)};">
+						<span
+							class="area-badge"
+							style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(
+								client.areaOfTown
+							)};"
+						>
 							{getAreaLabel(client.areaOfTown)}
 						</span>
 					</div>
@@ -321,19 +349,43 @@
 					</div>
 
 					{#if getFullAddress(client)}
-						<div class="client-card__address" onclick={() => openInMaps(client)}>
+						<div
+							class="client-card__address"
+							role="button"
+							tabindex="0"
+							onclick={() => openInMaps(client)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									openInMaps(client);
+								}
+							}}
+						>
 							📍 {getFullAddress(client)}
 						</div>
 					{/if}
 
 					<div class="client-card__meta">
 						{#if client.lastJobDate}
-							Last: <strong>{client.lastJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+							Last: <strong
+								>{client.lastJobDate.toLocaleDateString('en-US', {
+									month: 'short',
+									day: 'numeric',
+									year: 'numeric'
+								})}</strong
+							>
 						{:else}
 							<span class="no-jobs">No jobs yet</span>
 						{/if}
 						{#if client.nextJobDate}
-							<span> • Next: <strong>{client.nextJobDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong></span>
+							<span>
+								• Next: <strong
+									>{client.nextJobDate.toLocaleDateString('en-US', {
+										month: 'short',
+										day: 'numeric'
+									})}</strong
+								></span
+							>
 						{/if}
 						{#if client.totalJobs > 0}
 							<span> • {client.totalJobs} job{client.totalJobs > 1 ? 's' : ''}</span>
@@ -345,17 +397,14 @@
 					     Per spec: "The job list can be expandable on click inside the client card. Then the modal shared with the jobs page... Paginated jobs for now."
 					     Reference: JOBS_AND_INVOICES_SPEC.md -->
 					<div class="client-card__related">
-						<button 
-							class="client-card__related-toggle"
-							onclick={() => toggleRelatedJobs(client)}
-						>
+						<button class="client-card__related-toggle" onclick={() => toggleRelatedJobs(client)}>
 							{expandedClients[client.id!] ? '▼' : '▶'} Related Jobs ({client.totalJobs || 0})
 						</button>
 
 						{#if expandedClients[client.id!]}
 							<div class="client-card__related-list">
 								{#each expandedClients[client.id!].jobs as job (job.id)}
-									<div 
+									<div
 										class="client-card__related-job"
 										onclick={() => openJobFromClient(job, client)}
 									>
@@ -373,11 +422,13 @@
 										<span class="amount">${(job.totalAmount || 0).toFixed(2)}</span>
 									</div>
 								{:else}
-									<div class="client-card__related-empty">No related jobs found for this client.</div>
+									<div class="client-card__related-empty">
+										No related jobs found for this client.
+									</div>
 								{/each}
 
 								{#if expandedClients[client.id!].jobs.length > 0}
-									<button 
+									<button
 										class="client-card__related-more"
 										onclick={() => loadMoreRelated(client.id!)}
 										disabled={expandedClients[client.id!].loading}
@@ -391,16 +442,19 @@
 				</div>
 
 				<div class="client-card__actions">
-					<button onclick={() => editClient(client)} class="client-card__btn client-card__btn--edit">
+					<button
+						onclick={() => editClient(client)}
+						class="client-card__btn client-card__btn--edit"
+					>
 						Edit
 					</button>
-					<button 
+					<button
 						onclick={() => deleteClient(client.id!)}
 						class="client-card__btn client-card__btn--delete"
 						class:client-card__btn--disabled={(client.totalJobs ?? 0) > 0}
 						disabled={(client.totalJobs ?? 0) > 0}
-						title={(client.totalJobs ?? 0) > 0 
-							? 'Cannot delete: client has existing jobs' 
+						title={(client.totalJobs ?? 0) > 0
+							? 'Cannot delete: client has existing jobs'
 							: 'Delete client'}
 					>
 						Delete
@@ -416,11 +470,7 @@
 </div>
 
 {#if showForm}
-	<ClientForm
-		bind:show={showForm}
-		bind:client={editingClient}
-		onSaved={handleClientSaved}
-	/>
+	<ClientForm bind:show={showForm} bind:client={editingClient} onSaved={handleClientSaved} />
 {/if}
 
 <!-- Note: JobDetailsModal is globally mounted in (app)/+layout.svelte -->
@@ -514,7 +564,7 @@
 		background: white;
 		padding: 1.35rem;
 		border-radius: 12px;
-		box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 		transition: transform 0.2s;
 	}
 
@@ -522,13 +572,32 @@
 		transform: translateX(4px);
 	}
 
-	.client-card__main { flex: 1; }
-	.client-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
-	.client-card__name { margin: 0; font-size: 1.2rem; font-weight: 600; }
+	.client-card__main {
+		flex: 1;
+	}
+	.client-card__header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		margin-bottom: 0.75rem;
+	}
+	.client-card__name {
+		margin: 0;
+		font-size: 1.2rem;
+		font-weight: 600;
+	}
 
-	.client-card__contact { margin-bottom: 0.5rem; line-height: 1.5; }
-	.contact-link { color: #0369a1; text-decoration: none; }
-	.contact-link:hover { text-decoration: underline; }
+	.client-card__contact {
+		margin-bottom: 0.5rem;
+		line-height: 1.5;
+	}
+	.contact-link {
+		color: #0369a1;
+		text-decoration: none;
+	}
+	.contact-link:hover {
+		text-decoration: underline;
+	}
 
 	.client-card__address {
 		color: #1e40af;
@@ -536,14 +605,19 @@
 		margin-bottom: 0.75rem;
 		text-decoration: underline dotted;
 	}
-	.client-card__address:hover { color: #1e3a8a; text-decoration: underline; }
+	.client-card__address:hover {
+		color: #1e3a8a;
+		text-decoration: underline;
+	}
 
 	.client-card__meta {
 		font-size: 0.95rem;
 		color: #475569;
 	}
 
-	.no-jobs { color: #f59e0b; }
+	.no-jobs {
+		color: #f59e0b;
+	}
 
 	.client-card__actions {
 		display: flex;
@@ -561,8 +635,14 @@
 		white-space: nowrap;
 	}
 
-	.client-card__btn--edit { background: #e0f2fe; color: #0369a1; }
-	.client-card__btn--delete { background: #fee2e2; color: #ef4444; }
+	.client-card__btn--edit {
+		background: #e0f2fe;
+		color: #0369a1;
+	}
+	.client-card__btn--delete {
+		background: #fee2e2;
+		color: #ef4444;
+	}
 
 	.client-card__btn--disabled {
 		background: #f1f5f9 !important;
@@ -618,19 +698,66 @@
 		background: #f1f5f9;
 	}
 
-	.client-card__related-job .date { color: #64748b; font-size: 0.75rem; }
-	.client-card__related-job .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.client-card__related-job .status { font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 3px; text-transform: uppercase; }
-	.client-card__related-job .status--scheduled { background: #dbeafe; color: #1e40af; }
-	.client-card__related-job .status--confirmed { background: #d1fae5; color: #166534; }
-	.client-card__related-job .status--completed { background: #a7f3d0; color: #065f46; }
-	.client-card__related-job .status--cancelled { background: #fee2e2; color: #991b1b; }
-	.client-card__related-job .amount { font-weight: 600; text-align: right; }
-	.client-card__related-job .invoice-badge { font-size: 0.65rem; background: #ecfdf5; color: #166534; padding: 0.1rem 0.4rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 0.2rem; }
+	.client-card__related-job .date {
+		color: #64748b;
+		font-size: 0.75rem;
+	}
+	.client-card__related-job .title {
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.client-card__related-job .status {
+		font-size: 0.65rem;
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		text-transform: uppercase;
+	}
+	.client-card__related-job .status--scheduled {
+		background: #dbeafe;
+		color: #1e40af;
+	}
+	.client-card__related-job .status--confirmed {
+		background: #d1fae5;
+		color: #166534;
+	}
+	.client-card__related-job .status--completed {
+		background: #a7f3d0;
+		color: #065f46;
+	}
+	.client-card__related-job .status--cancelled {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+	.client-card__related-job .amount {
+		font-weight: 600;
+		text-align: right;
+	}
+	.client-card__related-job .invoice-badge {
+		font-size: 0.65rem;
+		background: #ecfdf5;
+		color: #166534;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+	}
 	/* )=- Overdue visual (Phase 7) on clients related jobs rows. Red background + small pill when overdue.
 	   Mirrors the treatment added to /jobs cards and the modal for consistency (BEM + shared isInvoiceOverdue). */
-	.client-card__related-job .invoice-badge.overdue { background: #fee2e2; color: #991b1b; }
-	.client-card__related-job .overdue-pill { font-size: 0.55rem; background: #991b1b; color: white; padding: 0 0.15rem; border-radius: 2px; text-transform: uppercase; }
+	.client-card__related-job .invoice-badge.overdue {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+	.client-card__related-job .overdue-pill {
+		font-size: 0.55rem;
+		background: #991b1b;
+		color: white;
+		padding: 0 0.15rem;
+		border-radius: 2px;
+		text-transform: uppercase;
+	}
 
 	.client-card__related-empty {
 		font-size: 0.75rem;

@@ -15,26 +15,11 @@
 <style>
 	.split-page {
 		padding: 1rem;
-		
+
 		margin: 0 auto;
 	}
 
-	.split-page__header {
-		margin-bottom: 1.5rem;
-	}
-
-	.split-page__title {
-		margin: 0 0 0.25rem 0;
-		font-size: 1.75rem;
-		font-weight: 700;
-		color: #0f172a;
-	}
-
-	.split-page__subtitle {
-		margin: 0;
-		color: #64748b;
-		font-size: 0.95rem;
-	}
+	/* )=- Removed unused .split-page__header / __title / __subtitle (current layout uses different structure). */
 
 	.split-page__content {
 		background: #f8fafc;

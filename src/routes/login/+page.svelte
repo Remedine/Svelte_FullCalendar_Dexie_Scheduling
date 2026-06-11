@@ -1,123 +1,119 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-  // )=- Completely removed PIN login option (per user request). Now ONLY email/password via PocketBase authWithPassword.
-  // No tabs, no PIN fields, no activeTab, no pinLogin import or forcePin redirects.
-  // handleLogin does email path + Dexie lookup + setCurrentUser + goto('/calendar').
-  // Layout + auth store provide the single source of truth (no more dual auth paths).
-  // BEM classes preserved on the form (login-card, login-form__*).
-  // )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-  import { loginWithEmail } from '$lib/db/pb';
-  import { goto } from '$app/navigation';
-  import { setCurrentUser } from '$lib/stores/auth.svelte';
-  import { db } from '$lib/db';
+	// )=- Completely removed PIN login option (per user request). Now ONLY email/password via PocketBase authWithPassword.
+	// No tabs, no PIN fields, no activeTab, no pinLogin import or forcePin redirects.
+	// handleLogin does email path + Dexie lookup + setCurrentUser + goto('/calendar').
+	// Layout + auth store provide the single source of truth (no more dual auth paths).
+	// BEM classes preserved on the form (login-card, login-form__*).
+	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	import { loginWithEmail } from '$lib/db/pb';
+	import { goto } from '$app/navigation';
+	import { setCurrentUser } from '$lib/stores/auth.svelte';
+	import { db } from '$lib/db';
 
-  let email = $state('');
-  let password = $state('');
-  let isLoading = $state(false);
-  let error = $state('');
+	let email = $state('');
+	let password = $state('');
+	let isLoading = $state(false);
+	let error = $state('');
 
-  $effect(() => {
-    // Auto-redirect if already authenticated via layout/store restore.
-  });
+	$effect(() => {
+		// Auto-redirect if already authenticated via layout/store restore.
+	});
 
-  async function handleLogin() {
-    isLoading = true;
-    error = '';
+	async function handleLogin() {
+		isLoading = true;
+		error = '';
 
-    try {
-      // Email / PB path only
-      await loginWithEmail(email, password);
+		try {
+			// Email / PB path only
+			await loginWithEmail(email, password);
 
-      // Sync the PB-authenticated user into the central Dexie-backed store
-      // so the UI (nav, guards, role checks) sees a consistent user object.
-      // Prefer email lookup (unique). Fallback to firstName or legacy name.
-      let cachedUser = await db.users.where('email').equalsIgnoreCase(email).first();
+			// Sync the PB-authenticated user into the central Dexie-backed store
+			// so the UI (nav, guards, role checks) sees a consistent user object.
+			// Prefer email lookup (unique). Fallback to firstName or legacy name.
+			let cachedUser = await db.users.where('email').equalsIgnoreCase(email).first();
 
-      if (!cachedUser) {
-        const guess = email.split('@')[0];
-        cachedUser = await db.users.where('firstName').equalsIgnoreCase(guess).first()
-          || await db.users.where('name').equalsIgnoreCase(guess).first();
-      }
+			if (!cachedUser) {
+				const guess = email.split('@')[0];
+				cachedUser =
+					(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
+					(await db.users.where('name').equalsIgnoreCase(guess).first());
+			}
 
-      if (!cachedUser) {
-        // Fallback to a seeded admin for development if email user not yet in Dexie
-        cachedUser = await db.users.where('name').equalsIgnoreCase('admin').first();
-      }
+			if (!cachedUser) {
+				// Fallback to a seeded admin for development if email user not yet in Dexie
+				cachedUser = await db.users.where('name').equalsIgnoreCase('admin').first();
+			}
 
-      if (cachedUser) {
-        setCurrentUser(cachedUser);
-        console.log('✅ User synced to central auth store after PB email login');
-      }
+			if (cachedUser) {
+				setCurrentUser(cachedUser);
+				console.log('✅ User synced to central auth store after PB email login');
+			}
 
-      goto('/calendar', { replaceState: true });
-    } catch (err: any) {
-      // Surface better messages from PocketBase auth errors (e.g. bad credentials, disabled, etc.)
-      const pbData = err?.response?.data;
-      error = pbData?.password?.message 
-        || pbData?.email?.message 
-        || err?.message 
-        || 'Login failed';
-      console.error('Login attempt failed:', err);
-    } finally {
-      isLoading = false;
-    }
-  }
+			goto('/calendar', { replaceState: true });
+		} catch (err: any) {
+			// Surface better messages from PocketBase auth errors (e.g. bad credentials, disabled, etc.)
+			const pbData = err?.response?.data;
+			error = pbData?.password?.message || pbData?.email?.message || err?.message || 'Login failed';
+			console.error('Login attempt failed:', err);
+		} finally {
+			isLoading = false;
+		}
+	}
 </script>
 
-
-
 <div class="login-page">
-  <div class="login-card">
-    <h1 class="login-card__title">CapitalCity Windows</h1>
-    <p class="login-card__subtitle">Crew Login</p>
+	<div class="login-card">
+		<h1 class="login-card__title">CapitalCity Windows</h1>
+		<p class="login-card__subtitle">Crew Login</p>
 
-    <!-- )=- PIN login completely removed. This page is now email/password ONLY.
+		<!-- )=- PIN login completely removed. This page is now email/password ONLY.
          No tabs, no activeTab, no pinLogin path, no forcePinUpdate redirects.
          All auth goes through PocketBase authWithPassword (loginWithEmail).
          Layout guards + central auth store handle post-login state.
          )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-    <form 
-      onsubmit={(e) => { e.preventDefault(); handleLogin(); }} 
-      class="login-form"
-    >
-      <div class="login-form__field">
-        <label class="login-form__label">Email</label>
-        <input 
-          type="email" 
-          class="login-form__input"
-          bind:value={email}
-          placeholder="you@company.com"
-          required
-        />
-      </div>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleLogin();
+			}}
+			class="login-form"
+		>
+			<div class="login-form__field">
+				<label for="login-email" class="login-form__label">Email</label>
+				<input
+					id="login-email"
+					type="email"
+					class="login-form__input"
+					bind:value={email}
+					placeholder="you@company.com"
+					required
+				/>
+			</div>
 
-      <div class="login-form__field">
-        <label class="login-form__label">Password</label>
-        <input 
-          type="password" 
-          class="login-form__input"
-          bind:value={password}
-          placeholder="••••••••"
-          required
-        />
-      </div>
+			<div class="login-form__field">
+				<label for="login-password" class="login-form__label">Password</label>
+				<input
+					id="login-password"
+					type="password"
+					class="login-form__input"
+					bind:value={password}
+					placeholder="••••••••"
+					required
+				/>
+			</div>
 
-      {#if error}
-        <p class="login-form__error">{error}</p>
-      {/if}
+			{#if error}
+				<p class="login-form__error">{error}</p>
+			{/if}
 
-      <button 
-        type="submit"
-        class="login-form__btn"
-        disabled={isLoading}>
-        {isLoading ? 'Logging in...' : 'Login'}
-      </button>
-    </form>
+			<button type="submit" class="login-form__btn" disabled={isLoading}>
+				{isLoading ? 'Logging in...' : 'Login'}
+			</button>
+		</form>
 
-    <p class="login-card__help">
-      Sign in with your email and password.
-    </p>
-  </div>
+		<p class="login-card__help">Sign in with your email and password.</p>
+	</div>
 </div>
 
 <style>

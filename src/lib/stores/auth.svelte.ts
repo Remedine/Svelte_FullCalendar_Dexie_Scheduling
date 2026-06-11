@@ -56,4 +56,3 @@ if (browser) {
 	auth.loading = false;
 	auth.isAuthenticated = false;
 }
-

@@ -1,522 +1,715 @@
 <script lang="ts">
-  // )=- Self-service profile page for the logged-in user (crew or admin self).
-  // We deliberately do NOT reuse /admin/crew (admin multi-user management tool).
-  // This is personal to auth.currentUser. Reuses updateUser for Dexie+PB sync (photo/name), direct pb (with realId resolution) for password + requestEmailChange for email.
-  // )=- ID-badge style card with polished BEM styling (per user request + Agents.md).
-  // - Edit buttons (pencils) right-aligned for Name and Email rows (avatar pencil stays overlaid).
-  // - Added subtle field labels: "Name", "Email", "Role" inside the badge.
-  // - Security actions stacked vertically with right-aligned pencils. Only "Update Password" remains (PIN login removed entirely).
-  // - All buttons remain icon-only (pencils / check / x). Nice spacing, typography, and card polish using strict BEM.
-  // - Email editing fully supported.
-  // )=- PIN/forcePin completely removed from UI, state, and save paths. Only email/password auth now.
-  // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-  import { auth } from '$lib/stores/auth.svelte';
-  import { db, updateUser, getUserPhotoSrc } from '$lib/db';
-  import { pb } from '$lib/db/pb';
+	// )=- Self-service profile page for the logged-in user (crew or admin self).
+	// We deliberately do NOT reuse /admin/crew (admin multi-user management tool).
+	// This is personal to auth.currentUser. Reuses updateUser for Dexie+PB sync (photo/name), direct pb (with realId resolution) for password + requestEmailChange for email.
+	// )=- ID-badge style card with polished BEM styling (per user request + Agents.md).
+	// - Edit buttons (pencils) right-aligned for Name and Email rows (avatar pencil stays overlaid).
+	// - Added subtle field labels: "Name", "Email", "Role" inside the badge.
+	// - Security actions stacked vertically with right-aligned pencils. Only "Update Password" remains (PIN login removed entirely).
+	// - All buttons remain icon-only (pencils / check / x). Nice spacing, typography, and card polish using strict BEM.
+	// - Email editing fully supported.
+	// )=- PIN/forcePin completely removed from UI, state, and save paths. Only email/password auth now.
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	import { auth } from '$lib/stores/auth.svelte';
+	import { db, updateUser, getUserPhotoSrc } from '$lib/db';
+	import { pb } from '$lib/db/pb';
 
-  let loading = $state(false);
-  let error = $state('');
-  let success = $state('');
+	let loading = $state(false);
+	let error = $state('');
+	let success = $state('');
 
-  // Photo input ref for camera (triggered directly by the pencil next to avatar)
-  let photoInput: HTMLInputElement | null = $state(null);
+	// Photo input ref for camera (triggered directly by the pencil next to avatar)
+	let photoInput: HTMLInputElement | null = $state(null);
 
-  // Password form state (PB email auth change - requires oldPassword for security)
-  let oldPassword = $state('');
-  let newPassword = $state('');
-  let confirmNewPassword = $state('');
+	// Password form state (PB email auth change - requires oldPassword for security)
+	let oldPassword = $state('');
+	let newPassword = $state('');
+	let confirmNewPassword = $state('');
 
-  // Name edit state (synced from currentUser except while actively editing)
-  let firstName = $state(auth.currentUser?.firstName || '');
-  let lastName = $state(auth.currentUser?.lastName || '');
+	// Name edit state (synced from currentUser except while actively editing)
+	let firstName = $state(auth.currentUser?.firstName || '');
+	let lastName = $state(auth.currentUser?.lastName || '');
 
-  // )=- Email edit state. Now fully wired (previously declared but had no saveEmail or UI row).
-  let newEmail = $state(auth.currentUser?.email || '');
+	// )=- Email edit state. Now fully wired (previously declared but had no saveEmail or UI row).
+	let newEmail = $state(auth.currentUser?.email || '');
 
-  // )=- editing controls which (if any) field is in edit mode. Photo uses direct trigger (no editing state needed).
-  // Only 'name' and 'email' use inline replacement inside the badge rows.
-  // 'password' opens the compact form below the badge.
-  let editing = $state<'password' | 'name' | 'email' | null>(null);
+	// )=- editing controls which (if any) field is in edit mode. Photo uses direct trigger (no editing state needed).
+	// Only 'name' and 'email' use inline replacement inside the badge rows.
+	// 'password' opens the compact form below the badge.
+	let editing = $state<'password' | 'name' | 'email' | null>(null);
 
-  // )=- Track pending email change (from requestEmailChange) so we can show "pending confirmation" pill + resend in the badge.
-  // Cleared on reload or when a new request overwrites it. Local email is already optimistically set to the pending value.
-  let pendingEmailChange = $state<string | null>(null);
+	// )=- Track pending email change (from requestEmailChange) so we can show "pending confirmation" pill + resend in the badge.
+	// Cleared on reload or when a new request overwrites it. Local email is already optimistically set to the pending value.
+	let pendingEmailChange = $state<string | null>(null);
 
-  function startEditing(section: 'password' | 'name' | 'email') {
-    editing = section;
-    error = '';
-    success = '';
-    if (section === 'password') {
-      oldPassword = '';
-      newPassword = '';
-      confirmNewPassword = '';
-    } else if (section === 'email') {
-      newEmail = auth.currentUser?.email || '';
-    }
-    // name uses live first/last from effect; no reset needed
-  }
+	function startEditing(section: 'password' | 'name' | 'email') {
+		editing = section;
+		error = '';
+		success = '';
+		if (section === 'password') {
+			oldPassword = '';
+			newPassword = '';
+			confirmNewPassword = '';
+		} else if (section === 'email') {
+			newEmail = auth.currentUser?.email || '';
+		}
+		// name uses live first/last from effect; no reset needed
+	}
 
-  function cancelEditing() {
-    editing = null;
-    error = '';
-    success = '';
-  }
+	function cancelEditing() {
+		editing = null;
+		error = '';
+		success = '';
+	}
 
-  // )=- Keep form values in sync if auth.currentUser updates externally (sync, force flags, other tabs).
-  // Skip overwriting the field the user is currently typing in.
-  $effect(() => {
-    if (auth.currentUser) {
-      firstName = auth.currentUser.firstName || '';
-      lastName = auth.currentUser.lastName || '';
-      if (editing !== 'email') {
-        newEmail = auth.currentUser.email || '';
-      }
-    }
-  });
+	// )=- Keep form values in sync if auth.currentUser updates externally (sync, force flags, other tabs).
+	// Skip overwriting the field the user is currently typing in.
+	$effect(() => {
+		if (auth.currentUser) {
+			firstName = auth.currentUser.firstName || '';
+			lastName = auth.currentUser.lastName || '';
+			if (editing !== 'email') {
+				newEmail = auth.currentUser.email || '';
+			}
+		}
+	});
 
-  // Handle camera photo upload (phone-friendly capture="user"). Triggered directly by pencil next to avatar.
-  async function handlePhoto(e: Event) {
-    const target = e.target as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file || !auth.currentUser) return;
+	// Handle camera photo upload (phone-friendly capture="user"). Triggered directly by pencil next to avatar.
+	async function handlePhoto(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file || !auth.currentUser) return;
 
-    loading = true;
-    error = '';
-    success = '';
+		loading = true;
+		error = '';
+		success = '';
 
-    try {
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-        const dataUrl = ev.target?.result as string;
-        await updateUser(auth.currentUser!.id!, {
-          photo: dataUrl,
-          forcePhotoUpdate: false,
-        });
-        // Update in-memory for immediate UI feedback (sync happens via updateUser queue + dataUrlToBlob in pb sync)
-        auth.currentUser!.photo = dataUrl;
-        auth.currentUser!.forcePhotoUpdate = false;
-        success = 'Photo updated (syncs when online)';
-        editing = null;
-        loading = false;
-      };
-      reader.readAsDataURL(file);
-    } catch (e: any) {
-      error = e.message || 'Failed to process photo';
-      loading = false;
-    }
-  }
+		try {
+			const reader = new FileReader();
+			reader.onload = async (ev) => {
+				const dataUrl = ev.target?.result as string;
+				await updateUser(auth.currentUser!.id!, {
+					photo: dataUrl,
+					forcePhotoUpdate: false
+				});
+				// Update in-memory for immediate UI feedback (sync happens via updateUser queue + dataUrlToBlob in pb sync)
+				auth.currentUser!.photo = dataUrl;
+				auth.currentUser!.forcePhotoUpdate = false;
+				success = 'Photo updated (syncs when online)';
+				editing = null;
+				loading = false;
+			};
+			reader.readAsDataURL(file);
+		} catch (e: any) {
+			error = e.message || 'Failed to process photo';
+			loading = false;
+		}
+	}
 
-  function triggerCamera() {
-    photoInput?.click();
-  }
+	function triggerCamera() {
+		photoInput?.click();
+	}
 
-  // Change password on PB side (for email/password login only). Requires oldPassword. Direct (not via queue) for security.
-  // )=- Must resolve the real PocketBase record id (pbId) instead of the local Dexie id.
-  // Hybrid users (admin-created crew) keep a local UUID as .id but store the PB id in .pbId after email login.
-  // Using the wrong id here would target a non-existent record (or the wrong one), so the update would silently
-  // not affect the actual auth record even if no exception was thrown in some cases.
-  // This mirrors the realId resolution used in processSyncQueue for users updates.
-  // Only email/password sessions have a valid PB token for password self-service (PIN login removed).
-  async function changePassword() {
-    if (!oldPassword || !newPassword || newPassword.length < 8 || newPassword !== confirmNewPassword) {
-      error = 'Old password required. New password min 8 chars and must match.';
-      return;
-    }
-    if (!auth.currentUser) return;
+	// Change password on PB side (for email/password login only). Requires oldPassword. Direct (not via queue) for security.
+	// )=- Must resolve the real PocketBase record id (pbId) instead of the local Dexie id.
+	// Hybrid users (admin-created crew) keep a local UUID as .id but store the PB id in .pbId after email login.
+	// Using the wrong id here would target a non-existent record (or the wrong one), so the update would silently
+	// not affect the actual auth record even if no exception was thrown in some cases.
+	// This mirrors the realId resolution used in processSyncQueue for users updates.
+	// Only email/password sessions have a valid PB token for password self-service (PIN login removed).
+	async function changePassword() {
+		if (
+			!oldPassword ||
+			!newPassword ||
+			newPassword.length < 8 ||
+			newPassword !== confirmNewPassword
+		) {
+			error = 'Old password required. New password min 8 chars and must match.';
+			return;
+		}
+		if (!auth.currentUser) return;
 
-    // Resolve the actual PocketBase auth record id
-    const realId = auth.currentUser.pbId || auth.currentUser.id;
-    if (!realId) {
-      error = 'Unable to determine user record for password change.';
-      return;
-    }
+		// Resolve the actual PocketBase auth record id
+		const realId = auth.currentUser.pbId || auth.currentUser.id;
+		if (!realId) {
+			error = 'Unable to determine user record for password change.';
+			return;
+		}
 
-    // Password self-service requires an active PB auth session (the one that can supply oldPassword).
-    if (!pb.authStore.isValid) {
-      error = 'Password change requires you to be logged in with your email and current password. Please log in via email first, then return here to update your password.';
-      return;
-    }
+		// Password self-service requires an active PB auth session (the one that can supply oldPassword).
+		if (!pb.authStore.isValid) {
+			error =
+				'Password change requires you to be logged in with your email and current password. Please log in via email first, then return here to update your password.';
+			return;
+		}
 
-    loading = true;
-    error = '';
-    success = '';
+		loading = true;
+		error = '';
+		success = '';
 
-    try {
-      await pb.collection('users').update(realId, {
-        oldPassword,
-        password: newPassword,
-        passwordConfirm: newPassword,
-      });
-      success = 'Password changed (may need re-login with the new password)';
-      oldPassword = '';
-      newPassword = '';
-      confirmNewPassword = '';
-      editing = null;
-    } catch (e: any) {
-      console.error('Password change to PB failed:', e?.response?.data || e);
-      error = e?.response?.data?.oldPassword?.message
-        || e?.message
-        || 'Failed to change password. Check your current (old) password.';
-    } finally {
-      loading = false;
-    }
-  }
+		try {
+			await pb.collection('users').update(realId, {
+				oldPassword,
+				password: newPassword,
+				passwordConfirm: newPassword
+			});
+			success = 'Password changed (may need re-login with the new password)';
+			oldPassword = '';
+			newPassword = '';
+			confirmNewPassword = '';
+			editing = null;
+		} catch (e: any) {
+			console.error('Password change to PB failed:', e?.response?.data || e);
+			error =
+				e?.response?.data?.oldPassword?.message ||
+				e?.message ||
+				'Failed to change password. Check your current (old) password.';
+		} finally {
+			loading = false;
+		}
+	}
 
-  async function saveName() {
-    if (!auth.currentUser) return;
-    loading = true;
-    error = '';
-    success = '';
-    try {
-      await updateUser(auth.currentUser.id!, {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-      });
-      auth.currentUser.firstName = firstName.trim();
-      auth.currentUser.lastName = lastName.trim();
-      auth.currentUser.name = `${firstName.trim()} ${lastName.trim()}`.trim();
-      success = 'Name updated';
-      editing = null;
-    } catch (e: any) {
-      error = e.message || 'Failed to update name';
-    } finally {
-      loading = false;
-    }
-  }
+	async function saveName() {
+		if (!auth.currentUser) return;
+		loading = true;
+		error = '';
+		success = '';
+		try {
+			await updateUser(auth.currentUser.id!, {
+				firstName: firstName.trim(),
+				lastName: lastName.trim()
+			});
+			auth.currentUser.firstName = firstName.trim();
+			auth.currentUser.lastName = lastName.trim();
+			auth.currentUser.name = `${firstName.trim()} ${lastName.trim()}`.trim();
+			success = 'Name updated';
+			editing = null;
+		} catch (e: any) {
+			error = e.message || 'Failed to update name';
+		} finally {
+			loading = false;
+		}
+	}
 
-  // )=- saveEmail: Server-first validation for email changes.
-  // We call requestEmailChange FIRST (the only safe way on PB auth collections with confirmation enabled).
-  // This sends a real confirmation email (now that you have SMTP configured) to the new address.
-  // Only on success do we update the local Dexie record (so local state only reflects accepted requests).
-  // In local dev without mail we still have a fallback to direct update (with email + emailConfirm).
-  // )=- Polish: Added pending confirmation indicator + resend button next to email in the ID badge.
-  // Shows "pending confirmation" pill + resend when a change has been requested but not yet confirmed on server.
-  async function saveEmail() {
-    if (!auth.currentUser) return;
-    const trimmed = (newEmail || '').trim();
-    if (!trimmed || !trimmed.includes('@')) {
-      error = 'Enter a valid email address';
-      return;
-    }
+	// )=- saveEmail: Server-first validation for email changes.
+	// We call requestEmailChange FIRST (the only safe way on PB auth collections with confirmation enabled).
+	// This sends a real confirmation email (now that you have SMTP configured) to the new address.
+	// Only on success do we update the local Dexie record (so local state only reflects accepted requests).
+	// In local dev without mail we still have a fallback to direct update (with email + emailConfirm).
+	// )=- Polish: Added pending confirmation indicator + resend button next to email in the ID badge.
+	// Shows "pending confirmation" pill + resend when a change has been requested but not yet confirmed on server.
+	async function saveEmail() {
+		if (!auth.currentUser) return;
+		const trimmed = (newEmail || '').trim();
+		if (!trimmed || !trimmed.includes('@')) {
+			error = 'Enter a valid email address';
+			return;
+		}
 
-    const currentEmail = (auth.currentUser.email || '').trim().toLowerCase();
-    if (trimmed.toLowerCase() === currentEmail) {
-      error = 'New email must be different from your current email.';
-      return;
-    }
+		const currentEmail = (auth.currentUser.email || '').trim().toLowerCase();
+		if (trimmed.toLowerCase() === currentEmail) {
+			error = 'New email must be different from your current email.';
+			return;
+		}
 
-    // Best-effort client-side duplicate check (Dexie may be incomplete until pull).
-    const existingWithEmail = await db.users.where('email').equalsIgnoreCase(trimmed).first();
-    if (existingWithEmail && existingWithEmail.id !== auth.currentUser.id) {
-      error = 'This email is already used by another account (local data). Choose a different one.';
-      return;
-    }
+		// Best-effort client-side duplicate check (Dexie may be incomplete until pull).
+		const existingWithEmail = await db.users.where('email').equalsIgnoreCase(trimmed).first();
+		if (existingWithEmail && existingWithEmail.id !== auth.currentUser.id) {
+			error = 'This email is already used by another account (local data). Choose a different one.';
+			return;
+		}
 
-    loading = true;
-    error = '';
-    success = '';
+		loading = true;
+		error = '';
+		success = '';
 
-    const hadValidSession = navigator.onLine && pb.authStore.isValid;
-    const isLocalDev = import.meta.env.DEV || 
-                       (pb.baseUrl || '').includes('localhost') || 
-                       (pb.baseUrl || '').includes('127.0.0.1');
+		const hadValidSession = navigator.onLine && pb.authStore.isValid;
+		const isLocalDev =
+			import.meta.env.DEV ||
+			(pb.baseUrl || '').includes('localhost') ||
+			(pb.baseUrl || '').includes('127.0.0.1');
 
-    try {
-      if (hadValidSession) {
-        let usedDevFallback = false;
+		try {
+			if (hadValidSession) {
+				let usedDevFallback = false;
 
-        try {
-          // Preferred path: official confirmation flow
-          await pb.collection('users').requestEmailChange(trimmed);
-        } catch (reqErr: any) {
-          if (isLocalDev) {
-            // On local dev without mail server configured, PocketBase can't send the confirmation.
-            // Fall back to direct update so you can still test the full profile/email UI flow, local Dexie state,
-            // badge display, etc. This is dev-only.
-            console.warn('[DEV] requestEmailChange failed (no mail server). Attempting direct update...');
-            usedDevFallback = true;
-            const realId = auth.currentUser.pbId || auth.currentUser.id;
-            try {
-              await pb.collection('users').update(realId, {
-                email: trimmed,
-                emailConfirm: trimmed
-              });
-            } catch (directErr: any) {
-              console.warn('[DEV] Direct email update also failed (this is expected if the users collection has "Confirm email change" enabled or email field updates are restricted for regular users):', directErr?.response?.data || directErr);
-              // Still continue to update local Dexie below so the profile badge and app state work for testing.
-            }
-          } else {
-            throw reqErr;
-          }
-        }
+				try {
+					// Preferred path: official confirmation flow
+					await pb.collection('users').requestEmailChange(trimmed);
+				} catch (reqErr: any) {
+					if (isLocalDev) {
+						// On local dev without mail server configured, PocketBase can't send the confirmation.
+						// Fall back to direct update so you can still test the full profile/email UI flow, local Dexie state,
+						// badge display, etc. This is dev-only.
+						console.warn(
+							'[DEV] requestEmailChange failed (no mail server). Attempting direct update...'
+						);
+						usedDevFallback = true;
+						const realId = auth.currentUser.pbId || auth.currentUser.id;
+						try {
+							await pb.collection('users').update(realId, {
+								email: trimmed,
+								emailConfirm: trimmed
+							});
+						} catch (directErr: any) {
+							console.warn(
+								'[DEV] Direct email update also failed (this is expected if the users collection has "Confirm email change" enabled or email field updates are restricted for regular users):',
+								directErr?.response?.data || directErr
+							);
+							// Still continue to update local Dexie below so the profile badge and app state work for testing.
+						}
+					} else {
+						throw reqErr;
+					}
+				}
 
-        // Server (or dev fallback) accepted → update local Dexie
-        await db.users.update(auth.currentUser.id!, {
-          email: trimmed,
-          updatedAt: new Date(),
-        });
-        auth.currentUser.email = trimmed;
+				// Server (or dev fallback) accepted → update local Dexie
+				await db.users.update(auth.currentUser.id!, {
+					email: trimmed,
+					updatedAt: new Date()
+				});
+				auth.currentUser.email = trimmed;
 
-        if (usedDevFallback) {
-          success = 'Email updated (local dev mode - direct update, no confirmation email was sent or required).';
-          pendingEmailChange = null; // no confirmation pending for direct dev update
-        } else {
-          success = 'Email change requested successfully. A confirmation link has been sent to the new address. The server-side record will update only after you confirm it.';
-          pendingEmailChange = trimmed; // show pending pill + resend until user confirms via email link
-        }
-      } else if (navigator.onLine) {
-        // No active PB email session. Update local only (user must have email/password login to do full server email change).
-        await db.users.update(auth.currentUser.id!, {
-          email: trimmed,
-          updatedAt: new Date(),
-        });
-        auth.currentUser.email = trimmed;
-        success = 'Email updated locally. Log in with your email + password (using the new address) to initiate the server change via confirmation.';
-      } else {
-        // Offline: local only
-        await db.users.update(auth.currentUser.id!, {
-          email: trimmed,
-          updatedAt: new Date(),
-        });
-        auth.currentUser.email = trimmed;
-        success = 'Email updated locally (offline). Will sync when back online.';
-      }
+				if (usedDevFallback) {
+					success =
+						'Email updated (local dev mode - direct update, no confirmation email was sent or required).';
+					pendingEmailChange = null; // no confirmation pending for direct dev update
+				} else {
+					success =
+						'Email change requested successfully. A confirmation link has been sent to the new address. The server-side record will update only after you confirm it.';
+					pendingEmailChange = trimmed; // show pending pill + resend until user confirms via email link
+				}
+			} else if (navigator.onLine) {
+				// No active PB email session. Update local only (user must have email/password login to do full server email change).
+				await db.users.update(auth.currentUser.id!, {
+					email: trimmed,
+					updatedAt: new Date()
+				});
+				auth.currentUser.email = trimmed;
+				success =
+					'Email updated locally. Log in with your email + password (using the new address) to initiate the server change via confirmation.';
+			} else {
+				// Offline: local only
+				await db.users.update(auth.currentUser.id!, {
+					email: trimmed,
+					updatedAt: new Date()
+				});
+				auth.currentUser.email = trimmed;
+				success = 'Email updated locally (offline). Will sync when back online.';
+			}
 
-      editing = null;
-    } catch (e: any) {
-      console.error('saveEmail / requestEmailChange failed:', e);
-      const data = e?.response?.data;
-      // Force stringification so you (and we) can see the exact content instead of just "[Object]"
-      const dataStr = data ? JSON.stringify(data, null, 2) : '{}';
-      console.error('PocketBase response data:', dataStr);
+			editing = null;
+		} catch (e: any) {
+			console.error('saveEmail / requestEmailChange failed:', e);
+			const data = e?.response?.data;
+			// Force stringification so you (and we) can see the exact content instead of just "[Object]"
+			const dataStr = data ? JSON.stringify(data, null, 2) : '{}';
+			console.error('PocketBase response data:', dataStr);
 
-      // Build the best possible message for the user
-      const pbMessage = data?.email?.message 
-        || data?.message 
-        || e?.response?.message 
-        || e?.message 
-        || 'Failed to request email change.';
+			// Build the best possible message for the user
+			const pbMessage =
+				data?.email?.message ||
+				data?.message ||
+				e?.response?.message ||
+				e?.message ||
+				'Failed to request email change.';
 
-      let msg = `Server rejected email change: ${pbMessage.replace(/\.$/, '')}.`;
+			let msg = `Server rejected email change: ${pbMessage.replace(/\.$/, '')}.`;
 
-      // Append the raw details so the real reason is visible in the red banner
-      if (dataStr && dataStr !== '{}') {
-        msg += ` PB raw response: ${dataStr}`;
-      }
+			// Append the raw details so the real reason is visible in the red banner
+			if (dataStr && dataStr !== '{}') {
+				msg += ` PB raw response: ${dataStr}`;
+			}
 
-      // Helpful context (especially useful on local dev where you hit the fallback)
-      msg += ' (This usually means the email field requires both `email` and `emailConfirm` to match for direct updates on auth collections, or the value conflicts with an existing record.)';
+			// Helpful context (especially useful on local dev where you hit the fallback)
+			msg +=
+				' (This usually means the email field requires both `email` and `emailConfirm` to match for direct updates on auth collections, or the value conflicts with an existing record.)';
 
-      error = msg;
-    } finally {
-      loading = false;
-    }
+			error = msg;
+		} finally {
+			loading = false;
+		}
 
-    // Extra safety: if we somehow still have a stale newEmail after failure, the input will still show what the user typed
-    // so they can easily correct it.
-  }
+		// Extra safety: if we somehow still have a stale newEmail after failure, the input will still show what the user typed
+		// so they can easily correct it.
+	}
 
-  // )=- Resend the confirmation email for a pending email change (calls requestEmailChange again with the same target).
-  // Useful if the user didn't receive the first email or the link expired. Only shown when pendingEmailChange is set.
-  async function resendEmailConfirmation() {
-    if (!pendingEmailChange || !auth.currentUser || !pb.authStore.isValid) return;
+	// )=- Resend the confirmation email for a pending email change (calls requestEmailChange again with the same target).
+	// Useful if the user didn't receive the first email or the link expired. Only shown when pendingEmailChange is set.
+	async function resendEmailConfirmation() {
+		if (!pendingEmailChange || !auth.currentUser || !pb.authStore.isValid) return;
 
-    loading = true;
-    error = '';
-    success = '';
+		loading = true;
+		error = '';
+		success = '';
 
-    try {
-      await pb.collection('users').requestEmailChange(pendingEmailChange);
-      success = `Confirmation re-sent to ${pendingEmailChange}. Check the new inbox.`;
-    } catch (e: any) {
-      error = e.message || 'Failed to resend confirmation email.';
-    } finally {
-      loading = false;
-    }
-  }
+		try {
+			await pb.collection('users').requestEmailChange(pendingEmailChange);
+			success = `Confirmation re-sent to ${pendingEmailChange}. Check the new inbox.`;
+		} catch (e: any) {
+			error = e.message || 'Failed to resend confirmation email.';
+		} finally {
+			loading = false;
+		}
+	}
 </script>
 
 <div class="profile-page">
-  {#if auth.currentUser}
-    <!-- )=- ID-badge card (BEM). Right-aligned pencils on Name/Email, labels present.
+	{#if auth.currentUser}
+		<!-- )=- ID-badge card (BEM). Right-aligned pencils on Name/Email, labels present.
          Security now only has "Update Password" (PIN login option fully removed).
          Avatar pencil kept overlaid on photo. All buttons icon-only. -->
-    <div class="profile__badge">
-      <!-- Avatar / photo with pencil edit icon next to it (overlay style for badge look) -->
-      <div class="profile__badge-photo">
-        {#if auth.currentUser.photo}
-          <!-- )=- Normalize here too for consistency (fixes potential 404 if photo is bare filename). -->
-          <img src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)} alt="ID photo" class="profile__badge-img" />
-        {:else}
-          <div class="profile__badge-placeholder">
-            {(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0, 1).toUpperCase()}
-          </div>
-        {/if}
-        <!-- Pencil edit icon directly for avatar/photo. Triggers camera input (no text, title only). -->
-        <button
-          class="profile__edit-btn profile__edit-btn--photo"
-          onclick={triggerCamera}
-          title="Edit photo"
-          disabled={loading}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-        </button>
-        <input
-          bind:this={photoInput}
-          type="file"
-          accept="image/*"
-          capture="user"
-          style="display:none"
-          onchange={handlePhoto}
-        />
-      </div>
+		<div class="profile__badge">
+			<!-- Avatar / photo with pencil edit icon next to it (overlay style for badge look) -->
+			<div class="profile__badge-photo">
+				{#if auth.currentUser.photo}
+					<!-- )=- Normalize here too for consistency (fixes potential 404 if photo is bare filename). -->
+					<img
+						src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+						alt="ID photo"
+						class="profile__badge-img"
+					/>
+				{:else}
+					<div class="profile__badge-placeholder">
+						{(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0, 1).toUpperCase()}
+					</div>
+				{/if}
+				<!-- Pencil edit icon directly for avatar/photo. Triggers camera input (no text, title only). -->
+				<button
+					class="profile__edit-btn profile__edit-btn--photo"
+					onclick={triggerCamera}
+					title="Edit photo"
+					disabled={loading}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="13"
+						height="13"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+					>
+				</button>
+				<input
+					bind:this={photoInput}
+					type="file"
+					accept="image/*"
+					capture="user"
+					style="display:none"
+					onchange={handlePhoto}
+				/>
+			</div>
 
-      <!-- Badge body with labeled fields (BEM). Name & Email rows have right-aligned edit buttons.
+			<!-- Badge body with labeled fields (BEM). Name & Email rows have right-aligned edit buttons.
            Avatar pencil overlay remains in its original position on the photo. Role is labeled but static. -->
-      <div class="profile__badge-body">
-        <!-- Name field: label + value (or inputs in edit). Pencil right-aligned. -->
-        <div class="profile__badge-field">
-          {#if editing === 'name'}
-            <div class="profile__field-main">
-              <span class="profile__badge-label">Name</span>
-              <div class="profile__inline-edit">
-                <input type="text" bind:value={firstName} placeholder="First" class="profile__input" />
-                <input type="text" bind:value={lastName} placeholder="Last" class="profile__input" />
-              </div>
-            </div>
-            <div class="profile__field-actions">
-              <button onclick={saveName} disabled={loading} class="profile__icon-btn" title="Save name">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              </button>
-              <button onclick={cancelEditing} class="profile__icon-btn profile__icon-btn--cancel" title="Cancel">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
-            </div>
-          {:else}
-            <div class="profile__field-main">
-              <span class="profile__badge-label">Name</span>
-              <span class="profile__badge-value profile__badge-value--name">
-                {auth.currentUser.firstName || ''} {auth.currentUser.lastName || ''}
-              </span>
-            </div>
-            <button
-              class="profile__edit-btn"
-              onclick={() => startEditing('name')}
-              title="Edit name"
-              disabled={loading}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-          {/if}
-        </div>
+			<div class="profile__badge-body">
+				<!-- Name field: label + value (or inputs in edit). Pencil right-aligned. -->
+				<div class="profile__badge-field">
+					{#if editing === 'name'}
+						<div class="profile__field-main">
+							<span class="profile__badge-label">Name</span>
+							<div class="profile__inline-edit">
+								<input
+									type="text"
+									bind:value={firstName}
+									placeholder="First"
+									class="profile__input"
+								/>
+								<input
+									type="text"
+									bind:value={lastName}
+									placeholder="Last"
+									class="profile__input"
+								/>
+							</div>
+						</div>
+						<div class="profile__field-actions">
+							<button
+								onclick={saveName}
+								disabled={loading}
+								class="profile__icon-btn"
+								title="Save name"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="3"
+									stroke-linecap="round"
+									stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg
+								>
+							</button>
+							<button
+								onclick={cancelEditing}
+								class="profile__icon-btn profile__icon-btn--cancel"
+								title="Cancel"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="3"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
+									></line></svg
+								>
+							</button>
+						</div>
+					{:else}
+						<div class="profile__field-main">
+							<span class="profile__badge-label">Name</span>
+							<span class="profile__badge-value profile__badge-value--name">
+								{auth.currentUser.firstName || ''}
+								{auth.currentUser.lastName || ''}
+							</span>
+						</div>
+						<button
+							class="profile__edit-btn"
+							onclick={() => startEditing('name')}
+							title="Edit name"
+							disabled={loading}
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="13"
+								height="13"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.5"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+							>
+						</button>
+					{/if}
+				</div>
 
-        <!-- Email field: label + value. Right-aligned pencil (enables email self-update). -->
-        <div class="profile__badge-field">
-          {#if editing === 'email'}
-            <div class="profile__field-main">
-              <span class="profile__badge-label">Email</span>
-              <div class="profile__inline-edit">
-                <input type="email" bind:value={newEmail} placeholder="name@example.com" class="profile__input profile__input--email" />
-              </div>
-              <p class="profile__email-hint">
-                Uses PocketBase's <strong>requestEmailChange</strong>.<br>
-                A confirmation link will be sent to the <em>new</em> email address. The PB record only updates after you click it.<br>
-                <strong>Tip for testing:</strong> Enter a real email address you can access (so you receive the confirmation).<br>
-                <strong>Common failure:</strong> the new email is already taken by another user in PocketBase.
-              </p>
-            </div>
-            <div class="profile__field-actions">
-              <button onclick={saveEmail} disabled={loading} class="profile__icon-btn" title="Save email">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              </button>
-              <button onclick={cancelEditing} class="profile__icon-btn profile__icon-btn--cancel" title="Cancel">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
-            </div>
-          {:else}
-            <div class="profile__field-main">
-              <span class="profile__badge-label">Email</span>
-              <span class="profile__badge-value profile__badge-value--email">
-                {auth.currentUser.email || '—'}
-              </span>
-              {#if pendingEmailChange}
-                <span class="profile__pending-pill">pending confirmation</span>
-                <button
-                  class="profile__resend-btn"
-                  onclick={resendEmailConfirmation}
-                  disabled={loading}
-                  title="Resend confirmation to the new address"
-                >
-                  resend
-                </button>
-              {/if}
-            </div>
-            <button
-              class="profile__edit-btn"
-              onclick={() => startEditing('email')}
-              title="Edit email"
-              disabled={loading}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-            </button>
-          {/if}
-        </div>
+				<!-- Email field: label + value. Right-aligned pencil (enables email self-update). -->
+				<div class="profile__badge-field">
+					{#if editing === 'email'}
+						<div class="profile__field-main">
+							<span class="profile__badge-label">Email</span>
+							<div class="profile__inline-edit">
+								<input
+									type="email"
+									bind:value={newEmail}
+									placeholder="name@example.com"
+									class="profile__input profile__input--email"
+								/>
+							</div>
+							<p class="profile__email-hint">
+								Uses PocketBase's <strong>requestEmailChange</strong>.<br />
+								A confirmation link will be sent to the <em>new</em> email address. The PB record
+								only updates after you click it.<br />
+								<strong>Tip for testing:</strong> Enter a real email address you can access (so you
+								receive the confirmation).<br />
+								<strong>Common failure:</strong> the new email is already taken by another user in PocketBase.
+							</p>
+						</div>
+						<div class="profile__field-actions">
+							<button
+								onclick={saveEmail}
+								disabled={loading}
+								class="profile__icon-btn"
+								title="Save email"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="3"
+									stroke-linecap="round"
+									stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg
+								>
+							</button>
+							<button
+								onclick={cancelEditing}
+								class="profile__icon-btn profile__icon-btn--cancel"
+								title="Cancel"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="3"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
+									></line></svg
+								>
+							</button>
+						</div>
+					{:else}
+						<div class="profile__field-main">
+							<span class="profile__badge-label">Email</span>
+							<span class="profile__badge-value profile__badge-value--email">
+								{auth.currentUser.email || '—'}
+							</span>
+							{#if pendingEmailChange}
+								<span class="profile__pending-pill">pending confirmation</span>
+								<button
+									class="profile__resend-btn"
+									onclick={resendEmailConfirmation}
+									disabled={loading}
+									title="Resend confirmation to the new address"
+								>
+									resend
+								</button>
+							{/if}
+						</div>
+						<button
+							class="profile__edit-btn"
+							onclick={() => startEditing('email')}
+							title="Edit email"
+							disabled={loading}
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="13"
+								height="13"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.5"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+							>
+						</button>
+					{/if}
+				</div>
 
-        <!-- Role (labeled, static, no edit button) -->
-        <div class="profile__badge-field profile__badge-field--static">
-          <div class="profile__field-main">
-            <span class="profile__badge-label">Role</span>
-            <span class="profile__badge-value profile__badge-value--role">
-              {auth.currentUser.role}
-            </span>
-            {#if auth.currentUser.forcePhotoUpdate}<span class="profile__force">Photo required</span>{/if}
-          </div>
-        </div>
-      </div>
-    </div>
+				<!-- Role (labeled, static, no edit button) -->
+				<div class="profile__badge-field profile__badge-field--static">
+					<div class="profile__field-main">
+						<span class="profile__badge-label">Role</span>
+						<span class="profile__badge-value profile__badge-value--role">
+							{auth.currentUser.role}
+						</span>
+						{#if auth.currentUser.forcePhotoUpdate}<span class="profile__force">Photo required</span
+							>{/if}
+					</div>
+				</div>
+			</div>
+		</div>
 
-    <!-- )=- Security section (BEM). Only password remains (PIN login removed entirely).
+		<!-- )=- Security section (BEM). Only password remains (PIN login removed entirely).
          Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
-    <div class="profile__security">
-      <div class="profile__security-item">
-        <span class="profile__security-label">Update Password</span>
-        <button
-          class="profile__edit-btn"
-          onclick={() => startEditing('password')}
-          title="Update Password"
-          disabled={loading || (editing !== null && editing !== 'password')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-        </button>
-      </div>
-    </div>
+		<div class="profile__security">
+			<div class="profile__security-item">
+				<span class="profile__security-label">Update Password</span>
+				<button
+					class="profile__edit-btn"
+					onclick={() => startEditing('password')}
+					title="Update Password"
+					disabled={loading || (editing !== null && editing !== 'password')}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.25"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+					>
+				</button>
+			</div>
+		</div>
 
-    <!-- Compact password form (icon-only save/cancel). Appears when the Update Password pencil is clicked. -->
-    {#if editing === 'password'}
-      <div class="profile__inline-form profile__inline-form--password">
-        <input type="password" bind:value={oldPassword} placeholder="Current" class="profile__input" />
-        <input type="password" bind:value={newPassword} placeholder="New (8+)" class="profile__input" />
-        <input type="password" bind:value={confirmNewPassword} placeholder="Confirm new" class="profile__input" />
-        <button onclick={changePassword} disabled={loading} class="profile__icon-btn" title="Save password">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </button>
-        <button onclick={cancelEditing} class="profile__icon-btn profile__icon-btn--cancel" title="Cancel">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
-      </div>
-    {/if}
+		<!-- Compact password form (icon-only save/cancel). Appears when the Update Password pencil is clicked. -->
+		{#if editing === 'password'}
+			<div class="profile__inline-form profile__inline-form--password">
+				<input
+					type="password"
+					bind:value={oldPassword}
+					placeholder="Current"
+					class="profile__input"
+				/>
+				<input
+					type="password"
+					bind:value={newPassword}
+					placeholder="New (8+)"
+					class="profile__input"
+				/>
+				<input
+					type="password"
+					bind:value={confirmNewPassword}
+					placeholder="Confirm new"
+					class="profile__input"
+				/>
+				<button
+					onclick={changePassword}
+					disabled={loading}
+					class="profile__icon-btn"
+					title="Save password"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="3"
+						stroke-linecap="round"
+						stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg
+					>
+				</button>
+				<button
+					onclick={cancelEditing}
+					class="profile__icon-btn profile__icon-btn--cancel"
+					title="Cancel"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="3"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
+						></line></svg
+					>
+				</button>
+			</div>
+		{/if}
 
-    {#if loading}<div class="profile__status">Saving...</div>{/if}
-    {#if error}<div class="profile__status profile__status--error">{error}</div>{/if}
-    {#if success}<div class="profile__status profile__status--success">{success}</div>{/if}
-  {:else}
-    <p>Please log in to manage your profile.</p>
-  {/if}
+		{#if loading}<div class="profile__status">Saving...</div>{/if}
+		{#if error}<div class="profile__status profile__status--error">{error}</div>{/if}
+		{#if success}<div class="profile__status profile__status--success">{success}</div>{/if}
+	{:else}
+		<p>Please log in to manage your profile.</p>
+	{/if}
 </div>
 
 <style>
-  /* )=- Full BEM-polished styling for the profile ID badge page.
+	/* )=- Full BEM-polished styling for the profile ID badge page.
      - Right-aligned edit pencils on Name and Email field rows (via flex:1 main + trailing actions).
      - Avatar pencil stays overlaid on the photo (classic badge affordance).
      - Explicit labels for Name, Email, Role using .profile__badge-label.
@@ -526,315 +719,317 @@
      - All buttons are icon-only. Consistent spacing and touch targets.
      )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 
-  .profile-page {
-    padding: 1rem;
-    max-width: 440px;
-    margin: 0 auto;
-  }
+	.profile-page {
+		padding: 1rem;
+		max-width: 440px;
+		margin: 0 auto;
+	}
 
-  /* === ID BADGE CARD === */
-  .profile__badge {
-    display: flex;
-    gap: 0.85rem;
-    background: linear-gradient(155deg, #f8fafc 0%, #ffffff 100%);
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    padding: 0.7rem;
-    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
-    margin-bottom: 0.75rem;
-  }
+	/* === ID BADGE CARD === */
+	.profile__badge {
+		display: flex;
+		gap: 0.85rem;
+		background: linear-gradient(155deg, #f8fafc 0%, #ffffff 100%);
+		border: 1px solid #cbd5e1;
+		border-radius: 10px;
+		padding: 0.7rem;
+		box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
+		margin-bottom: 0.75rem;
+	}
 
-  .profile__badge-photo {
-    position: relative;
-    width: 72px;
-    height: 72px;
-    flex-shrink: 0;
-  }
+	.profile__badge-photo {
+		position: relative;
+		width: 72px;
+		height: 72px;
+		flex-shrink: 0;
+	}
 
-  .profile__badge-img,
-  .profile__badge-placeholder {
-    width: 100%;
-    height: 100%;
-    border-radius: 8px;
-    object-fit: cover;
-    border: 1px solid #e2e8f0;
-    background: #e2e8f0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #475569;
-  }
+	.profile__badge-img,
+	.profile__badge-placeholder {
+		width: 100%;
+		height: 100%;
+		border-radius: 8px;
+		object-fit: cover;
+		border: 1px solid #e2e8f0;
+		background: #e2e8f0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #475569;
+	}
 
-  /* Pencil stays overlaid bottom-right of the avatar (kept in place) */
-  .profile__edit-btn--photo {
-    position: absolute;
-    bottom: -2px;
-    right: -2px;
-    background: #ffffff;
-    border: 1px solid #94a3b8;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  }
+	/* Pencil stays overlaid bottom-right of the avatar (kept in place) */
+	.profile__edit-btn--photo {
+		position: absolute;
+		bottom: -2px;
+		right: -2px;
+		background: #ffffff;
+		border: 1px solid #94a3b8;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+	}
 
-  .profile__badge-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
+	.profile__badge-body {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
 
-  /* Field row: main content (label + value or inputs) takes remaining space;
+	/* Field row: main content (label + value or inputs) takes remaining space;
      edit button / actions are right-aligned by coming after the flex-1 element. */
-  .profile__badge-field {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding-bottom: 0.35rem;
-  }
-  .profile__badge-field:not(.profile__badge-field--static) {
-    border-bottom: 1px solid #f1f5f9;
-  }
+	.profile__badge-field {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		padding-bottom: 0.35rem;
+	}
+	.profile__badge-field:not(.profile__badge-field--static) {
+		border-bottom: 1px solid #f1f5f9;
+	}
 
-  .profile__field-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-  }
+	.profile__field-main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
 
-  .profile__badge-label {
-    font-size: 0.65rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.75px;
-    color: #64748b;
-    line-height: 1;
-  }
+	.profile__badge-label {
+		font-size: 0.65rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.75px;
+		color: #64748b;
+		line-height: 1;
+	}
 
-  .profile__badge-value {
-    font-size: 0.95rem;
-    color: #1e2937;
-    line-height: 1.15;
-    word-break: break-word;
-  }
-  .profile__badge-value--name {
-    font-weight: 600;
-    font-size: 1.05rem;
-  }
-  .profile__badge-value--email {
-    font-size: 0.85rem;
-    color: #475569;
-  }
-  .profile__badge-value--role {
-    font-size: 0.85rem;
-    text-transform: capitalize;
-  }
+	.profile__badge-value {
+		font-size: 0.95rem;
+		color: #1e2937;
+		line-height: 1.15;
+		word-break: break-word;
+	}
+	.profile__badge-value--name {
+		font-weight: 600;
+		font-size: 1.05rem;
+	}
+	.profile__badge-value--email {
+		font-size: 0.85rem;
+		color: #475569;
+	}
+	.profile__badge-value--role {
+		font-size: 0.85rem;
+		text-transform: capitalize;
+	}
 
-  .profile__force {
-    display: inline-block;
-    margin-top: 0.15rem;
-    font-size: 0.6rem;
-    background: #fef2f2;
-    color: #b91c1c;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-  }
+	.profile__force {
+		display: inline-block;
+		margin-top: 0.15rem;
+		font-size: 0.6rem;
+		background: #fef2f2;
+		color: #b91c1c;
+		padding: 1px 5px;
+		border-radius: 3px;
+		font-weight: 600;
+		letter-spacing: 0.3px;
+	}
 
-  /* Field actions container (holds save/cancel icon buttons when editing a field) */
-  .profile__field-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    flex-shrink: 0;
-  }
+	/* Field actions container (holds save/cancel icon buttons when editing a field) */
+	.profile__field-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-shrink: 0;
+	}
 
-  /* === EDIT BUTTONS (pure pencil icons, right-aligned for name/email) === */
-  .profile__edit-btn {
-    background: #e2e8f0;
-    border: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    color: #475569;
-    flex-shrink: 0;
-    padding: 0;
-    line-height: 0;
-    transition: background 0.1s ease, color 0.1s ease;
-  }
-  .profile__edit-btn:hover:not(:disabled) {
-    background: #cbd5e1;
-    color: #1e2937;
-  }
-  .profile__edit-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
+	/* === EDIT BUTTONS (pure pencil icons, right-aligned for name/email) === */
+	.profile__edit-btn {
+		background: #e2e8f0;
+		border: none;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		color: #475569;
+		flex-shrink: 0;
+		padding: 0;
+		line-height: 0;
+		transition:
+			background 0.1s ease,
+			color 0.1s ease;
+	}
+	.profile__edit-btn:hover:not(:disabled) {
+		background: #cbd5e1;
+		color: #1e2937;
+	}
+	.profile__edit-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
 
-  /* === INLINE EDITING (inside badge fields) === */
-  .profile__inline-edit {
-    display: flex;
-    gap: 0.3rem;
-    margin-top: 0.15rem;
-  }
+	/* === INLINE EDITING (inside badge fields) === */
+	.profile__inline-edit {
+		display: flex;
+		gap: 0.3rem;
+		margin-top: 0.15rem;
+	}
 
-  .profile__input {
-    flex: 1;
-    padding: 0.22rem 0.4rem;
-    border: 1px solid #94a3b8;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    min-width: 0;
-    background: #fff;
-  }
-  .profile__input:focus {
-    outline: none;
-    border-color: #64748b;
-    box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.15);
-  }
-  .profile__input--email {
-    font-size: 0.82rem;
-  }
+	.profile__input {
+		flex: 1;
+		padding: 0.22rem 0.4rem;
+		border: 1px solid #94a3b8;
+		border-radius: 4px;
+		font-size: 0.85rem;
+		min-width: 0;
+		background: #fff;
+	}
+	.profile__input:focus {
+		outline: none;
+		border-color: #64748b;
+		box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.15);
+	}
+	.profile__input--email {
+		font-size: 0.82rem;
+	}
 
-  /* === ICON ACTION BUTTONS (check / x — no text) === */
-  .profile__icon-btn {
-    background: #0f172a;
-    color: white;
-    border: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    padding: 0;
-    line-height: 0;
-    transition: background 0.1s ease;
-  }
-  .profile__icon-btn:hover:not(:disabled) {
-    background: #1e2937;
-  }
-  .profile__icon-btn--cancel {
-    background: #f1f5f9;
-    color: #475569;
-  }
-  .profile__icon-btn--cancel:hover:not(:disabled) {
-    background: #e2e8f0;
-  }
-  .profile__icon-btn:disabled {
-    opacity: 0.5;
-  }
+	/* === ICON ACTION BUTTONS (check / x — no text) === */
+	.profile__icon-btn {
+		background: #0f172a;
+		color: white;
+		border: none;
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		flex-shrink: 0;
+		padding: 0;
+		line-height: 0;
+		transition: background 0.1s ease;
+	}
+	.profile__icon-btn:hover:not(:disabled) {
+		background: #1e2937;
+	}
+	.profile__icon-btn--cancel {
+		background: #f1f5f9;
+		color: #475569;
+	}
+	.profile__icon-btn--cancel:hover:not(:disabled) {
+		background: #e2e8f0;
+	}
+	.profile__icon-btn:disabled {
+		opacity: 0.5;
+	}
 
-  /* === SECURITY SECTION (stacked, right-aligned pencils) === */
-  .profile__security {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    margin-bottom: 0.5rem;
-  }
+	/* === SECURITY SECTION (stacked, right-aligned pencils) === */
+	.profile__security {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		margin-bottom: 0.5rem;
+	}
 
-  .profile__security-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.15rem 0;
-  }
+	.profile__security-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.15rem 0;
+	}
 
-  .profile__security-label {
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: #475569;
-    letter-spacing: 0.2px;
-  }
+	.profile__security-label {
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: #475569;
+		letter-spacing: 0.2px;
+	}
 
-  /* === FORMS (compact, appear under security when a pencil is activated) === */
-  .profile__inline-form {
-    display: flex;
-    gap: 0.3rem;
-    align-items: center;
-    margin-bottom: 0.45rem;
-    padding: 0.35rem;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-  }
-  .profile__inline-form--password {
-    flex-wrap: wrap;
-  }
-  .profile__inline-form--password .profile__input {
-    flex: 1 1 32%;
-    min-width: 64px;
-  }
+	/* === FORMS (compact, appear under security when a pencil is activated) === */
+	.profile__inline-form {
+		display: flex;
+		gap: 0.3rem;
+		align-items: center;
+		margin-bottom: 0.45rem;
+		padding: 0.35rem;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+	}
+	.profile__inline-form--password {
+		flex-wrap: wrap;
+	}
+	.profile__inline-form--password .profile__input {
+		flex: 1 1 32%;
+		min-width: 64px;
+	}
 
-  /* === STATUS MESSAGES === */
-  .profile__status {
-    font-size: 0.78rem;
-    margin-top: 0.2rem;
-    color: #475569;
-  }
-  .profile__status--error {
-    color: #b91c1c;
-  }
-  .profile__status--success {
-    color: #166534;
-  }
+	/* === STATUS MESSAGES === */
+	.profile__status {
+		font-size: 0.78rem;
+		margin-top: 0.2rem;
+		color: #475569;
+	}
+	.profile__status--error {
+		color: #b91c1c;
+	}
+	.profile__status--success {
+		color: #166534;
+	}
 
-  /* Small explanatory text shown only while editing the email field */
-  .profile__email-hint {
-    font-size: 0.62rem;
-    color: #475569;
-    margin-top: 0.2rem;
-    line-height: 1.25;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 4px;
-    padding: 0.25rem 0.4rem;
-  }
+	/* Small explanatory text shown only while editing the email field */
+	.profile__email-hint {
+		font-size: 0.62rem;
+		color: #475569;
+		margin-top: 0.2rem;
+		line-height: 1.25;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 4px;
+		padding: 0.25rem 0.4rem;
+	}
 
-  /* )=- Pending confirmation pill + resend button shown next to email value in the ID badge
+	/* )=- Pending confirmation pill + resend button shown next to email value in the ID badge
      when a requestEmailChange has been issued but not yet confirmed on the PB server.
      BEM: profile__pending-pill, profile__resend-btn */
-  .profile__pending-pill {
-    font-size: 0.6rem;
-    background: #fef3c7;
-    color: #92400e;
-    padding: 1px 5px;
-    border-radius: 3px;
-    margin-left: 0.25rem;
-    vertical-align: middle;
-    font-weight: 500;
-  }
+	.profile__pending-pill {
+		font-size: 0.6rem;
+		background: #fef3c7;
+		color: #92400e;
+		padding: 1px 5px;
+		border-radius: 3px;
+		margin-left: 0.25rem;
+		vertical-align: middle;
+		font-weight: 500;
+	}
 
-  .profile__resend-btn {
-    font-size: 0.62rem;
-    background: none;
-    border: 1px solid #cbd5e1;
-    color: #475569;
-    padding: 1px 5px;
-    border-radius: 3px;
-    cursor: pointer;
-    margin-left: 0.25rem;
-    vertical-align: middle;
-  }
+	.profile__resend-btn {
+		font-size: 0.62rem;
+		background: none;
+		border: 1px solid #cbd5e1;
+		color: #475569;
+		padding: 1px 5px;
+		border-radius: 3px;
+		cursor: pointer;
+		margin-left: 0.25rem;
+		vertical-align: middle;
+	}
 
-  .profile__resend-btn:hover:not(:disabled) {
-    background: #f1f5f9;
-    color: #1e2937;
-  }
+	.profile__resend-btn:hover:not(:disabled) {
+		background: #f1f5f9;
+		color: #1e2937;
+	}
 
-  .profile__resend-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
+	.profile__resend-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
 </style>

@@ -24,8 +24,9 @@ export async function loginWithEmail(email: string, password: string) {
 		let existing = await db.users.where('email').equalsIgnoreCase(email).first();
 		if (!existing) {
 			const guess = email.split('@')[0];
-			existing = await db.users.where('firstName').equalsIgnoreCase(guess).first()
-				|| await db.users.where('name').equalsIgnoreCase(guess).first();
+			existing =
+				(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
+				(await db.users.where('name').equalsIgnoreCase(guess).first());
 		}
 		if (!existing && pbUser.id) {
 			existing = await db.users.where('pbId').equals(pbUser.id).first();
@@ -37,30 +38,49 @@ export async function loginWithEmail(email: string, password: string) {
 			// )=- pinHash/forcePinUpdate/verified kept only for backward compat with old Dexie data (PIN login removed).
 			localUser = {
 				...existing,
-				id: existing.id,  // keep local key
+				id: existing.id, // keep local key
 				pbId: pbUser.id,
-				firstName: pbUser.firstName || existing.firstName || (pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
-				lastName: pbUser.lastName || existing.lastName || (pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
-				name: pbUser.name || `${pbUser.firstName || existing.firstName || ''} ${pbUser.lastName || existing.lastName || ''}`.trim() || email.split('@')[0] || 'Admin',
+				firstName:
+					pbUser.firstName ||
+					existing.firstName ||
+					(pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
+				lastName:
+					pbUser.lastName ||
+					existing.lastName ||
+					(pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
+				name:
+					pbUser.name ||
+					`${pbUser.firstName || existing.firstName || ''} ${pbUser.lastName || existing.lastName || ''}`.trim() ||
+					email.split('@')[0] ||
+					'Admin',
 				pinHash: existing.pinHash || pbUser.pinHash || '',
 				role: pbUser.role || existing.role || 'admin',
 				// )=- Prefer local data: URL photo (from camera upload in /profile) over PB file reference for offline <img src> support.
 				// Only fall back to PB's photo value if no local data URL.
-				photo: (existing.photo && existing.photo.startsWith('data:')) ? existing.photo : (pbUser.photo || existing.photo),
+				photo:
+					existing.photo && existing.photo.startsWith('data:')
+						? existing.photo
+						: pbUser.photo || existing.photo,
 				active: pbUser.active ?? existing.active ?? true,
 				forcePinUpdate: pbUser.forcePinUpdate ?? existing.forcePinUpdate ?? false,
 				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? existing.forcePhotoUpdate ?? false,
 				verified: !!pbUser.verified,
 				createdAt: new Date(pbUser.created || pbUser.createdAt || existing.createdAt),
-				updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt),
+				updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt)
 			};
 		} else {
 			// Pure PB user: use PB id as Dexie key (original pattern)
 			localUser = {
 				id: pbUser.id,
-				firstName: pbUser.firstName || (pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
+				firstName:
+					pbUser.firstName ||
+					(pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
 				lastName: pbUser.lastName || (pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
-				name: pbUser.name || `${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() || email.split('@')[0] || 'Admin',
+				name:
+					pbUser.name ||
+					`${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() ||
+					email.split('@')[0] ||
+					'Admin',
 				pinHash: pbUser.pinHash || '',
 				role: pbUser.role || 'admin',
 				photo: pbUser.photo ? pbUser.photo : undefined,
@@ -69,13 +89,16 @@ export async function loginWithEmail(email: string, password: string) {
 				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
 				verified: !!pbUser.verified,
 				createdAt: new Date(pbUser.created || pbUser.createdAt),
-				updatedAt: new Date(pbUser.updated || pbUser.updatedAt),
+				updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
 			};
 		}
 
 		await db.users.put(localUser);
 		setCurrentUser(localUser);
-		console.log('✅ PB user synced to Dexie (merged if hybrid local record existed):', localUser.name);
+		console.log(
+			'✅ PB user synced to Dexie (merged if hybrid local record existed):',
+			localUser.name
+		);
 
 		// )=- Cleanup any duplicate records with the same email but different Dexie key (the old loginWithEmail always-put-pb-id logic + prior admin creation could leave a local-UUID record and a PB-id record).
 		// This cleans historical dups like the two Joe Poe in Dexie. UI loads also dedup now.
@@ -111,14 +134,14 @@ export async function loginWithEmail(email: string, password: string) {
 // Pull jobs from PocketBase (with conflict resolution)
 // line 79
 export async function pullJobsFromServer() {
-  if (!pb.authStore.isValid) return;
+	if (!pb.authStore.isValid) return;
 
-  // )=- Debounce to prevent log spam and excessive server calls from repeated effect triggers.
-  const now = Date.now();
-  if (now - (pullJobsFromServer as any)._lastCall < 800) return;
-  (pullJobsFromServer as any)._lastCall = now;
+	// )=- Debounce to prevent log spam and excessive server calls from repeated effect triggers.
+	const now = Date.now();
+	if (now - (pullJobsFromServer as any)._lastCall < 800) return;
+	(pullJobsFromServer as any)._lastCall = now;
 
-  try {
+	try {
 		const records = await pb.collection('jobs').getFullList({
 			sort: '-updatedAt',
 			// Removed expand: 'client' because the clients collection's rules only allow superusers for expand access (causing "only superusers can view collection \"clients\" records").
@@ -180,11 +203,11 @@ export async function pullJobsFromServer() {
 		}
 		// )=- Reduced log noise: only log when there are actual records. 0-job case was spamming console.
 	} catch (err: any) {
-    // Only log real errors, not auto-cancellations
-    if (err?.status !== 0) {
-      console.error('Pull jobs failed', err);
-    }
-  }
+		// Only log real errors, not auto-cancellations
+		if (err?.status !== 0) {
+			console.error('Pull jobs failed', err);
+		}
+	}
 }
 
 // Pull clients from PocketBase and merge into Dexie
@@ -300,8 +323,12 @@ export async function pullInvoicesFromServer() {
 					billableItems: rec.billableItems || [],
 					notes: rec.notes || '',
 					importSource: rec.importSource || undefined,
-					primaryInvoiceFile: rec.primaryInvoiceFile ? { filename: rec.primaryInvoiceFile } : undefined,
-					supportingDocuments: (rec.supportingDocuments || []).map((f: any) => ({ filename: typeof f === 'string' ? f : f.filename })),
+					primaryInvoiceFile: rec.primaryInvoiceFile
+						? { filename: rec.primaryInvoiceFile }
+						: undefined,
+					supportingDocuments: (rec.supportingDocuments || []).map((f: any) => ({
+						filename: typeof f === 'string' ? f : f.filename
+					})),
 					createdAt: new Date(rec.created || rec.createdAt),
 					updatedAt: new Date(rec.updated || rec.updatedAt)
 				};
@@ -326,7 +353,9 @@ export async function pullInvoicesFromServer() {
 			}
 		}
 
-		console.log(`✅ Pulled and merged ${totalPulled} invoices. Deleted ${totalDeleted} from Dexie.`);
+		console.log(
+			`✅ Pulled and merged ${totalPulled} invoices. Deleted ${totalDeleted} from Dexie.`
+		);
 	} catch (err) {
 		console.error('❌ Pull invoices failed:', err);
 	}
@@ -349,43 +378,52 @@ export async function pullUsersFromServer(force = false) {
 	if (!force && rosterPullAttemptedThisSession) return;
 	rosterPullAttemptedThisSession = true;
 
-	// @ts-ignore
 	if ((pullUsersFromServer as any)._inFlight) return;
-	// @ts-ignore
 	(pullUsersFromServer as any)._inFlight = true;
 
 	const currentAuth = pb.authStore.model;
 	if (!currentAuth || currentAuth.role !== 'admin') {
-		// @ts-ignore
 		(pullUsersFromServer as any)._inFlight = false;
 		return;
 	}
 
 	// Always ensure the currently authenticated admin is in Dexie with up-to-date server data.
 	try {
-		const existingSelf = await db.users.where('pbId').equals(currentAuth.id).first()
-			|| (currentAuth.id ? await db.users.get(currentAuth.id) : null);
+		const existingSelf =
+			(await db.users.where('pbId').equals(currentAuth.id).first()) ||
+			(currentAuth.id ? await db.users.get(currentAuth.id) : null);
 
 		const nameForSplit = currentAuth.name || '';
 		const computedFirst = currentAuth.firstName || (nameForSplit ? nameForSplit.split(' ')[0] : '');
-		const computedLast = currentAuth.lastName || (nameForSplit ? nameForSplit.split(' ').slice(1).join(' ') : '');
+		const computedLast =
+			currentAuth.lastName || (nameForSplit ? nameForSplit.split(' ').slice(1).join(' ') : '');
 
 		const selfUser = {
 			id: existingSelf?.id || currentAuth.id,
 			pbId: currentAuth.id,
 			firstName: computedFirst,
 			lastName: computedLast,
-			name: currentAuth.name || `${computedFirst} ${computedLast}`.trim() || (currentAuth.email ? currentAuth.email.split('@')[0] : 'Admin'),
-			pinHash: currentAuth.id ? (currentAuth.pinHash || (existingSelf?.pinHash || '')) : '',
+			name:
+				currentAuth.name ||
+				`${computedFirst} ${computedLast}`.trim() ||
+				(currentAuth.email ? currentAuth.email.split('@')[0] : 'Admin'),
+			pinHash: currentAuth.id ? currentAuth.pinHash || existingSelf?.pinHash || '' : '',
 			email: currentAuth.email || '',
 			role: currentAuth.role || 'admin',
-			photo: (existingSelf?.photo && existingSelf.photo.startsWith('data:')) ? existingSelf.photo : (currentAuth.photo || existingSelf?.photo),
+			photo:
+				existingSelf?.photo && existingSelf.photo.startsWith('data:')
+					? existingSelf.photo
+					: currentAuth.photo || existingSelf?.photo,
 			active: currentAuth.active ?? true,
 			forcePinUpdate: existingSelf?.forcePinUpdate ?? currentAuth.forcePinUpdate ?? false,
 			forcePhotoUpdate: currentAuth.forcePhotoUpdate ?? false,
 			verified: !!currentAuth.verified,
-			createdAt: new Date(currentAuth.created || currentAuth.createdAt || existingSelf?.createdAt || Date.now()),
-			updatedAt: new Date(currentAuth.updated || currentAuth.updatedAt || existingSelf?.updatedAt || Date.now()),
+			createdAt: new Date(
+				currentAuth.created || currentAuth.createdAt || existingSelf?.createdAt || Date.now()
+			),
+			updatedAt: new Date(
+				currentAuth.updated || currentAuth.updatedAt || existingSelf?.updatedAt || Date.now()
+			)
 		};
 
 		await db.users.put(selfUser);
@@ -403,7 +441,7 @@ export async function pullUsersFromServer(force = false) {
 		while (page <= totalPages) {
 			const result = await pb.collection('users').getList(page, PAGE_SIZE, {
 				sort: '-updatedAt',
-				$autoCancel: false,
+				$autoCancel: false
 			});
 
 			totalPages = result.totalPages;
@@ -419,16 +457,17 @@ export async function pullUsersFromServer(force = false) {
 					firstName: rec.firstName || '',
 					lastName: rec.lastName || '',
 					name: rec.name || `${rec.firstName || ''} ${rec.lastName || ''}`.trim(),
-					pinHash: rec.id === currentAuth.id ? (rec.pinHash || (existingLocal?.pinHash || '')) : '',
+					pinHash: rec.id === currentAuth.id ? rec.pinHash || existingLocal?.pinHash || '' : '',
 					email: rec.email || existingLocal?.email || '',
 					role: rec.role || 'crew',
-					photo: rec.photo || (existingLocal?.photo || ''),
+					photo: rec.photo || existingLocal?.photo || '',
 					active: rec.active ?? true,
 					forcePinUpdate: existingLocal?.forcePinUpdate ?? false,
 					forcePhotoUpdate: rec.forcePhotoUpdate ?? false,
-					verified: typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
+					verified:
+						typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
 					createdAt: new Date(rec.created || rec.createdAt),
-					updatedAt: new Date(rec.updated || rec.updatedAt),
+					updatedAt: new Date(rec.updated || rec.updatedAt)
 				};
 
 				const localUser = await db.users.get(serverUser.id);
@@ -464,7 +503,6 @@ export async function pullUsersFromServer(force = false) {
 			}
 		}
 	} finally {
-		// @ts-ignore
 		(pullUsersFromServer as any)._inFlight = false;
 	}
 }

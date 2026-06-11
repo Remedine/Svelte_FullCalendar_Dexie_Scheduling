@@ -3,11 +3,14 @@
 	import { type Job, type Invoice } from '$lib/db';
 
 	let modalInstance: {
-		open: (jobOrId: string | Job, context?: { fromClientId?: string; fromClientName?: string }) => void;
+		open: (
+			jobOrId: string | Job,
+			context?: { fromClientId?: string; fromClientName?: string }
+		) => void;
 	} | null = null;
 
 	export function openJobDetailsModal(
-		jobOrId: string | Job, 
+		jobOrId: string | Job,
 		context?: { fromClientId?: string; fromClientName?: string }
 	) {
 		if (modalInstance) {
@@ -19,7 +22,18 @@
 </script>
 
 <script lang="ts">
-	import { db, type Job, type Invoice, type Client, getInvoiceForJob, updateJob, getUserPhotoSrc, ensureInvoiceForJob, isInvoiceOverdue, cancelJob } from '$lib/db';
+	import {
+		db,
+		type Job,
+		type Invoice,
+		type Client,
+		getInvoiceForJob,
+		updateJob,
+		getUserPhotoSrc,
+		ensureInvoiceForJob,
+		isInvoiceOverdue,
+		cancelJob
+	} from '$lib/db';
 	import { pb, pullUsersFromServer, pullInvoicesFromServer } from '$lib/db/pb';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { openJobModal } from './JobFormModal.svelte';
@@ -51,7 +65,10 @@
 	// Register singleton (runes only, no onMount)
 	$effect(() => {
 		modalInstance = {
-			open: async (jobOrId: string | Job, ctx?: { fromClientId?: string; fromClientName?: string }) => {
+			open: async (
+				jobOrId: string | Job,
+				ctx?: { fromClientId?: string; fromClientName?: string }
+			) => {
 				clientContext = ctx || null;
 				loading = true;
 				show = true;
@@ -69,14 +86,14 @@
 						const fresh = await db.jobs.get(job.id!);
 						if (fresh) job = fresh;
 
-						invoice = await getInvoiceForJob(job.id!) || null;
+						invoice = (await getInvoiceForJob(job.id!)) || null;
 
 						if (auth.currentUser?.role === 'admin' && navigator.onLine) {
 							// )=- Import + call added to fix "pullInvoicesFromServer is not defined" ReferenceError on modal open (log: JobDetailsModal.svelte:65).
 							// Pull ensures fresh invoice data (incl. newly generated primary files) before showing billing panel.
 							// Guard matches users pull and jobs page refresh. Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md Phase 3/4
 							await pullInvoicesFromServer();
-							invoice = await getInvoiceForJob(job.id!) || null;
+							invoice = (await getInvoiceForJob(job.id!)) || null;
 						}
 
 						if (job.clientId) {
@@ -103,21 +120,26 @@
 		}
 	});
 
-	let areaOptions = $derived(optionsStore.data?.areasOfTown || []);
-	let area = $derived(areaOptions.find((a) => a.id === job?.areaOfTown));
+	const areaOptions = $derived(optionsStore.data?.areasOfTown || []);
+	const area = $derived(areaOptions.find((a) => a.id === job?.areaOfTown));
 
 	// )=- Cancel reasons from options for the cancel form (Phase 7).
-	let cancelReasons = $derived(optionsStore.data?.cancelReasons || []);
+	const cancelReasons = $derived(optionsStore.data?.cancelReasons || []);
 
 	// )=- Load users for crew avatars in the details modal (consistent with jobs page cards and calendar).
 	// For admins we also trigger the server pull (guarded) so photos/names for other crew are available even if Crew page not visited.
 	let users = $state<any[]>([]);
 	$effect(() => {
 		if (show && users.length === 0) {
-			const loadLocal = () => import('$lib/db').then(({ db }) => db.users.toArray().then((us: any[]) => { users = us; }));
+			const loadLocal = () =>
+				import('$lib/db').then(({ db }) =>
+					db.users.toArray().then((us: any[]) => {
+						users = us;
+					})
+				);
 			loadLocal();
 			if (auth.currentUser?.role === 'admin' && navigator.onLine) {
-				pullUsersFromServer().then(loadLocal);  // re-load after pull completes for fresh data in this modal instance
+				pullUsersFromServer().then(loadLocal); // re-load after pull completes for fresh data in this modal instance
 			}
 		}
 	});
@@ -149,7 +171,7 @@
 			if (currentJob.id) {
 				const freshJob = await db.jobs.get(currentJob.id);
 				// small delay to reduce visual flash between modals
-				await new Promise(r => setTimeout(r, 50));
+				await new Promise((r) => setTimeout(r, 50));
 				if (freshJob) {
 					openJobDetailsModal(freshJob, clientContext || undefined);
 				} else {
@@ -221,10 +243,12 @@
 	}
 
 	// Derived display helpers (kept simple, BEM-ready)
-	let jobStatusClass = $derived(job ? `job-details__status job-details__status--${job.status}` : '');
-	let invoiceStatus = $derived(invoice?.status || 'none');
+	const jobStatusClass = $derived(
+		job ? `job-details__status job-details__status--${job.status}` : ''
+	);
+	const invoiceStatus = $derived(invoice?.status || 'none');
 	// )=- Now uses the shared helper (added for Phase 7 overdue visuals everywhere) for consistency across jobs cards, clients related list, and modal.
-	let isOverdue = $derived(isInvoiceOverdue(invoice));
+	const isOverdue = $derived(isInvoiceOverdue(invoice));
 </script>
 
 {#if show}
@@ -261,11 +285,18 @@
 						     Reference: JOBS_AND_INVOICES_SPEC.md -->
 						<!-- )=- Context-aware single button for job status per user request. Scheduled shows "Mark Complete" (with start-time guard). Completed shows "Revert to Scheduled". Confirmed status removed from this UI as not needed. Guard prevents completing before start time. -->
 						{#if job.status === 'completed'}
-							<button class="job-details-modal__btn job-details-modal__btn--small" onclick={() => quickUpdateJobStatus('scheduled')}>
+							<button
+								class="job-details-modal__btn job-details-modal__btn--small"
+								onclick={() => quickUpdateJobStatus('scheduled')}
+							>
 								Revert to Scheduled
 							</button>
 						{:else}
-							<button class="job-details-modal__btn job-details-modal__btn--small" onclick={() => quickUpdateJobStatus('completed')} disabled={new Date() < new Date(job.start)}>
+							<button
+								class="job-details-modal__btn job-details-modal__btn--small"
+								onclick={() => quickUpdateJobStatus('completed')}
+								disabled={new Date() < new Date(job.start)}
+							>
 								Mark Complete
 							</button>
 						{/if}
@@ -275,7 +306,10 @@
 						     On confirm calls cancelJob which sets all the cancel* fields + status.
 						     )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 						{#if job.status !== 'cancelled' && job.status !== 'completed'}
-							<button class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel" onclick={() => showCancelForm = !showCancelForm}>
+							<button
+								class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel"
+								onclick={() => (showCancelForm = !showCancelForm)}
+							>
 								{showCancelForm ? 'Hide Cancel' : 'Cancel'}
 							</button>
 						{/if}
@@ -293,23 +327,27 @@
 									<option value={reason}>{reason}</option>
 								{/each}
 							</select>
-							<textarea 
-								bind:value={cancelNotesInput} 
+							<textarea
+								bind:value={cancelNotesInput}
 								class="job-details-modal__cancel-notes"
 								placeholder="Optional notes (e.g. customer request, weather, etc.)"
 								rows="2"
 							></textarea>
 							<div class="job-details-modal__cancel-actions">
-								<button 
-									class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel-confirm" 
+								<button
+									class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel-confirm"
 									onclick={confirmCancelJob}
 									disabled={!selectedCancelReason}
 								>
 									Confirm Cancel
 								</button>
-								<button 
-									class="job-details-modal__btn job-details-modal__btn--small" 
-									onclick={() => { showCancelForm = false; selectedCancelReason = ''; cancelNotesInput = ''; }}
+								<button
+									class="job-details-modal__btn job-details-modal__btn--small"
+									onclick={() => {
+										showCancelForm = false;
+										selectedCancelReason = '';
+										cancelNotesInput = '';
+									}}
 								>
 									Dismiss
 								</button>
@@ -334,11 +372,16 @@
 						<!-- )=- Now resolves full client (via clientId/pbId) for name + address display (Phase 4+ polish). Falls back to ID if not found. Area uses options for label + color. -->
 						{#if resolvedClient}
 							<div><strong>{resolvedClient.name}</strong></div>
-							<div>{resolvedClient.serviceAddressStreet || ''} {resolvedClient.serviceAddressCity || ''}</div>
+							<div>
+								{resolvedClient.serviceAddressStreet || ''}
+								{resolvedClient.serviceAddressCity || ''}
+							</div>
 						{:else}
 							<div>Client: {job.clientId}</div>
 						{/if}
-						<div style="color: {area?.color || '#64748b'};">Area: {area?.label || job.areaOfTown || '—'}</div>
+						<div style="color: {area?.color || '#64748b'};">
+							Area: {area?.label || job.areaOfTown || '—'}
+						</div>
 					</div>
 				</section>
 
@@ -362,9 +405,15 @@
 							<span class="job-details-modal__crew-pill" title={crewName}>
 								{#if u?.photo}
 									<!-- )=- Use central helper for normalization. -->
-									<img class="job-details-modal__crew-avatar" src={getUserPhotoSrc(u.photo, u)} alt={crewName} />
+									<img
+										class="job-details-modal__crew-avatar"
+										src={getUserPhotoSrc(u.photo, u)}
+										alt={crewName}
+									/>
 								{:else}
-									<span class="job-details-modal__crew-initial">{crewName?.[0]?.toUpperCase() || '?'}</span>
+									<span class="job-details-modal__crew-initial"
+										>{crewName?.[0]?.toUpperCase() || '?'}</span
+									>
 								{/if}
 								{crewName}
 							</span>
@@ -390,17 +439,17 @@
 
 					<!-- )=- JobInvoicePanel is rendered directly under Billing Items (as decided in planning).
 					     It contains the real Generate Draft (Phase 4 generator + file persistence) and revised upload. -->
-					<JobInvoicePanel 
-						bind:job={job} 
-						bind:invoice={invoice} 
-						onStatusChange={(newInv) => { 
+					<JobInvoicePanel
+						bind:job
+						bind:invoice
+						onStatusChange={(newInv) => {
 							// )=- Pure state lift for the header badges (status, overdue, due date) and the "Mark Complete" flow.
 							// All actual persistence (status changes, regenerate, paidAt edit, supporting add) now lives inside
 							// JobInvoicePanel so we never double-queue updateInvoice calls (which was causing the repeated
 							// "Invoice updated in PocketBase" + "Synced update" spam in the logs after every status or regen action).
 							// The previous always-on update here was firing after the panel's own updateInvoice for files/status/paid.
 							// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-							invoice = newInv; 
+							invoice = newInv;
 						}}
 					/>
 				</section>
@@ -410,7 +459,10 @@
 					<h3 class="job-details-modal__section-title">Notes</h3>
 					<p class="job-details-modal__notes">{job.notes || '—'}</p>
 					{#if job.cancelReason}
-						<p class="job-details-modal__cancel">Cancelled: {job.cancelReason} {job.cancelNotes ? `— ${job.cancelNotes}` : ''}</p>
+						<p class="job-details-modal__cancel">
+							Cancelled: {job.cancelReason}
+							{job.cancelNotes ? `— ${job.cancelNotes}` : ''}
+						</p>
 					{/if}
 				</section>
 
@@ -425,9 +477,13 @@
 						<ul class="job-details-modal__docs">
 							{#each invoice.supportingDocuments as doc}
 								<li>
-									{doc.filename} {doc.type ? `(${doc.type})` : ''}
+									{doc.filename}
+									{doc.type ? `(${doc.type})` : ''}
 									{#if invoice.pbId}
-										<button class="job-details-modal__small-btn" onclick={() => downloadSupporting(doc)}>Download</button>
+										<button
+											class="job-details-modal__small-btn"
+											onclick={() => downloadSupporting(doc)}>Download</button
+										>
 									{:else}
 										<span class="job-details-modal__not-available">not available offline</span>
 									{/if}
@@ -436,7 +492,8 @@
 						</ul>
 						{#if !invoice.pbId}
 							<p class="job-details-modal__offline-note">
-								Supporting documents are stored on the server and are not available while offline or before the first successful sync.
+								Supporting documents are stored on the server and are not available while offline or
+								before the first successful sync.
 							</p>
 						{/if}
 					</section>
@@ -524,11 +581,29 @@
 		font-weight: 600;
 		text-transform: uppercase;
 	}
-	.job-details-modal__status--draft { background: #fef3c7; color: #92400e; }
-	.job-details-modal__status--generated { background: #dbeafe; color: #1e40af; }
-	.job-details-modal__status--sent { background: #d1fae5; color: #166534; }
-	.job-details-modal__status--paid { background: #a7f3d0; color: #065f46; }
-	.job-details-modal__overdue { background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 0.1rem 0.5rem; border-radius: 999px; }
+	.job-details-modal__status--draft {
+		background: #fef3c7;
+		color: #92400e;
+	}
+	.job-details-modal__status--generated {
+		background: #dbeafe;
+		color: #1e40af;
+	}
+	.job-details-modal__status--sent {
+		background: #d1fae5;
+		color: #166534;
+	}
+	.job-details-modal__status--paid {
+		background: #a7f3d0;
+		color: #065f46;
+	}
+	.job-details-modal__overdue {
+		background: #fee2e2;
+		color: #991b1b;
+		font-size: 0.65rem;
+		padding: 0.1rem 0.5rem;
+		border-radius: 999px;
+	}
 
 	.job-details-modal__totals {
 		padding: 0.75rem 1rem;
@@ -574,10 +649,15 @@
 		gap: 0.25rem;
 	}
 	.job-details-modal__crew-avatar {
-		width: 16px; height: 16px; border-radius: 50%; object-fit: cover; border: 1px solid #e2e8f0;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		object-fit: cover;
+		border: 1px solid #e2e8f0;
 	}
 	.job-details-modal__crew-initial {
-		font-size: 0.6rem; font-weight: 600;
+		font-size: 0.6rem;
+		font-weight: 600;
 	}
 
 	.job-details-modal__billables {
