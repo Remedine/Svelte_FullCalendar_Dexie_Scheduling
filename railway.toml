@@ -3,31 +3,34 @@
 # Repo: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 
 [build]
-builder = "NIXPACKS"
-# Nixpacks auto-detects:
-# - pnpm from pnpm-lock.yaml + pnpm-workspace.yaml
-# - Runs: pnpm install --frozen-lockfile (or equivalent)
-# - Runs: pnpm build  (from package.json scripts)
-# Output: ./build (from @sveltejs/adapter-node)
+builder = "RAILPACK"
+# Railpack (Railway's current builder) will:
+# - Detect pnpm from pnpm-lock.yaml
+# - Run pnpm install
+# - Run pnpm build
+# Output: ./build (standalone server from @sveltejs/adapter-node)
 
 [deploy]
-# Start command is auto-detected from package.json "start": "node build"
-# The generated server (adapter-node) respects $PORT (injected by Railway).
-# restartPolicyType = "ON_FAILURE"
-# restartPolicyMaxRetries = 10
+startCommand = "pnpm start"
+# Explicit start command guarantees Railpack detects how to run the server.
+# "pnpm start" executes "node build" (see package.json), which starts the
+# adapter-node server. It automatically listens on Railway's $PORT.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
 
 # Healthcheck (optional - the app serves a PWA shell at /)
 # healthcheckPath = "/"
 # healthcheckTimeout = 30
 
-# If you want to run a multi-service setup (app + PocketBase) in one project,
-# create a separate service for PocketBase (use the Railway PocketBase template
-# or a Dockerfile) and reference it via internal networking.
+# IMPORTANT for this app:
+# Set PUBLIC_POCKETBASE_URL in the Railway service Variables tab.
+# This is required at runtime (client-side Dexie + PocketBase sync).
+# The value must be reachable from the browser (public URL or exposed service).
 
-# Example for same-project PB service (internal DNS):
-# PUBLIC_POCKETBASE_URL=http://<pocketbase-service-name>.railway.internal:8090
+# Multi-service note:
+# If running PocketBase in the same Railway project, create a separate
+# service (Railway PocketBase template or custom) and point this app's
+# PUBLIC_POCKETBASE_URL at it (use the public domain or internal DNS).
 
-# Variables are intentionally NOT set here.
-# Set PUBLIC_POCKETBASE_URL (and any future PUBLIC_* vars) in the Railway
-# dashboard under the service → Variables tab (or via Railway CLI).
-# This keeps secrets/config out of git and allows per-environment (staging/prod) values.
+# Variables are intentionally NOT set here (use dashboard or Railway CLI
+# for per-environment values like staging vs prod PB instances).
