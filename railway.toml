@@ -1,0 +1,33 @@
+# Railway.app configuration for Capital City Windows Scheduler
+# SvelteKit + adapter-node (SPA/PWA mode) + PocketBase backend
+# Repo: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+
+[build]
+builder = "NIXPACKS"
+# Nixpacks auto-detects:
+# - pnpm from pnpm-lock.yaml + pnpm-workspace.yaml
+# - Runs: pnpm install --frozen-lockfile (or equivalent)
+# - Runs: pnpm build  (from package.json scripts)
+# Output: ./build (from @sveltejs/adapter-node)
+
+[deploy]
+# Start command is auto-detected from package.json "start": "node build"
+# The generated server (adapter-node) respects $PORT (injected by Railway).
+# restartPolicyType = "ON_FAILURE"
+# restartPolicyMaxRetries = 10
+
+# Healthcheck (optional - the app serves a PWA shell at /)
+# healthcheckPath = "/"
+# healthcheckTimeout = 30
+
+# If you want to run a multi-service setup (app + PocketBase) in one project,
+# create a separate service for PocketBase (use the Railway PocketBase template
+# or a Dockerfile) and reference it via internal networking.
+
+# Example for same-project PB service (internal DNS):
+# PUBLIC_POCKETBASE_URL=http://<pocketbase-service-name>.railway.internal:8090
+
+# Variables are intentionally NOT set here.
+# Set PUBLIC_POCKETBASE_URL (and any future PUBLIC_* vars) in the Railway
+# dashboard under the service → Variables tab (or via Railway CLI).
+# This keeps secrets/config out of git and allows per-environment (staging/prod) values.
