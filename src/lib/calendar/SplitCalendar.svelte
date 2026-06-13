@@ -16,7 +16,13 @@
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
 	import { getLocalDateString, parseLocalDate, toDateString } from '$lib/utils/dates';
 
-	let isExternalDrop = $state(false);
+	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
+	// and $effects (which do refetch/update) on every pointer event during drag.
+	// This was causing the "dog slow" feel and inability to complete drops – FullCalendar's
+	// drag handling was being interrupted by parent re-renders and refetch thrashing.
+	// Only used inside drag handlers; no UI binding depends on them reactively.
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	let isExternalDrop = false;
 	let dragMouseListener: ((e: MouseEvent) => void) | null = null;
 	let originalEventRect: DOMRect | null = null;
 
@@ -39,7 +45,7 @@
 	// )=- Map of crew name to photo URL for rendering circular avatars on event cards.
 	let crewPhotoMap = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
-	let draggedJobId: string | null = $state(null);
+	let draggedJobId: string | null = null;
 
 	// Persist filter panel state
 	$effect(() => {
@@ -93,7 +99,16 @@
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	$effect(() => {
 		if (dayApi && Object.keys(crewPhotoMap).length > 0) {
-			dayApi.refetchEvents();
+			// )=- Removed unconditional refetch here (and similar in options effect below).
+			// These were firing on every photo/options update (including during/after login syncs
+			// and filter changes), causing repeated FullCalendar event list rebuilds.
+			// This + reactive drag state was the main source of "dog slow" + drag not working
+			// (heavy work on every pointer event + visual "reloading" of events).
+			// Colors/avatars are now populated before calendar creation (via loadData eager loads),
+			// and one refetch after initial render is sufficient. Extra refetches only on explicit
+			// data changes that matter (jobs, filters that affect range).
+			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+			// dayApi.refetchEvents();  // removed for perf
 		}
 	});
 
@@ -102,16 +117,16 @@
 		if (!wrapper) return;
 
 		const observer = new ResizeObserver(() => {
-			setTimeout(() => {
+			// )=- Throttled with rAF + only updateSize (render is expensive and was causing jank).
+			// setTimeout + nested render was adding to the constant "reloading" feel.
+			// FullCalendar will handle most layout in updateSize during normal use.
+			// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+			requestAnimationFrame(() => {
 				if (dayApi) {
 					dayApi.updateSize();
 					dayApi.setOption('height', 'auto');
-					// Nuclear option - re-render
-					setTimeout(() => {
-						dayApi?.render();
-					}, 30);
 				}
-			}, 100);
+			});
 		});
 
 		observer.observe(wrapper);
@@ -138,7 +153,8 @@
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	$effect(() => {
 		if (dayApi && optionsStore.data) {
-			dayApi.refetchEvents();
+			// (see comment above on crewPhotoMap effect for why the refetch was removed)
+			// dayApi.refetchEvents();  // removed for perf
 		}
 	});
 
@@ -163,27 +179,22 @@
 
 	async function loadData() {
 		await optionsStore.load?.();
-		// )=- Force a pull from PB (if online) so that area colors are available immediately
-		// on calendar load. Previously colors only appeared after a job add/edit triggered refetch.
-		// This ensures getJobColor sees the real areasOfTown data before the first events() call.
+		// )=- Removed the unconditional pullFromPB here.
+		// It was causing extra network roundtrips + optionsStore.data updates (which previously
+		// triggered refetch effects) on every calendar loadData (initial + certain filter toggles).
+		// This contributed to the "reloading slightly" feel. Freshness is handled at login
+		// (pull*FromServer) and explicit options pulls when user visits the options page.
+		// Eager crew photo load is kept for initial avatars.
 		// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		if (navigator.onLine) {
-			await optionsStore.pullFromPB?.();
-		}
+		// if (navigator.onLine) { await optionsStore.pullFromPB?.(); }
 
 		// )=- Eagerly kick off crew photo load (for the right-edge circular avatars under drag handle)
-		// before we fetch jobs and create the FullCalendar instance. This increases the chance that
-		// crewPhotoMap is populated for the *first* eventDidMount + the explicit post-render refetch.
-		// The existing top-level crewPhotoMap $effect will still handle late arrivals / updates.
-		// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+		// before we fetch jobs and create the FullCalendar instance. ...
 		import('$lib/db').then(({ db }) => {
 			db.users.toArray().then((users: any[]) => {
 				const map: Record<string, string> = {};
 				users.forEach((u: any) => {
 					if (u.name && u.photo) {
-						// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
-						// This fixes the 404s for crew avatars on event cards (e.g. blob_xxx.png relative paths) when photos are stored as filenames in Dexie after PB sync.
-						// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 						map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
 					}
 				});
