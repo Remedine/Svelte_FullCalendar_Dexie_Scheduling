@@ -23,7 +23,6 @@
 	// Only used inside drag handlers; no UI binding depends on them reactively.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	let isExternalDrop = false;
-	let dragMouseListener: ((e: MouseEvent) => void) | null = null;
 	let originalEventRect: DOMRect | null = null;
 
 	let dayEl = $state<HTMLDivElement | null>(null);
@@ -329,21 +328,17 @@
 	}
 
 	$effect(() => {
-		// )=- Use a *local* `api` variable for this effect execution.
-		// This is the standard safe pattern for long-lived imperative objects (FullCalendar)
-		// in Svelte 5 $effect.
-		// - Previous cleanup (from earlier execution) runs before this body, destroying any
-		//   old instance and nulling the outer `dayApi`.
-		// - The local `api` guard prevents re-creation *within* this execution.
-		// - We only publish to the outer `dayApi` (for refetch effects etc.) once created.
-		// - The returned cleanup closes over the local `api` of *this* run and cleans it
-		//   when the component unmounts or this effect is torn down for a new run.
-		// This eliminates the destroy/create feedback loop that was causing the calendar
-		// to flash repeatedly after login (the async loadData + state updates were causing
-		// the effect to re-execute, the old cleanup nulled dayApi, the body saw null and
-		// re-scheduled creation).
-		// Also keep the isConnected guard inside the promise for the original race.
+		// )=- Use a *local* `api` variable for this effect execution (Svelte 5 best practice
+		// for imperative libs like FullCalendar). Added early `if (dayApi) return;` to
+		// prevent the effect from even scheduling creation on re-runs (e.g. other state
+		// changes in the component or parent re-renders). This avoids accumulation of
+		// multiple FC instances (each holding significant memory: internal date state,
+		// event renderers, DOM structures, plugins, closures) which was likely causing
+		// the 700MB+ usage even with 1 job.
+		// Previous cleanup still destroys on teardown.
 		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+		if (dayApi) return;
+
 		let api: Calendar | null = null;
 
 		const container = dayEl;
@@ -481,10 +476,6 @@
 				},
 
 				eventDragStop: (info) => {
-					if (dragMouseListener) {
-						document.removeEventListener('mousemove', dragMouseListener);
-						dragMouseListener = null;
-					}
 					originalEventRect = null;
 
 					if (!draggedJobId) return;
