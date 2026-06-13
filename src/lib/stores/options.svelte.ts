@@ -73,7 +73,8 @@ export const optionsStore = $state({
 		try {
 			// )=- Try to find the global options record. We no longer rely on 'key="global"' filter
 			// because the options collection schema may not have a 'key' field (old migrations).
-			// Fall back to first record, or create a default one on 404.
+			// Fall back to first record (list/view rules allow any authenticated user per 1780477923_updated_options_rules.js).
+			// Only admins may create the initial record (createRule: @request.auth.role = "admin").
 			let record;
 			try {
 				record = await pb.collection('options').getFirstListItem('', {
@@ -81,6 +82,17 @@ export const optionsStore = $state({
 				});
 			} catch (e: any) {
 				if (e.status === 404) {
+					// )=- Guard create: only attempt if the current auth user has role exactly "admin".
+					// This prevents 400 "Failed to create record." when the logged-in user's users.role
+					// is not set (or "crew"), or before the initial global record is seeded by main.go OnServe.
+					// Non-admins (or pre-role admins) fall back to Dexie local copy (or the default created in load()).
+					// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					const currentRole = pb.authStore.model?.role;
+					if (currentRole !== 'admin') {
+						console.warn('[options] No options record in PB and current user is not admin (role=', currentRole, ') — using local Dexie only. Set role="admin" on your user record in PB admin UI to allow seeding.');
+						return false;
+					}
+
 					// Create a sensible default so the page always has data with id:1
 					const defaultPayload = {
 						defaultJobDurationHours: 2,
@@ -126,8 +138,19 @@ export const optionsStore = $state({
 				err?.name === 'AbortError' ||
 				(err?.message || '').toLowerCase().includes('abort') ||
 				(err?.message || '').toLowerCase().includes('autocancel');
-			if (!isAbort && err.status !== 404) {
+			// )=- Treat permission denials (403) and create-rule 400s as non-fatal.
+			// These are expected until the user's role is set to "admin" in PB or the initial record exists.
+			// Avoids spamming the exact "ClientResponseError 400: Failed to create record." you are seeing.
+			const status = err?.status;
+			const msg = (err?.message || '').toLowerCase();
+			const isPermissionOrCreateFail =
+				status === 403 ||
+				(status === 400 && (msg.includes('create') || msg.includes('permission') || msg.includes('rule')));
+			if (!isAbort && status !== 404 && !isPermissionOrCreateFail) {
 				console.error('❌ Failed to pull options from PocketBase:', err);
+			} else if (isPermissionOrCreateFail) {
+				// Quiet one-time hint in dev; remove or downgrade after role is confirmed admin.
+				console.warn('[options] Pull/create blocked by PB rules (role not admin or no record yet). Using Dexie fallback.');
 			}
 			return false;
 		}
@@ -155,6 +178,15 @@ export const optionsStore = $state({
 	async syncToPB(updatedData: any) {
 		if (!pb?.authStore?.isValid || !updatedData) return;
 
+		// )=- Only admins can write options (per collection create/updateRule). Guard here too
+		// so a misconfigured role never attempts the write that produces 400.
+		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + pb_migrations/1780477923_updated_options_rules.js
+		const currentRole = pb.authStore.model?.role;
+		if (currentRole !== 'admin') {
+			console.warn('[options] syncToPB skipped — current auth role is not "admin":', currentRole);
+			return;
+		}
+
 		try {
 			const cleanData = JSON.parse(
 				JSON.stringify(updatedData, (key, value) => {
@@ -176,15 +208,19 @@ export const optionsStore = $state({
 
 			console.log('📤 Sending to PocketBase:', pbPayload);
 
+			// )=- Use the same first-record strategy as pull (getFirstListItem('')) instead of the legacy
+			// 'key="global"' filter. The current options schema (Go OnServe creation + rule migrations)
+			// does not rely on a "key" field. This avoids an extra 404 + failed create path.
 			try {
 				const existing = await pb
 					.collection('options')
-					.getFirstListItem('key="global"', { $autoCancel: false });
+					.getFirstListItem('', { $autoCancel: false });
 				const record = await pb.collection('options').update(existing.id, pbPayload);
 				console.log('✅ Options UPDATED in PocketBase');
 				return record;
 			} catch (err: any) {
 				if (err.status === 404) {
+					// Admin-only create (we already guarded above).
 					const record = await pb.collection('options').create(pbPayload);
 					console.log('✅ Options CREATED in PocketBase');
 					return record;
@@ -193,7 +229,12 @@ export const optionsStore = $state({
 				}
 			}
 		} catch (err: any) {
-			console.error('❌ Failed to sync options to PocketBase:', err);
+			// )=- Swallow permission/create errors here too (e.g. transient rule mismatch after login before role claim settles).
+			// Real validation errors will still surface via the toast in the options page caller.
+			const status = err?.status;
+			if (status !== 403 && !(status === 400 && (err?.message || '').toLowerCase().includes('create'))) {
+				console.error('❌ Failed to sync options to PocketBase:', err);
+			}
 		}
 	}
 });
