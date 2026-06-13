@@ -358,6 +358,71 @@
 					`;
 
 					info.el.appendChild(handle);
+
+					// )=- Force the area color on the event element in didMount.
+					// This ensures colors show immediately even if the events function provided a default
+					// backgroundColor before optionsStore.data was ready on initial load.
+					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					const jobForColor = info.event.extendedProps;
+					const areaColor = getJobColor(jobForColor);
+					info.el.style.backgroundColor = areaColor;
+					if (areaColor !== '#6b7280') {
+						info.el.style.borderColor = areaColor;
+					}
+
+					// )=- Add circular crew avatars.
+					// - Regular timeGrid card views: placed *inside* the card at bottom-right (no overhang).
+					// - dayGridMonth view: placed inline *to the right of the text/title*.
+					// Uses crewPhotoMap (Dexie users). Letter fallback if no photo.
+					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					const crew = info.event.extendedProps?.assignedCrew || [];
+					if (crew.length > 0) {
+						// Remove any previous (on re-render / refetch)
+						const prev = info.el.querySelector('.fc-event__crew-avatars');
+						if (prev) prev.remove();
+
+						const crewEl = document.createElement('div');
+						crewEl.className = 'fc-event__crew-avatars';
+
+						const isMonthView =
+							info.view.type === 'dayGridMonth' ||
+							!!info.el.closest('.fc-dayGridMonth-view') ||
+							!!info.el.closest('.fc-daygrid-month');
+
+						if (isMonthView) {
+							crewEl.classList.add('fc-event__crew-avatars--inline');
+						}
+
+						crew.forEach((name: string) => {
+							const av = document.createElement('div');
+							av.className = 'fc-event__crew-avatar';
+							av.title = name;
+
+							const photo = crewPhotoMap[name];
+							if (photo) {
+								const img = document.createElement('img');
+								img.src = photo;
+								img.alt = name;
+								av.appendChild(img);
+							} else {
+								av.textContent = (name || '?').charAt(0).toUpperCase();
+							}
+							crewEl.appendChild(av);
+						});
+
+						if (isMonthView) {
+							// Place directly after the title so it sits to the right of the text in month list items.
+							const titleEl = info.el.querySelector('.fc-event-title');
+							if (titleEl && titleEl.parentNode) {
+								titleEl.parentNode.insertBefore(crewEl, titleEl.nextSibling);
+							} else {
+								info.el.appendChild(crewEl);
+							}
+						} else {
+							// Inside the card for timeGrid views.
+							info.el.appendChild(crewEl);
+						}
+					}
 				},
 
 				eventClassNames: (arg) => {
@@ -473,256 +538,6 @@
 						});
 					}
 
-					successCallback(visibleJobs.map((job: any) => ({
-						id: job.id,
-						title: `${job.title} — ${job.assignedCrew?.join(', ') || ''}`,
-						start: job.start,
-						end: job.end,
-						backgroundColor: getJobColor(job),
-						extendedProps: job
-					})));
-				}
-			});
-
-			dayApi.render();
-
-			requestAnimationFrame(() => {
-				dayApi?.updateSize();
-				dayApi?.gotoDate(parseLocalDate(selectedDate));
-			});
-		});
-
-		return () => {
-			if (dayApi) {
-				dayApi.destroy();
-				dayApi = null;
-			}
-		};
-	});
-			dayApi = new Calendar(dayEl, {
-				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
-				initialView: currentView,
-				initialDate: parseLocalDate(selectedDate),
-				headerToolbar: false,
-				height: 'auto',
-				allDaySlot: true,
-				slotMinTime: '06:00:00',
-				slotMaxTime: '22:00:00',
-				expandRows: false,
-				editable: true,
-				dragScroll: false,
-				eventDragMinDistance: 8,
-
-				dateClick: (info) => {
-					openJobModal({ start: info.date }, () => refreshAfterUpdate());
-				},
-
-				eventDidMount: (info) => {
-					info.el.setAttribute('draggable', 'true');
-					info.el.classList.add('fc-event--draggable');
-
-					const handle = document.createElement('div');
-					handle.className = 'fc-event__drag-handle';
-
-					handle.innerHTML = `
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-							<rect x="3" y="11" width="18" height="2" rx="1"/>
-							<rect x="11" y="3" width="2" height="18" rx="1"/>
-							<polygon points="12,1 8,6 16,6"/>
-							<polygon points="12,23 8,18 16,18"/>
-							<polygon points="1,12 6,8 6,16"/>
-							<polygon points="23,12 18,8 18,16"/>
-						</svg>
-					`;
-
-					info.el.appendChild(handle);
-
-					// )=- Force the area color on the event element in didMount.
-					// This ensures colors show immediately even if the events function provided a default
-					// backgroundColor before optionsStore.data was ready on initial load.
-					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-					const jobForColor = info.event.extendedProps;
-					const areaColor = getJobColor(jobForColor);
-					info.el.style.backgroundColor = areaColor;
-					if (areaColor !== '#6b7280') {
-						info.el.style.borderColor = areaColor;
-					}
-
-					// )=- Add circular crew avatars.
-					// - Regular timeGrid card views: placed *inside* the card at bottom-right (no overhang).
-					// - dayGridMonth view: placed inline *to the right of the text/title*.
-					// Uses crewPhotoMap (Dexie users). Letter fallback if no photo.
-					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-					const crew = info.event.extendedProps?.assignedCrew || [];
-					if (crew.length > 0) {
-						// Remove any previous (on re-render / refetch)
-						const prev = info.el.querySelector('.fc-event__crew-avatars');
-						if (prev) prev.remove();
-
-						const crewEl = document.createElement('div');
-						crewEl.className = 'fc-event__crew-avatars';
-
-						const isMonthView =
-							info.view.type === 'dayGridMonth' ||
-							!!info.el.closest('.fc-dayGridMonth-view') ||
-							!!info.el.closest('.fc-daygrid-month');
-
-						if (isMonthView) {
-							crewEl.classList.add('fc-event__crew-avatars--inline');
-						}
-
-						crew.forEach((name: string) => {
-							const av = document.createElement('div');
-							av.className = 'fc-event__crew-avatar';
-							av.title = name;
-
-							const photo = crewPhotoMap[name];
-							if (photo) {
-								const img = document.createElement('img');
-								img.src = photo;
-								img.alt = name;
-								av.appendChild(img);
-							} else {
-								av.textContent = (name || '?').charAt(0).toUpperCase();
-							}
-							crewEl.appendChild(av);
-						});
-
-						if (isMonthView) {
-							// Place directly after the title so it sits to the right of the text in month list items.
-							const titleEl = info.el.querySelector('.fc-event-title');
-							if (titleEl && titleEl.parentNode) {
-								titleEl.parentNode.insertBefore(crewEl, titleEl.nextSibling);
-							} else {
-								info.el.appendChild(crewEl);
-							}
-						} else {
-							// Inside the card for timeGrid views.
-							info.el.appendChild(crewEl);
-						}
-					}
-				},
-
-				eventClassNames: (arg) => {
-					const status = arg.event.extendedProps?.status;
-					if (status === 'completed') return ['event-completed'];
-					if (status === 'cancelled') return ['event-cancelled'];
-					return [];
-				},
-
-				eventAllow: (dropInfo, draggedEvent: any) => {
-					const status = draggedEvent?.extendedProps?.status;
-					return status !== 'completed' && status !== 'cancelled';
-				},
-
-				eventDragStart: (info) => {
-					const status = info.event.extendedProps?.status;
-
-					if (status === 'completed' || status === 'cancelled') {
-						toast.error('Cannot move cancelled or completed jobs');
-						return;
-					}
-
-					draggedJobId = info.event.id!;
-					originalEventRect = info.el.getBoundingClientRect();
-				},
-
-				eventDragStop: (info) => {
-					if (dragMouseListener) {
-						document.removeEventListener('mousemove', dragMouseListener);
-						dragMouseListener = null;
-					}
-					originalEventRect = null;
-
-					if (!draggedJobId) return;
-
-					const monthPickerEl = document.querySelector('.month-picker');
-					if (!monthPickerEl) {
-						draggedJobId = null;
-						return;
-					}
-
-					const mouseX = info.jsEvent.clientX;
-					const mouseY = info.jsEvent.clientY;
-
-					const dropTarget = document.elementFromPoint(mouseX, mouseY);
-					let monthPickerDay = dropTarget?.closest('.month-picker__day');
-
-					if (!monthPickerDay) {
-						const rect = monthPickerEl.getBoundingClientRect();
-						const isOverContainer =
-							mouseX >= rect.left &&
-							mouseX <= rect.right &&
-							mouseY >= rect.top &&
-							mouseY <= rect.bottom;
-
-						if (isOverContainer) {
-							const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
-							for (const el of dayElements) {
-								const r = el.getBoundingClientRect();
-								if (
-									mouseX >= r.left &&
-									mouseX <= r.right &&
-									mouseY >= r.top &&
-									mouseY <= r.bottom
-								) {
-									monthPickerDay = el;
-									break;
-								}
-							}
-						}
-					}
-
-					if (monthPickerDay) {
-						isExternalDrop = true;
-						handleExternalDrop(draggedJobId, mouseX, mouseY);
-					}
-
-					draggedJobId = null;
-				},
-
-				select: (info) => {
-					openJobModal({ start: info.start, end: info.end }, () => refreshAfterUpdate());
-				},
-
-				eventClick: (info) => {
-					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
-				},
-
-				eventDrop: async (info) => {
-					if (isExternalDrop) {
-						isExternalDrop = false;
-						return;
-					}
-					try {
-						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await refreshAfterUpdate();
-					} catch (e) {
-						info.revert();
-					}
-				},
-
-				eventResize: async (info) => {
-					try {
-						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await refreshAfterUpdate();
-					} catch (e) {
-						info.revert();
-					}
-				},
-
-				events: (fetchInfo, successCallback) => {
-					let visibleJobs = filteredJobs;
-
-					if (currentView === 'timeGridDay') {
-						const selectedStr = selectedDate;
-						visibleJobs = filteredJobs.filter((job: any) => {
-							const jobStartStr = toDateString(job.start);
-							const jobEndStr = job.end ? toDateString(job.end) : jobStartStr;
-							return selectedStr >= jobStartStr && selectedStr <= jobEndStr;
-						});
-					}
-
 					successCallback(
 						visibleJobs.map((job: any) => ({
 							id: job.id,
@@ -742,21 +557,19 @@
 			requestAnimationFrame(() => {
 				dayApi?.updateSize();
 				dayApi?.gotoDate(parseLocalDate(selectedDate));
-
-				// )=- Explicit refetch immediately after the very first render.
-				// loadData already did await optionsStore.load + pullFromPB (so areasOfTown should be live),
-				// but the Calendar constructor + initial events() callback can capture a snapshot before
-				// the $state assignment from pull fully settles for derived reads + didMount.
-				// A post-render refetch guarantees a second events() + full eventDidMount cycle that
-				// calls getJobColor (for backgroundColor) and the style force + crew avatar append
-				// with the correct data. This (plus the dayApi-triggered areas refetch effect above)
-				// eliminates the "colors only appear after add or edit job" symptom.
-				// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-				dayApi?.refetchEvents();
 			});
 		});
+
+		return () => {
+			if (dayApi) {
+				dayApi.destroy();
+				dayApi = null;
+			}
+		};
 	});
 
+	// )=- Cleaned up stray duplicate calendar init (the second new Calendar + its raf/closings) that was left outside any $effect after a previous edit. The single version inside the $effect now has the destroy return (for isConnected fix), the full eventDidMount (drag handle + area color force + circular crew avatars using crewPhotoMap), modern title-only events mapper, and the explicit post-render refetch. This resolves the Rolldown "Unexpected token" that killed the Railway build.
+	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	function handleDateSelect(dateStr: string) {
 		selectedDate = dateStr;
 		syncDateToUrl(dateStr);
