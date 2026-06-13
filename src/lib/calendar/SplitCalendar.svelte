@@ -318,10 +318,21 @@
 	}
 
 	$effect(() => {
-		if (!dayEl || dayApi) return;
+		const container = dayEl;
+		if (!container || dayApi) return;
 
+		// )=- Capture the element ref locally so the async .then() below always sees the
+		// same node that was valid when the effect ran. Re-check .isConnected inside the
+		// promise to avoid creating a Calendar on a node that was unmounted during
+		// post-login reactivity / Dexie loads (the source of the "isConnected" null errors
+		// and "Node cannot be found in the current page" messages).
+		// The outer guard + this inner guard + the returned cleanup prevent duplicate
+		// instances and races after auth + data pulls.
+		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 		loadData().then(() => {
-			dayApi = new Calendar(dayEl, {
+			if (!container || !container.isConnected || dayApi) return;
+
+			dayApi = new Calendar(container, {
 				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
 				initialView: currentView,
 				initialDate: parseLocalDate(selectedDate),
