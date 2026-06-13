@@ -106,7 +106,7 @@ func main() {
 				rec.Set("defaultBillableItems", []any{})
 				rec.Set("cancelReasons", []any{})
 				rec.Set("updatedBy", "System")
-				if err := se.App.SaveRecord(rec); err != nil {
+				if err := se.App.Save(rec); err != nil {
 					log.Printf("failed to seed initial options record: %v", err)
 				}
 			}
