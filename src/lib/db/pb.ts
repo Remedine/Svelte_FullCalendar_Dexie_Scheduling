@@ -4,8 +4,19 @@ import { db, processSyncQueue, type User } from '$lib/db';
 import { setCurrentUser } from '$lib/stores/auth.svelte';
 
 // PocketBase client singleton
-console.log('[DEBUG] PUBLIC_POCKETBASE_URL =', import.meta.env.PUBLIC_POCKETBASE_URL);
-export const pb = new PocketBase(import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090');
+import { PUBLIC_POCKETBASE_URL } from '$env/static/public';
+console.log('[DEBUG] PUBLIC_POCKETBASE_URL =', PUBLIC_POCKETBASE_URL);
+
+// Fail fast in production if the required public env var is missing (prevents silent localhost fallback)
+if (!PUBLIC_POCKETBASE_URL) {
+	throw new Error(
+		'PUBLIC_POCKETBASE_URL is not defined. ' +
+		'This must be set at build time for the client bundle (e.g. via Railway shared variable PUBLIC_POCKETBASE_URL). ' +
+		'Falling back to localhost is only for local dev.'
+	);
+}
+
+export const pb = new PocketBase(PUBLIC_POCKETBASE_URL);
 
 export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;

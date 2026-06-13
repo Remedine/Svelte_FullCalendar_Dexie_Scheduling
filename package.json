@@ -8,7 +8,7 @@
 	},
 	"scripts": {
 		"dev": "vite dev --force",
-		"build": "vite build",
+		"build": "echo \"BUILD TIME: PUBLIC_POCKETBASE_URL=$PUBLIC_POCKETBASE_URL PUBLIC_PB_URL=$PUBLIC_PB_URL\" && vite build",
 		"preview": "vite preview",
 		"start": "node build",
 		"prepare": "svelte-kit sync || echo ''",
