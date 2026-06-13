@@ -1,4 +1,4 @@
-import { BREVO_API_KEY, PUBLIC_PB_URL } from '$env/static/private';
+import { BREVO_API_KEY } from '$env/static/private';
 
 const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
 

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { INTERNAL_SECRET, PUBLIC_PB_URL } from '$env/static/private';
+import { INTERNAL_SECRET } from '$env/static/private';
+import { PUBLIC_PB_URL } from '$env/static/public';
 import { sendEmailChangeConfirmation } from '$lib/server/brevo';
 
 export async function POST({ request }: { request: Request }) {
