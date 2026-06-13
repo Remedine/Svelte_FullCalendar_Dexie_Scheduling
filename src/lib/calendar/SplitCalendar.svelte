@@ -318,21 +318,30 @@
 	}
 
 	$effect(() => {
-		const container = dayEl;
-		if (!container || dayApi) return;
-
-		// )=- Capture the element ref locally so the async .then() below always sees the
-		// same node that was valid when the effect ran. Re-check .isConnected inside the
-		// promise to avoid creating a Calendar on a node that was unmounted during
-		// post-login reactivity / Dexie loads (the source of the "isConnected" null errors
-		// and "Node cannot be found in the current page" messages).
-		// The outer guard + this inner guard + the returned cleanup prevent duplicate
-		// instances and races after auth + data pulls.
+		// )=- Use a *local* `api` variable for this effect execution.
+		// This is the standard safe pattern for long-lived imperative objects (FullCalendar)
+		// in Svelte 5 $effect.
+		// - Previous cleanup (from earlier execution) runs before this body, destroying any
+		//   old instance and nulling the outer `dayApi`.
+		// - The local `api` guard prevents re-creation *within* this execution.
+		// - We only publish to the outer `dayApi` (for refetch effects etc.) once created.
+		// - The returned cleanup closes over the local `api` of *this* run and cleans it
+		//   when the component unmounts or this effect is torn down for a new run.
+		// This eliminates the destroy/create feedback loop that was causing the calendar
+		// to flash repeatedly after login (the async loadData + state updates were causing
+		// the effect to re-execute, the old cleanup nulled dayApi, the body saw null and
+		// re-scheduled creation).
+		// Also keep the isConnected guard inside the promise for the original race.
 		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		loadData().then(() => {
-			if (!container || !container.isConnected || dayApi) return;
+		let api: Calendar | null = null;
 
-			dayApi = new Calendar(container, {
+		const container = dayEl;
+		if (!container) return;
+
+		loadData().then(() => {
+			if (api || !container.isConnected) return;
+
+			api = new Calendar(container, {
 				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
 				initialView: currentView,
 				initialDate: parseLocalDate(selectedDate),
@@ -563,17 +572,22 @@
 				}
 			});
 
-			dayApi.render();
+			dayApi = api; // expose the local instance to other effects (refetch, etc.)
+
+			api.render();
 
 			requestAnimationFrame(() => {
-				dayApi?.updateSize();
-				dayApi?.gotoDate(parseLocalDate(selectedDate));
+				api?.updateSize();
+				api?.gotoDate(parseLocalDate(selectedDate));
 			});
 		});
 
 		return () => {
+			if (api) {
+				api.destroy();
+				api = null;
+			}
 			if (dayApi) {
-				dayApi.destroy();
 				dayApi = null;
 			}
 		};
