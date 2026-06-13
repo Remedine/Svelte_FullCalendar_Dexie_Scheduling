@@ -234,8 +234,14 @@
 				let usedDevFallback = false;
 
 				try {
-					// Preferred path: official confirmation flow
-					await pb.collection('users').requestEmailChange(trimmed);
+					// Preferred path: call our SvelteKit route which gets the secure link from PB (via internal route)
+					// and sends via Brevo HTTPS API (works on Railway Hobby, no SMTP).
+					const currentEmailForChange = (auth.currentUser.email || '').trim().toLowerCase();
+					await fetch('/api/auth/request-email-change', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ email: currentEmailForChange, newEmail: trimmed })
+					});
 				} catch (reqErr: any) {
 					if (isLocalDev) {
 						// On local dev without mail server configured, PocketBase can't send the confirmation.
@@ -344,7 +350,12 @@
 		success = '';
 
 		try {
-			await pb.collection('users').requestEmailChange(pendingEmailChange);
+			const currentEmailForResend = (auth.currentUser.email || '').trim().toLowerCase();
+			await fetch('/api/auth/request-email-change', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ email: currentEmailForResend, newEmail: pendingEmailChange })
+			});
 			success = `Confirmation re-sent to ${pendingEmailChange}. Check the new inbox.`;
 		} catch (e: any) {
 			error = e.message || 'Failed to resend confirmation email.';

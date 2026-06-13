@@ -65,6 +65,18 @@
 				photo: undefined
 			} as any);
 			tempPasswordForUser = tempPass; // show to admin (user changes password on first email login)
+
+			// Send password reset email via our Brevo route so the new user gets a link to set their real password (in addition to the temp pass shown to admin).
+			// This uses the PB internal route to generate the secure link, then Brevo API.
+			try {
+				await fetch('/api/auth/request-password-reset', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ email: data.email })
+				});
+			} catch (e) {
+				console.warn('Failed to send initial password reset email for new user (non-blocking):', e);
+			}
 		} catch (err) {
 			console.error('Failed to create new user:', err);
 			errors.general = 'Failed to create user. Check console / PB rules.';
