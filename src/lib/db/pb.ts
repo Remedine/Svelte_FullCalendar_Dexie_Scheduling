@@ -4,6 +4,7 @@ import { db, processSyncQueue, type User } from '$lib/db';
 import { setCurrentUser } from '$lib/stores/auth.svelte';
 
 // PocketBase client singleton
+console.log('[DEBUG] PUBLIC_POCKETBASE_URL =', import.meta.env.PUBLIC_POCKETBASE_URL);
 export const pb = new PocketBase(import.meta.env.PUBLIC_POCKETBASE_URL || 'http://127.0.0.1:8090');
 
 export function isAuthenticated(): boolean {
