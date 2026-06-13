@@ -366,7 +366,10 @@
 				},
 
 				eventDidMount: (info) => {
-					info.el.setAttribute('draggable', 'true');
+					// )=- Do NOT set draggable="true" here. It enables native HTML5 drag which interferes with FullCalendar's own drag system (editable events), causing D&D to not work or behave erratically (native vs FC drag fighting).
+					// The visual drag handle + CSS hover is sufficient for UX. FC handles the actual drag start internally on the event.
+					// This was likely contributing to "Drag and drop isn't working".
+					// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 					info.el.classList.add('fc-event--draggable');
 
 					const handle = document.createElement('div');
@@ -592,6 +595,11 @@
 			if (dayApi) {
 				dayApi = null;
 			}
+			// )=- Clear photo map on unmount to release any large data: URL strings and associated image bitmaps from memory (avatars can be several MB each when decoded).
+			// The map will be repopulated on next mount via loadData before calendar creation.
+			// Helps prevent accumulation over long sessions or repeated mount/unmount.
+			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+			crewPhotoMap = {};
 		};
 	});
 
