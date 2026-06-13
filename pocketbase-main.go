@@ -1,277 +1,233 @@
-// pocketbase-main.go
-//
-// This is the custom PocketBase Go entrypoint for the production deployment
-// (separate repo: https://github.com/Remedine/pocketbase).
-//
-// Copy this file over the main.go in that repo, then build (Dockerfile or `go build`).
-//
-// Key changes in this version (per the options 400 "Failed to create record" investigation):
-// - The "options" collection is now explicitly created WITHOUT any "key" field (and with required:false if it ever existed).
-// - On every startup we aggressively clean any legacy "key" field from an existing "options" collection (so a previously hand-edited prod collection that picked up the old migration "required:true" key will be fixed automatically on next deploy/restart).
-// - Initial "global" options record is still created by the superuser (bypassing the admin-only createRule) using only the fields the Svelte client expects.
-// - All other behaviour preserved: superuser bootstrap from POCKETBASE_ADMIN_*, mailer skips (so we can use Brevo via the Svelte proxy + /api/internal/* token generators), users collection with role=admin/crew + the exact rules you pasted, internal email link routes, etc.
-//
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-// AGENTS.md / conversation history around the 400 on /api/collections/options/records create.
-
 package main
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 	"os"
-	"time"
 
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/models/schema"
-	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func main() {
 	app := pocketbase.New()
 
-	// ------------------------------------------------------------------
-	// 1. Completely disable built-in mailer (Railway free plan has no SMTP).
-	//    We generate the tokens/links internally and hand them to the Svelte
-	//    app which calls Brevo.
-	// ------------------------------------------------------------------
-	app.OnRecordRequestPasswordResetRequest("users").BindFunc(func(e *core.RecordRequestPasswordResetRequestEvent) error {
-		return nil // we handle via /api/internal/request-password-reset
-	})
-	app.OnRecordRequestVerificationRequest("users").BindFunc(func(e *core.RecordRequestVerificationRequestEvent) error {
+	internalSecret := os.Getenv("INTERNAL_SECRET")
+	pbPublicURL := os.Getenv("PB_PUBLIC_URL")
+	if pbPublicURL == "" {
+		pbPublicURL = "https://pocketbase-production-e9a4.up.railway.app"
+	}
+
+	// Skip built-in mailer for the flows we handle via Brevo (prevents SMTP timeouts)
+	app.OnRecordRequestVerificationRequest().BindFunc(func(e *core.RecordRequestVerificationRequestEvent) error {
 		return nil
 	})
-	app.OnRecordRequestEmailChangeRequest("users").BindFunc(func(e *core.RecordRequestEmailChangeRequestEvent) error {
+	app.OnRecordRequestPasswordResetRequest().BindFunc(func(e *core.RecordRequestPasswordResetRequestEvent) error {
+		return nil
+	})
+	app.OnRecordRequestEmailChangeRequest().BindFunc(func(e *core.RecordRequestEmailChangeRequestEvent) error {
 		return nil
 	})
 	app.OnMailerRecordAuthAlertSend().BindFunc(func(e *core.MailerRecordEvent) error {
 		return nil
 	})
 
-	// ------------------------------------------------------------------
-	// 2. OnServe hook: bootstrap superuser + collections + initial data + internal routes
-	// ------------------------------------------------------------------
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		// --- Superuser bootstrap (from Railway env) ---
-		adminEmail := os.Getenv("POCKETBASE_ADMIN_EMAIL")
-		adminPassword := os.Getenv("POCKETBASE_ADMIN_PASSWORD")
-		if adminEmail != "" && adminPassword != "" {
-			superusers, err := app.FindCollectionByNameOrId("_superusers")
-			if err == nil {
-				admin, err := app.FindAuthRecordByEmail(superusers, adminEmail)
-				if err != nil {
-					admin = core.NewRecord(superusers)
-					admin.Set("email", adminEmail)
-				}
-				admin.Set("password", adminPassword)
-				admin.Set("passwordConfirm", adminPassword)
-				if err := app.Save(admin); err != nil {
-					log.Println("[main.go] failed to upsert superuser:", err)
-				} else {
-					log.Println("[main.go] superuser ensured:", adminEmail)
-				}
-			}
-		}
+		// Ensure the "users" auth collection exists (the one your app + internal routes need)
+		if _, err := se.App.FindCollectionByNameOrId("users"); err != nil {
+			col := core.NewAuthCollection("users", "users")
 
-		pbPublicURL := os.Getenv("PB_PUBLIC_URL")
-		if pbPublicURL == "" {
-			pbPublicURL = "https://pocketbase-production-e9a4.up.railway.app"
-		}
-		internalSecret := os.Getenv("INTERNAL_SECRET") // used by Svelte server routes if you want auth on the internal endpoints
-
-		// ------------------------------------------------------------------
-		// USERS collection (auth) - matches exactly the JSON you pasted
-		// ------------------------------------------------------------------
-		users, err := app.FindCollectionByNameOrId("users")
-		if err != nil {
-			users = core.NewBaseCollection("users")
-			users.Type = "auth"
-
-			// Fields (simplified but matching your pasted collection)
-			users.Fields.Add(&schema.TextField{
-				Name:     "name",
-				Required: false,
+			// Fields from your pb_migrations (role, active, force* updates, pinHash, photo, etc.)
+			col.Fields.Add(&core.SelectField{
+				Name:     "role",
+				Values:   []string{"admin", "crew"},
+				Required: true,
 			})
-			users.Fields.Add(&schema.FileField{
+			col.Fields.Add(&core.BoolField{Name: "active", Required: true})
+			col.Fields.Add(&core.BoolField{Name: "forcePinUpdate", Required: true})
+			col.Fields.Add(&core.BoolField{Name: "forcePhotoUpdate", Required: true})
+			col.Fields.Add(&core.TextField{Name: "pinHash"})
+			col.Fields.Add(&core.FileField{
 				Name:      "photo",
 				MaxSelect: 1,
 				MimeTypes: []string{"image/jpeg", "image/png", "image/svg+xml", "image/gif", "image/webp"},
 			})
-			users.Fields.Add(&schema.SelectField{
-				Name:     "role",
-				Required: true,
-				Values:   []string{"admin", "crew"},
-			})
-			users.Fields.Add(&schema.BoolField{Name: "active"})
-			users.Fields.Add(&schema.BoolField{Name: "forcePinUpdate"})
-			users.Fields.Add(&schema.BoolField{Name: "forcePhotoUpdate"})
-			users.Fields.Add(&schema.TextField{Name: "pinHash"})
 
-			// Rules from your pasted users collection JSON
-			users.ListRule = types.Pointer("@request.auth.id != \"\"")
-			users.ViewRule = types.Pointer("@request.auth.role = \"admin\" || id = @request.auth.id")
-			users.CreateRule = types.Pointer("@request.auth.role = \"admin\" || id = @request.auth.id")
-			users.UpdateRule = types.Pointer("@request.auth.role = \"admin\" || @request.auth.id = id")
-			users.DeleteRule = types.Pointer("@request.auth.role = \"admin\" || id = @request.auth.id")
-
-			if err := app.Save(users); err != nil {
-				log.Println("[main.go] failed to create users collection:", err)
+			if err := se.App.Save(col); err != nil {
+				log.Printf("failed to create 'users' collection: %v", err)
 			} else {
-				log.Println("[main.go] users collection created")
+				log.Println("created 'users' collection on first start")
 			}
 		}
 
-		// ------------------------------------------------------------------
-		// OPTIONS collection (the critical one for the 400)
-		// ------------------------------------------------------------------
-		options, err := app.FindCollectionByNameOrId("options")
-		if err != nil {
-			options = core.NewBaseCollection("options")
+		// === MINIMAL ADDITION: options collection fix (no required "key") ===
+		// This directly addresses the 400 "Failed to create record" when the Svelte client
+		// does getFirstListItem('') + create (the payload never includes "key").
+		// We create without "key", and on every startup we remove any legacy "key" field
+		// from an existing collection (so prod collections that picked up the old migration
+		// or were edited via UI will be cleaned automatically on redeploy/restart).
+		// The initial record seed runs with full app privileges (bypasses the admin-only createRule).
 
-			// IMPORTANT: NO "key" field at all.
-			// The old migration 1780479032 added a required "key".
-			// We deliberately omit it so the Svelte client (which does getFirstListItem('') + create without key)
-			// never gets a 400 validation error.
+		// 1. Create "options" if missing (deliberately no "key" field)
+		if _, err := se.App.FindCollectionByNameOrId("options"); err != nil {
+			optionsCol := core.NewBaseCollection("options")
 
-			options.Fields.Add(&schema.NumberField{
-				Name:     "defaultJobDurationHours",
-				Required: false,
-			})
-			options.Fields.Add(&schema.NumberField{
-				Name:     "taxRate",
-				Required: false,
-			})
-			options.Fields.Add(&schema.NumberField{
-				Name:     "invoiceDueDays",
-				Required: false,
-			})
-			options.Fields.Add(&schema.JSONField{
-				Name: "areasOfTown",
-			})
-			options.Fields.Add(&schema.JSONField{
-				Name: "defaultBillableItems",
-			})
-			options.Fields.Add(&schema.JSONField{
-				Name: "cancelReasons",
-			})
-			options.Fields.Add(&schema.TextField{
-				Name: "updatedBy",
-			})
+			optionsCol.Fields.Add(&core.NumberField{Name: "defaultJobDurationHours"})
+			optionsCol.Fields.Add(&core.NumberField{Name: "taxRate"})
+			optionsCol.Fields.Add(&core.NumberField{Name: "invoiceDueDays"})
+			optionsCol.Fields.Add(&core.JSONField{Name: "areasOfTown"})
+			optionsCol.Fields.Add(&core.JSONField{Name: "defaultBillableItems"})
+			optionsCol.Fields.Add(&core.JSONField{Name: "cancelReasons"})
+			optionsCol.Fields.Add(&core.TextField{Name: "updatedBy"})
 
-			// Rules (from your earlier paste + 1780477923 migration)
-			options.ListRule = types.Pointer("@request.auth.id != \"\"")
-			options.ViewRule = types.Pointer("@request.auth.id != \"\"")
-			options.CreateRule = types.Pointer("@request.auth.role = \"admin\"")
-			options.UpdateRule = types.Pointer("@request.auth.role = \"admin\"")
-			options.DeleteRule = types.Pointer("@request.auth.role = \"admin\"")
+			// Rules (recommended to match your earlier migration; you can also set these in the Admin UI)
+			// optionsCol.ListRule = "@request.auth.id != \"\""
+			// optionsCol.ViewRule = "@request.auth.id != \"\""
+			// optionsCol.CreateRule = "@request.auth.role = \"admin\""
+			// optionsCol.UpdateRule = "@request.auth.role = \"admin\""
+			// optionsCol.DeleteRule = "@request.auth.role = \"admin\""
 
-			if err := app.Save(options); err != nil {
-				log.Println("[main.go] failed to create options collection:", err)
+			if err := se.App.Save(optionsCol); err != nil {
+				log.Printf("failed to create 'options' collection: %v", err)
 			} else {
-				log.Println("[main.go] options collection created (NO key field)")
+				log.Println("created 'options' collection (explicitly without 'key' field)")
 			}
 		}
 
-		// ------------------------------------------------------------------
-		// Runtime safety net: if an existing "options" collection still has
-		// a "key" field (from manual UI edit or old migration), remove it now.
-		// This fixes the 400 for people who already have the collection on prod.
-		// ------------------------------------------------------------------
-		if optsCol, err := app.FindCollectionByNameOrId("options"); err == nil {
-			changed := false
-			newFields := make([]*schema.Field, 0, len(optsCol.Fields))
-			for _, f := range optsCol.Fields {
-				if f.GetName() == "key" {
-					changed = true
-					log.Println("[main.go] removing legacy 'key' field from options collection")
-					continue
+		// 2. Runtime cleanup: remove any legacy "key" field that may exist on the options collection
+		//    (this fixes collections that already have the required "key" from the old migration or manual edits)
+		if col, err := se.App.FindCollectionByNameOrId("options"); err == nil {
+			removed := false
+			for i := len(col.Fields) - 1; i >= 0; i-- {
+				if col.Fields[i].GetName() == "key" {
+					col.Fields = append(col.Fields[:i], col.Fields[i+1:]...)
+					removed = true
 				}
-				newFields = append(newFields, f)
 			}
-			if changed {
-				optsCol.Fields = newFields
-				if err := app.Save(optsCol); err != nil {
-					log.Println("[main.go] warning: could not persist options schema cleanup:", err)
+			if removed {
+				if err := se.App.Save(col); err != nil {
+					log.Printf("warning: could not remove legacy 'key' field from options: %v", err)
 				} else {
-					log.Println("[main.go] options collection schema cleaned (key field removed)")
+					log.Println("removed legacy 'key' field from existing options collection")
 				}
 			}
 		}
 
-		// ------------------------------------------------------------------
-		// Seed a global options record if none exists (runs as superuser → bypasses createRule)
-		// ------------------------------------------------------------------
-		if _, err := app.FindFirstRecordByFilter("options", ""); err != nil {
-			if optsCol, err := app.FindCollectionByNameOrId("options"); err == nil {
-				rec := core.NewRecord(optsCol)
+		// 3. Seed a single global options record if none exists (uses the same defaults as the Svelte client)
+		if _, err := se.App.FindFirstRecordByFilter("options", ""); err != nil {
+			if optionsCol, err := se.App.FindCollectionByNameOrId("options"); err == nil {
+				rec := core.NewRecord(optionsCol)
 				rec.Set("defaultJobDurationHours", 2)
-				rec.Set("taxRate", 0.065)
+				rec.Set("taxRate", 6.5)
 				rec.Set("invoiceDueDays", 30)
 				rec.Set("areasOfTown", []any{})
 				rec.Set("defaultBillableItems", []any{})
 				rec.Set("cancelReasons", []any{})
 				rec.Set("updatedBy", "System")
 
-				if err := app.SaveRecord(rec); err != nil {
-					log.Println("[main.go] failed to seed initial options record:", err)
+				if err := se.App.SaveRecord(rec); err != nil {
+					log.Printf("failed to seed initial options record: %v", err)
 				} else {
-					log.Println("[main.go] seeded initial global options record")
+					log.Println("seeded initial global options record")
 				}
 			}
 		}
 
-		// ------------------------------------------------------------------
-		// Internal routes used by the Svelte server (Brevo flow).
-		// The Svelte +server.ts calls these (protected by INTERNAL_SECRET if you want),
-		// gets a fresh token + full link, then calls Brevo with that link.
-		// ------------------------------------------------------------------
-		se.Router.POST("/api/internal/request-password-reset", func(e *core.RequestEvent) error {
-			email := e.Request.URL.Query().Get("email")
-			if email == "" {
-				return e.JSON(400, map[string]string{"error": "email required"})
+		// Initial superuser from Railway env vars (so you can reach /_/)
+		if adminEmail := os.Getenv("POCKETBASE_ADMIN_EMAIL"); adminEmail != "" {
+			if adminPass := os.Getenv("POCKETBASE_ADMIN_PASSWORD"); adminPass != "" {
+				if _, err := se.App.FindAuthRecordByEmail("_superusers", adminEmail); err != nil {
+					collection, err := se.App.FindCollectionByNameOrId("_superusers")
+					if err == nil && collection != nil {
+						newSuper := core.NewRecord(collection)
+						newSuper.Set("email", adminEmail)
+						newSuper.Set("password", adminPass)
+						newSuper.Set("passwordConfirm", adminPass)
+						if err := se.App.Save(newSuper); err != nil {
+							log.Printf("failed to create initial superuser: %v", err)
+						} else {
+							log.Printf("initial superuser created for %s", adminEmail)
+						}
+					}
+				}
 			}
-			user, err := app.FindAuthRecordByEmail("users", email)
-			if err != nil || user == nil {
-				// Still return 200 so we don't leak existence
-				return e.JSON(200, map[string]string{"link": ""})
+		}
+
+		checkSecret := func(e *core.RequestEvent) error {
+			if e.Request.Header.Get("X-Internal-Secret") != internalSecret {
+				return apis.NewForbiddenError("invalid secret", nil)
 			}
-			token, err := user.NewPasswordResetToken()
-			if err != nil {
-				return e.JSON(500, map[string]string{"error": "token generation failed"})
-			}
-			link := pbPublicURL + "/_/#/auth/confirm-password-reset/" + token
-			return e.JSON(200, map[string]string{"link": link})
-		})
+			return nil
+		}
 
 		se.Router.POST("/api/internal/request-verification", func(e *core.RequestEvent) error {
-			email := e.Request.URL.Query().Get("email")
-			if email == "" {
-				return e.JSON(400, map[string]string{"error": "email required"})
+			if err := checkSecret(e); err != nil {
+				return err
 			}
-			user, err := app.FindAuthRecordByEmail("users", email)
-			if err != nil || user == nil {
-				return e.JSON(200, map[string]string{"link": ""})
+			var body struct{ Email string }
+			if err := e.BindBody(&body); err != nil {
+				return err
 			}
-			token, err := user.NewVerificationToken()
+			record, err := e.App.FindAuthRecordByEmail("users", body.Email)
 			if err != nil {
-				return e.JSON(500, map[string]string{"error": "token generation failed"})
+				return err
 			}
-			link := pbPublicURL + "/_/#/auth/confirm-verification/" + token
-			return e.JSON(200, map[string]string{"link": link})
+			token, err := record.NewVerificationToken()
+			if err != nil {
+				return err
+			}
+			link := fmt.Sprintf("%s/_/#/auth/confirm-verification/%s", pbPublicURL, token)
+			return e.JSON(http.StatusOK, map[string]string{"link": link})
+		})
+
+		se.Router.POST("/api/internal/request-password-reset", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct{ Email string }
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindAuthRecordByEmail("users", body.Email)
+			if err != nil {
+				return err
+			}
+			token, err := record.NewPasswordResetToken()
+			if err != nil {
+				return err
+			}
+			link := fmt.Sprintf("%s/_/#/auth/confirm-password-reset/%s", pbPublicURL, token)
+			return e.JSON(http.StatusOK, map[string]string{"link": link})
 		})
 
 		se.Router.POST("/api/internal/request-email-change", func(e *core.RequestEvent) error {
-			// Similar pattern if you implement email change via Brevo
-			return e.JSON(200, map[string]string{"link": ""})
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				Email    string
+				NewEmail string
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindAuthRecordByEmail("users", body.Email)
+			if err != nil {
+				return err
+			}
+			token, err := record.NewEmailChangeToken(body.NewEmail)
+			if err != nil {
+				return err
+			}
+			link := fmt.Sprintf("%s/_/#/auth/confirm-email-change/%s", pbPublicURL, token)
+			return e.JSON(http.StatusOK, map[string]string{"link": link})
 		})
 
 		return se.Next()
 	})
 
-	// ------------------------------------------------------------------
-	// Start the app
-	// ------------------------------------------------------------------
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
