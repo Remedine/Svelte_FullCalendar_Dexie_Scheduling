@@ -62,63 +62,43 @@ func main() {
 			}
 		}
 
-		// === MINIMAL ADDITION: options collection fix (no required "key") ===
-		// This directly addresses the 400 "Failed to create record" when the Svelte client
-		// does getFirstListItem('') + create (the payload never includes "key").
-		// We create without "key", and on every startup we remove any legacy "key" field
-		// from an existing collection (so prod collections that picked up the old migration
-		// or were edited via UI will be cleaned automatically on redeploy/restart).
-		// The initial record seed runs with full app privileges (bypasses the admin-only createRule).
+		// === options collection fix (no "key" field) ===
+		// create without key + remove any legacy "key" from existing collection + seed global record
+		// (prevents 400 "Failed to create record" from Svelte client)
 
-		// 1. Create "options" if missing (deliberately no "key" field)
 		if _, err := se.App.FindCollectionByNameOrId("options"); err != nil {
-			optionsCol := core.NewBaseCollection("options")
-
-			optionsCol.Fields.Add(&core.NumberField{Name: "defaultJobDurationHours"})
-			optionsCol.Fields.Add(&core.NumberField{Name: "taxRate"})
-			optionsCol.Fields.Add(&core.NumberField{Name: "invoiceDueDays"})
-			optionsCol.Fields.Add(&core.JSONField{Name: "areasOfTown"})
-			optionsCol.Fields.Add(&core.JSONField{Name: "defaultBillableItems"})
-			optionsCol.Fields.Add(&core.JSONField{Name: "cancelReasons"})
-			optionsCol.Fields.Add(&core.TextField{Name: "updatedBy"})
-
-			// Rules (recommended to match your earlier migration; you can also set these in the Admin UI)
-			// optionsCol.ListRule = "@request.auth.id != \"\""
-			// optionsCol.ViewRule = "@request.auth.id != \"\""
-			// optionsCol.CreateRule = "@request.auth.role = \"admin\""
-			// optionsCol.UpdateRule = "@request.auth.role = \"admin\""
-			// optionsCol.DeleteRule = "@request.auth.role = \"admin\""
-
-			if err := se.App.Save(optionsCol); err != nil {
+			col := core.NewBaseCollection("options")
+			col.Fields.Add(&core.NumberField{Name: "defaultJobDurationHours"})
+			col.Fields.Add(&core.NumberField{Name: "taxRate"})
+			col.Fields.Add(&core.NumberField{Name: "invoiceDueDays"})
+			col.Fields.Add(&core.JSONField{Name: "areasOfTown"})
+			col.Fields.Add(&core.JSONField{Name: "defaultBillableItems"})
+			col.Fields.Add(&core.JSONField{Name: "cancelReasons"})
+			col.Fields.Add(&core.TextField{Name: "updatedBy"})
+			if err := se.App.Save(col); err != nil {
 				log.Printf("failed to create 'options' collection: %v", err)
-			} else {
-				log.Println("created 'options' collection (explicitly without 'key' field)")
 			}
 		}
 
-		// 2. Runtime cleanup: remove any legacy "key" field that may exist on the options collection
-		//    (this fixes collections that already have the required "key" from the old migration or manual edits)
+		// remove legacy "key" field if present on existing options collection
 		if col, err := se.App.FindCollectionByNameOrId("options"); err == nil {
-			removed := false
 			for i := len(col.Fields) - 1; i >= 0; i-- {
 				if col.Fields[i].GetName() == "key" {
 					col.Fields = append(col.Fields[:i], col.Fields[i+1:]...)
-					removed = true
-				}
-			}
-			if removed {
-				if err := se.App.Save(col); err != nil {
-					log.Printf("warning: could not remove legacy 'key' field from options: %v", err)
-				} else {
-					log.Println("removed legacy 'key' field from existing options collection")
+					if err := se.App.Save(col); err != nil {
+						log.Printf("warning: failed to remove legacy 'key' from options: %v", err)
+					} else {
+						log.Println("removed legacy 'key' from options collection")
+					}
+					break
 				}
 			}
 		}
 
-		// 3. Seed a single global options record if none exists (uses the same defaults as the Svelte client)
+		// seed initial global options record if none exists (runs with full privileges)
 		if _, err := se.App.FindFirstRecordByFilter("options", ""); err != nil {
-			if optionsCol, err := se.App.FindCollectionByNameOrId("options"); err == nil {
-				rec := core.NewRecord(optionsCol)
+			if col, err := se.App.FindCollectionByNameOrId("options"); err == nil {
+				rec := core.NewRecord(col)
 				rec.Set("defaultJobDurationHours", 2)
 				rec.Set("taxRate", 6.5)
 				rec.Set("invoiceDueDays", 30)
@@ -126,11 +106,8 @@ func main() {
 				rec.Set("defaultBillableItems", []any{})
 				rec.Set("cancelReasons", []any{})
 				rec.Set("updatedBy", "System")
-
 				if err := se.App.SaveRecord(rec); err != nil {
 					log.Printf("failed to seed initial options record: %v", err)
-				} else {
-					log.Println("seeded initial global options record")
 				}
 			}
 		}
