@@ -33,6 +33,8 @@ const SENDER = {
 
 const LOGO_HTML = `<img src="https://static.wixstatic.com/media/5bfb6f_e26c222c0bf648c39eeed8e67ae87701.png/v1/fill/w_71,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/5bfb6f_e26c222c0bf648c39eeed8e67ae87701.png" style="height:40px; vertical-align:middle;" alt="Capital City Windows"> <strong style="font-size:20px; vertical-align:middle;">Capital City Windows</strong>`;
 
+const CREDIT_HTML = `<p style="color:#999; font-size:10px; margin-top:16px;">Transactional emails powered by Brevo</p>`;
+
 // === AUTH EMAILS (use links from PB internal routes) ===
 
 export async function sendVerificationEmail(to: string, link: string) {
@@ -43,6 +45,7 @@ export async function sendVerificationEmail(to: string, link: string) {
 			<p>Please confirm your email address for your Capital City Windows account.</p>
 			<p><a href="${link}" style="background:#1e3a8a; color:white; padding:12px 24px; text-decoration:none; border-radius:4px; display:inline-block;">Verify Email</a></p>
 			<p style="color:#666; font-size:12px;">If you did not request this, you can safely ignore this email.</p>
+			${CREDIT_HTML}
 		</div>
 	`;
 	await sendBrevoEmail({
@@ -61,6 +64,7 @@ export async function sendPasswordResetEmail(to: string, link: string) {
 			<p>Click the button below to reset your password for your Capital City Windows account.</p>
 			<p><a href="${link}" style="background:#1e3a8a; color:white; padding:12px 24px; text-decoration:none; border-radius:4px; display:inline-block;">Reset Password</a></p>
 			<p style="color:#666; font-size:12px;">If you did not request this, you can safely ignore this email.</p>
+			${CREDIT_HTML}
 		</div>
 	`;
 	await sendBrevoEmail({
@@ -79,6 +83,7 @@ export async function sendEmailChangeConfirmation(to: string, link: string) {
 			<p>Click the button below to confirm your new email address for your Capital City Windows account.</p>
 			<p><a href="${link}" style="background:#1e3a8a; color:white; padding:12px 24px; text-decoration:none; border-radius:4px; display:inline-block;">Confirm Email Change</a></p>
 			<p style="color:#666; font-size:12px;">If you did not request this, you can safely ignore this email.</p>
+			${CREDIT_HTML}
 		</div>
 	`;
 	await sendBrevoEmail({
@@ -121,6 +126,7 @@ export async function sendJobAssignmentEmail(
 				${mapHtml}
 			</ul>
 			<p>See Calendar for more details.</p>
+			${CREDIT_HTML}
 		</div>
 	`;
 
@@ -141,6 +147,7 @@ export async function sendInvoiceSentEmail(to: string, invoiceId: string, client
 			<h2>Invoice sent</h2>
 			<p>An invoice has been sent for client <strong>${clientName}</strong> (Invoice ID: ${invoiceId}).</p>
 			<p>Please log in to the app to view and manage the invoice.</p>
+			${CREDIT_HTML}
 		</div>
 	`;
 
