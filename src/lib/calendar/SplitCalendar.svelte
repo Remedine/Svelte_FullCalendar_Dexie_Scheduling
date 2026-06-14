@@ -736,6 +736,13 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 										checked={filters.crew.includes(crew)}
 										onchange={() => toggleFilter('crew', crew)}
 									/>
+									<span class="split-calendar__filter-option-avatar">
+										{#if crewPhotoMap[crew]}
+											<img src={crewPhotoMap[crew]} alt={crew} />
+										{:else}
+											{(crew || '?').charAt(0).toUpperCase()}
+										{/if}
+									</span>
 									<span>{crew}</span>
 								</label>
 							{/each}
@@ -1055,6 +1062,27 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	.split-calendar__filter-option input {
 		margin: 0;
 		accent-color: var(--color-primary);
+	}
+
+	.split-calendar__filter-option-avatar {
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		overflow: hidden;
+		background-color: var(--color-surface-2);
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 9px;
+		font-weight: 600;
+		color: var(--color-text-muted);
+	}
+
+	.split-calendar__filter-option-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 
 	.split-calendar__status--completed {
