@@ -37,7 +37,7 @@ func main() {
 	// Automatically verify the user record when they successfully complete a password reset.
 	// This is used for new users created by admins: the "set your password" step also activates
 	// their account (sets verified=true), so we only need a single link/button in the welcome email.
-	app.OnRecordAfterConfirmPasswordResetRequest("users").BindFunc(func(e *core.RecordEvent) error {
+	app.OnRecordConfirmPasswordResetRequest("users").BindFunc(func(e *core.RecordConfirmPasswordResetRequestEvent) error {
 		if !e.Record.Verified() {
 			e.Record.Set("verified", true)
 			if err := e.App.Save(e.Record); err != nil {
