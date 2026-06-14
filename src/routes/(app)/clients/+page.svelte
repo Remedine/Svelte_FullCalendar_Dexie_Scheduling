@@ -406,7 +406,15 @@
 								{#each expandedClients[client.id!].jobs as job (job.id)}
 									<div
 										class="client-card__related-job"
+										role="button"
+										tabindex="0"
 										onclick={() => openJobFromClient(job, client)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												openJobFromClient(job, client);
+											}
+										}}
 									>
 										<span class="date">{new Date(job.start).toLocaleDateString()}</span>
 										<span class="title">{job.title}</span>

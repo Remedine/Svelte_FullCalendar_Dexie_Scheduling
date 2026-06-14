@@ -252,8 +252,8 @@
 </script>
 
 {#if show}
-	<div class="job-details-modal" onclick={closeModal}>
-		<div class="job-details-modal__content" onclick={(e) => e.stopPropagation()}>
+	<div class="job-details-modal" role="presentation" onclick={closeModal}>
+		<div class="job-details-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
 			{#if loading}
 				<div class="job-details-modal__loading">Loading job details…</div>
 			{:else if !job}

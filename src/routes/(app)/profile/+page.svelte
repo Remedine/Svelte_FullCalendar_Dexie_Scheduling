@@ -377,7 +377,7 @@
 					<!-- )=- Normalize here too for consistency (fixes potential 404 if photo is bare filename). -->
 					<img
 						src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
-						alt="ID photo"
+						alt="User ID photo"
 						class="profile__badge-img"
 					/>
 				{:else}

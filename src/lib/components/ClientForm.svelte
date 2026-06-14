@@ -147,8 +147,8 @@
 </script>
 
 {#if show}
-	<div class="client-form-modal" onclick={closeForm}>
-		<div class="client-form-modal__content" onclick={(e) => e.stopPropagation()}>
+	<div class="client-form-modal" role="presentation" onclick={closeForm}>
+		<div class="client-form-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
 			<h2 class="client-form-modal__title">
 				{isEditing ? 'Edit Client' : 'New Client'}
 			</h2>
@@ -159,60 +159,74 @@
 			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 			<form id="client-form" onsubmit={handleSubmit} class="client-form-modal__form">
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Full Name <span class="required">*</span></label>
-					<input bind:value={formData.name} class="client-form-modal__input" />
+					<label class="client-form-modal__label">
+						Full Name <span class="required">*</span>
+						<input bind:value={formData.name} class="client-form-modal__input" />
+					</label>
 					{#if errors.name}<small class="error">{errors.name}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Email</label>
-					<input type="email" bind:value={formData.email} class="client-form-modal__input" />
+					<label class="client-form-modal__label">
+						Email
+						<input type="email" bind:value={formData.email} class="client-form-modal__input" />
+					</label>
 					{#if errors.email}<small class="error">{errors.email}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Phone</label>
-					<input
-						type="tel"
-						bind:value={formData.phone}
-						oninput={(e) => (formData.phone = formatPhone((e.target as HTMLInputElement).value))}
-						placeholder="(503) 555-1234"
-						class="client-form-modal__input"
-					/>
+					<label class="client-form-modal__label">
+						Phone
+						<input
+							type="tel"
+							bind:value={formData.phone}
+							oninput={(e) => (formData.phone = formatPhone((e.target as HTMLInputElement).value))}
+							placeholder="(503) 555-1234"
+							class="client-form-modal__input"
+						/>
+					</label>
 					{#if errors.phone}<small class="error">{errors.phone}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Street Address</label>
-					<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input" />
+					<label class="client-form-modal__label">
+						Street Address
+						<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input" />
+					</label>
 				</div>
 
 				<div class="client-form-modal__address-row">
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">City</label>
-						<input bind:value={formData.serviceAddressCity} class="client-form-modal__input" />
+						<label class="client-form-modal__label">
+							City
+							<input bind:value={formData.serviceAddressCity} class="client-form-modal__input" />
+						</label>
 					</div>
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">State</label>
-						<input
-							bind:value={formData.serviceAddressState}
-							maxlength="2"
-							class="client-form-modal__input"
-						/>
+						<label class="client-form-modal__label">
+							State
+							<input
+								bind:value={formData.serviceAddressState}
+								maxlength="2"
+								class="client-form-modal__input"
+							/>
+						</label>
 					</div>
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">ZIP</label>
-						<input bind:value={formData.serviceAddressZip} class="client-form-modal__input" />
+						<label class="client-form-modal__label">
+							ZIP
+							<input bind:value={formData.serviceAddressZip} class="client-form-modal__input" />
+						</label>
 					</div>
 				</div>
 
 				<!-- Area with Colored Left Border -->
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label"
+					<label for="area-of-town" class="client-form-modal__label"
 						>Area of Town <span class="required">*</span></label
 					>
 					<div class="area-field-wrapper" style="border-left: 6px solid {selectedAreaColor};">
-						<select bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
+						<select id="area-of-town" bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
 							<option value="">Select area...</option>
 							{#each areaOptions as area}
 								<option value={area.id}>{area.label}</option>
@@ -223,18 +237,22 @@
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Preferred Billing</label>
-					<select bind:value={formData.preferredBillingMethod} class="client-form-modal__input">
-						<option value="email">Email</option>
-						<option value="check">Check</option>
-						<option value="invoice">Invoice</option>
-					</select>
+					<label class="client-form-modal__label">
+						Preferred Billing
+						<select bind:value={formData.preferredBillingMethod} class="client-form-modal__input">
+							<option value="email">Email</option>
+							<option value="check">Check</option>
+							<option value="invoice">Invoice</option>
+						</select>
+					</label>
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">Notes</label>
-					<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"
-					></textarea>
+					<label class="client-form-modal__label">
+						Notes
+						<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"
+						></textarea>
+					</label>
 				</div>
 			</form>
 

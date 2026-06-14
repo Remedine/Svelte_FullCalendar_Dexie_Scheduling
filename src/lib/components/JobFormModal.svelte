@@ -286,6 +286,12 @@
 			aria-modal="true"
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') {
+					e.stopPropagation();
+					closeModal();
+				}
+			}}
 		>
 			<h2 class="new-job-modal__title">
 				{isEditing ? 'Edit Job' : 'Create New Job'}
@@ -410,8 +416,8 @@
 
 				<!-- Billable Items -->
 				<div class="new-job-modal__field">
-					<label class="new-job-modal__label">Billable Items</label>
-					<div class="billable-items">
+					<label id="billable-label" class="new-job-modal__label">Billable Items</label>
+					<div class="billable-items" role="group" aria-labelledby="billable-label">
 						{#each currentJob.billableItems as item, index (index)}
 							<BillableItemRow
 								bind:item={currentJob.billableItems[index]}
@@ -465,8 +471,14 @@
 
 <!-- Cancel Confirmation -->
 {#if showCancelConfirm}
-	<div class="cancel-confirm-modal" onclick={() => (showCancelConfirm = false)}>
-		<div class="cancel-confirm-modal__content" onclick={(e) => e.stopPropagation()}>
+	<div class="cancel-confirm-modal" role="presentation" onclick={() => (showCancelConfirm = false)}>
+		<div class="cancel-confirm-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') {
+					e.stopPropagation();
+					showCancelConfirm = false;
+				}
+			}}>
 			<h3 class="cancel-confirm-modal__title">Cancel Job?</h3>
 			<p class="cancel-confirm-modal__subtitle">Please select a reason:</p>
 
@@ -485,13 +497,15 @@
 			</div>
 
 			<div class="new-job-modal__field">
-				<label class="new-job-modal__label">Additional notes (optional)</label>
-				<textarea
-					class="new-job-modal__input"
-					rows="3"
-					bind:value={currentJob.cancelNotes}
-					placeholder="Any extra details..."
-				></textarea>
+				<label class="new-job-modal__label">
+					Additional notes (optional)
+					<textarea
+						class="new-job-modal__input"
+						rows="3"
+						bind:value={currentJob.cancelNotes}
+						placeholder="Any extra details..."
+					></textarea>
+				</label>
 			</div>
 
 			<div class="cancel-confirm-modal__footer">

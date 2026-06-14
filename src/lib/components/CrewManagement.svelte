@@ -289,23 +289,36 @@
 				aria-modal="true"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => {
+					if (e.key === 'Escape') {
+						e.stopPropagation();
+						showEditModal = false;
+						selectedUser = null;
+					}
+				}}
 			>
 				<h2 class="modal__title">
 					Edit {selectedUser.firstName || ''}
 					{selectedUser.lastName || selectedUser.name || ''}
 				</h2>
 				<div class="modal__form">
-					<label class="modal__label">First Name</label>
-					<input type="text" bind:value={editFirstName} class="modal__input" />
+					<label class="modal__label">
+						First Name
+						<input type="text" bind:value={editFirstName} class="modal__input" />
+					</label>
 
-					<label class="modal__label">Last Name</label>
-					<input type="text" bind:value={editLastName} class="modal__input" />
+					<label class="modal__label">
+						Last Name
+						<input type="text" bind:value={editLastName} class="modal__input" />
+					</label>
 
-					<label class="modal__label">Role</label>
-					<select bind:value={editRole} class="modal__select">
-						<option value="crew">Crew</option>
-						<option value="admin">Admin</option>
-					</select>
+					<label class="modal__label">
+						Role
+						<select bind:value={editRole} class="modal__select">
+							<option value="crew">Crew</option>
+							<option value="admin">Admin</option>
+						</select>
+					</label>
 
 					<label class="modal__checkbox-label">
 						<input type="checkbox" bind:checked={editForcePhoto} />
@@ -349,19 +362,28 @@
 				aria-modal="true"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => {
+					if (e.key === 'Escape') {
+						e.stopPropagation();
+						showEmailModal = false;
+						selectedUser = null;
+					}
+				}}
 			>
 				<h2 class="modal__title">
 					Link Email for {selectedUser.firstName}
 					{selectedUser.lastName || selectedUser.name || ''}
 				</h2>
 				<div class="modal__form">
-					<label class="modal__label">Email Address</label>
-					<input
-						type="email"
-						bind:value={editEmail}
-						class="modal__input"
-						placeholder="user@capitalcitywindows.com"
-					/>
+					<label class="modal__label">
+						Email Address
+						<input
+							type="email"
+							bind:value={editEmail}
+							class="modal__input"
+							placeholder="user@capitalcitywindows.com"
+						/>
+					</label>
 				</div>
 				<div class="modal__actions">
 					<button
