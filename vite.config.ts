@@ -25,7 +25,20 @@ export default defineConfig({
 			},
 			// )=- Workbox will still generate sw.js and precache the app shell for offline use (Dexie + PWA).
 			includeAssets: ['favicon.svg']
-		})
+		}),
+		{
+			// Add crossorigin="anonymous" to all generated preload/modulepreload links.
+			// This fixes "A preload ... is found, but is not used because the request credentials mode does not match"
+			// warnings (common with SvelteKit + Vite PWA + service workers, especially on platforms like Railway).
+			// The browser's preload hints will then use a consistent (anonymous) credentials mode.
+			name: 'add-crossorigin-to-preloads',
+			transformIndexHtml(html) {
+				return html.replace(
+					/<link rel="(modulepreload|preload)"((?![^>]*crossorigin)[^>]*)>/g,
+					'<link rel="$1" crossorigin="anonymous"$2>'
+				);
+			},
+		}
 	],
 
 	ssr: {
@@ -37,6 +50,14 @@ export default defineConfig({
 			'@fullcalendar/multimonth',
 			'dexie'
 		]
+	},
+
+	// Reduce aggressive module preloading (helps with "preloaded using link preload but not used" warnings
+	// in PWA setups with route-based code splitting). The crossorigin plugin above handles credentials mismatches.
+	build: {
+		modulePreload: {
+			polyfill: false,
+		},
 	},
 
 	// )=- Stronger optimization settings to prevent 504 errors
