@@ -1,7 +1,7 @@
 <!-- src/routes/(app)/+layout.svelte -->
 <script lang="ts">
 	import { page } from '$app/state';
-	import { auth } from '$lib/stores/auth.svelte';
+	import { auth, logout } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { processSyncQueue } from '$lib/db';
 	import { getUserPhotoSrc } from '$lib/db';
@@ -15,9 +15,8 @@
 
 	const currentPath = $derived(page.url.pathname);
 
-	// )=- Logout handler for the avatar dropdown menu. Uses dynamic import to match existing pattern in layout.
+	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
-		const { logout } = await import('$lib/stores/auth.svelte');
 		await logout();
 		goto('/login', { replaceState: true });
 	}

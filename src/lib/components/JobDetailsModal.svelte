@@ -132,15 +132,13 @@
 	let users = $state<any[]>([]);
 	$effect(() => {
 		if (show && users.length === 0) {
-			const loadLocal = () =>
-				import('$lib/db').then(({ db }) =>
-					db.users.toArray().then((us: any[]) => {
-						users = us;
-					})
-				);
-			loadLocal();
+			db.users.toArray().then((us: any[]) => {
+				users = us;
+			});
 			if (auth.currentUser?.role === 'admin' && navigator.onLine) {
-				pullUsersFromServer().then(loadLocal); // re-load after pull completes for fresh data in this modal instance
+				pullUsersFromServer().then(() => {
+					db.users.toArray().then((us: any[]) => { users = us; });
+				});
 			}
 		}
 	});

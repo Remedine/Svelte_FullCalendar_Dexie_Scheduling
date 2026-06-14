@@ -7,11 +7,7 @@ import { pb, pullJobsFromServer } from '$lib/db/pb';
 import { calculateDueDate } from '$lib/utils/dates';
 // )=- bcryptjs import removed (was only for PIN hashing in login/create/setInitialPin flows). PIN login deleted; password hashing is handled by PocketBase on the server side for email auth.
 
-// Dynamic import to break circular dependency with auth.svelte.ts
-let auth: any = null;
-import('$lib/stores/auth.svelte').then((module) => {
-	auth = module.auth;
-});
+import { auth } from '$lib/stores/auth.svelte';
 
 // SAFE CLONE HELPER
 // )=- Exported for unit testing (Phase 0 of TESTING_PLAN.md).

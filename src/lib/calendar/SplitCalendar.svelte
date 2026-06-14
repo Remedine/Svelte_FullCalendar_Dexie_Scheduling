@@ -5,7 +5,7 @@
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getJobsForRange, updateJobDates, getUserPhotoSrc } from '$lib/db/index';
+	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers } from '$lib/db/index';
 	import { pullJobsFromServer, pb } from '$lib/db/pb';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
@@ -59,8 +59,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	// Load crew options
 	$effect(() => {
-		import('$lib/db').then(async ({ db, cleanupDuplicateUsers }) => {
-			await cleanupDuplicateUsers();
+		cleanupDuplicateUsers().then(() => {
 			db.users.toArray().then((users: any[]) => {
 				// )=- Dedup by display name...
 				crewOptions = Array.from(
@@ -75,21 +74,17 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	});
 
 	// )=- Load crew photos once (for circular avatars on job event cards, right edge under drag icon).
-	// )=- Use dynamic import to match the crewOptions pattern and avoid top-level db dependency.
-	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	$effect(() => {
 		if (Object.keys(crewPhotoMap).length === 0) {
-			import('$lib/db').then(({ db }) => {
-				db.users.toArray().then((users: any[]) => {
-					const map: Record<string, string> = {};
-					users.forEach((u: any) => {
-						if (u.name && u.photo) {
-							// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
-							map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
-						}
-					});
-					crewPhotoMap = map;
+			db.users.toArray().then((users: any[]) => {
+				const map: Record<string, string> = {};
+				users.forEach((u: any) => {
+					if (u.name && u.photo) {
+						// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
+						map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
+					}
 				});
+				crewPhotoMap = map;
 			});
 		}
 	});
@@ -190,18 +185,16 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 		// )=- Eagerly kick off crew photo load (for the right-edge circular avatars under drag handle)
 		// before we fetch jobs and create the FullCalendar instance. ...
-		import('$lib/db').then(({ db }) => {
-			db.users.toArray().then((users: any[]) => {
-				const map: Record<string, string> = {};
-				users.forEach((u: any) => {
-					if (u.name && u.photo) {
-						map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
-					}
-				});
-				if (Object.keys(map).length > 0) {
-					crewPhotoMap = map;
+		db.users.toArray().then((users: any[]) => {
+			const map: Record<string, string> = {};
+			users.forEach((u: any) => {
+				if (u.name && u.photo) {
+					map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
 				}
 			});
+			if (Object.keys(map).length > 0) {
+				crewPhotoMap = map;
+			}
 		});
 
 		const includeCancelled = filters.statuses.includes('cancelled');

@@ -125,13 +125,11 @@
 
 	// Load crew members
 	$effect(() => {
-		import('$lib/db').then(({ db }) => {
-			db.users.toArray().then((users: any[]) => {
-				crewOptions = users
-					.filter((u) => u.active)
-					.map((u) => u.name)
-					.sort();
-			});
+		db.users.toArray().then((users: any[]) => {
+			crewOptions = users
+				.filter((u) => u.active)
+				.map((u) => u.name)
+				.sort();
 		});
 	});
 

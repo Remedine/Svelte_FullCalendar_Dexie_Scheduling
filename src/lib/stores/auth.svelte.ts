@@ -1,5 +1,6 @@
 // src/lib/stores/auth.svelte.ts
 import { browser } from '$app/environment';
+import { db } from '$lib/db';
 
 export const auth = $state({
 	currentUser: null as any,
@@ -38,15 +39,12 @@ if (browser) {
 	const savedId = localStorage.getItem('currentUserId');
 
 	if (savedId) {
-		import('$lib/db').then(({ db }) => {
-			// )=- Dynamic import
-			db.users.get(savedId).then((user) => {
-				if (user && user.active) {
-					auth.currentUser = user;
-					auth.isAuthenticated = true;
-				}
-				auth.loading = false;
-			});
+		db.users.get(savedId).then((user) => {
+			if (user && user.active) {
+				auth.currentUser = user;
+				auth.isAuthenticated = true;
+			}
+			auth.loading = false;
 		});
 	} else {
 		auth.loading = false;

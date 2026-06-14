@@ -5,7 +5,8 @@
 		type User,
 		updateUser,
 		deleteUser as deleteUserFromDb,
-		getUserPhotoSrc
+		getUserPhotoSrc,
+		cleanupDuplicateUsers
 	} from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
 	import NewUserModal from './NewUserModal.svelte';
@@ -32,7 +33,6 @@
 	let hasAutoLoadedRoster = $state(false);
 
 	async function loadUsers() {
-		const { cleanupDuplicateUsers } = await import('$lib/db');
 		await cleanupDuplicateUsers();
 
 		if (isAdmin && navigator.onLine) {
@@ -176,13 +176,14 @@
 		<h1 class="user-management__title">User Management</h1>
 		<div class="user-management__header-actions">
 			<button onclick={openNewUser} class="user-management__add-btn button button--primary">+ Add New User</button>
-			<button onclick={refreshRoster} class="user-management__add-btn button">Refresh roster from server</button>
+			<button onclick={refreshRoster} class="user-management__add-btn button" title="Refresh roster from server">Refresh roster</button>
 		</div>
 	</header>
 
-	<div class="user-management__grid">
-		{#each allUsers as user (user.id)}
-			<div class="user-management__row">
+	<div class="user-management__scroll-container">
+		<div class="user-management__grid">
+			{#each allUsers as user (user.id)}
+				<div class="user-management__row">
 				<!-- Avatar -->
 				<div class="user-management__avatar-col">
 					<div class="user-management__avatar">
@@ -246,6 +247,7 @@
 				</div>
 			</div>
 		{/each}
+		</div>
 	</div>
 
 	<!-- Modals -->
@@ -355,14 +357,20 @@
 	.user-management {
 		max-width: 1350px;
 		margin: 0 auto;
-		padding: 2rem;
+		padding: var(--space-6) var(--space-4);
+	}
+
+	.user-management__scroll-container {
+		width: 100%;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
 	}
 
 	.user-management__header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: var(--space-8);
+		margin-bottom: var(--space-6);
 	}
 
 	.user-management__header-actions {
@@ -384,15 +392,15 @@
 	.user-management__grid {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--space-3);
 	}
 
 	.user-management__row {
 		display: grid;
-		grid-template-columns: 64px 220px 180px 100px 160px auto;
+		grid-template-columns: 56px minmax(120px, 1.4fr) minmax(100px, 1.8fr) 78px 108px auto;
 		align-items: center;
-		gap: var(--space-4);
-		padding: var(--space-4) var(--space-6);
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-4);
 		background: var(--color-surface);
 		border-radius: var(--radius-lg);
 		box-shadow: var(--shadow-sm);
@@ -425,30 +433,34 @@
 	}
 
 	.user-management__name-col {
-		width: 220px;
-		flex-shrink: 0;
+		min-width: 0;
 	}
 	.user-management__email-col {
-		width: 180px;
-		flex-shrink: 0;
+		min-width: 0;
 	}
 	.user-management__name {
-		font-size: 1.1rem;
-		font-weight: 600;
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: block;
 	}
 	.user-management__email {
-		font-size: 0.95rem;
+		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: block;
 	}
 
 	.user-management__role-col {
-		width: 100px;
-		flex-shrink: 0;
+		min-width: 0;
 	}
 	.user-management__status-col {
-		width: 160px;
-		flex-shrink: 0;
+		min-width: 0;
 	}
 
 	.user-management__role-badge,
@@ -584,5 +596,117 @@
 	.modal__btn--delete {
 		background: var(--color-danger-soft);
 		color: var(--color-danger-emphasis);
+	}
+
+	/* ============================================
+	   MOBILE CREW PAGE (stacked cards instead of wide grid)
+	   Fixes horizontal overflow / "too wide" on phones and small tablets.
+	   Desktop keeps the compact tabular grid.
+	   Matches card-list patterns used on jobs/clients pages.
+	   BEM + tokens only.
+	   ============================================ */
+	@media (max-width: 768px) {
+		.user-management {
+			padding: var(--space-3) var(--space-2);
+			max-width: 100%;
+		}
+
+		.user-management__header {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: var(--space-2);
+			margin-bottom: var(--space-4);
+		}
+
+		.user-management__title {
+			font-size: var(--font-size-2xl);
+		}
+
+		.user-management__header-actions {
+			width: 100%;
+			flex-wrap: wrap;
+		}
+
+		.user-management__add-btn {
+			flex: 1 1 auto;
+			min-width: 0;
+			font-size: var(--font-size-sm);
+			padding: var(--space-2) var(--space-3);
+		}
+
+		.user-management__grid {
+			gap: var(--space-2);
+		}
+
+		/* Turn each user row into a mobile-friendly stacked card.
+		   Uses flex + order so avatar+name+badges share a line,
+		   email drops below, actions become a button row underneath.
+		   No markup changes required. */
+		.user-management__row {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-2);
+			padding: var(--space-3) var(--space-3);
+		}
+
+		.user-management__avatar-col {
+			order: 1;
+			flex-shrink: 0;
+		}
+
+		.user-management__name-col {
+			order: 2;
+			flex: 1 1 auto;
+			min-width: 0;
+			margin-right: var(--space-2);
+		}
+
+		.user-management__status-col {
+			order: 3;
+			flex-shrink: 0;
+		}
+
+		.user-management__role-col {
+			order: 4;
+			flex-shrink: 0;
+		}
+
+		.user-management__email-col {
+			order: 5;
+			width: 100%;
+			flex-basis: 100%;
+			margin-top: var(--space-1);
+		}
+
+		.user-management__actions-col {
+			order: 6;
+			width: 100%;
+			flex-basis: 100%;
+			margin-top: var(--space-2);
+			justify-content: flex-start;
+			gap: var(--space-2);
+		}
+
+		.user-management__name {
+			font-size: var(--font-size-base);
+		}
+
+		.user-management__email {
+			font-size: var(--font-size-sm);
+		}
+
+		.user-management__role-badge,
+		.user-management__status-badge {
+			padding: 0.15rem 0.55rem;
+			font-size: var(--font-size-xs);
+		}
+
+		.user-management__btn {
+			flex: 1;
+			padding: var(--space-2) var(--space-3);
+			font-size: var(--font-size-sm);
+			text-align: center;
+		}
 	}
 </style>
