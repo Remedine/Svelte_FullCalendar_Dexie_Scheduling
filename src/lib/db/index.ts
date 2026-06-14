@@ -414,13 +414,25 @@ export async function getJobsForRange(
  * even when Dexie has accumulated (pbId + local-uuid) records for the same logical job.
  */
 export function dedupJobs(list: Job[]): Job[] {
-	const seen = new Set<string>();
-	return list.filter((j: Job) => {
+	const byKey = new Map<string, Job>();
+	for (const j of list) {
 		const key = j.pbId || j.id || '';
-		if (seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
+		if (!key) continue;
+		const existing = byKey.get(key);
+		if (!existing) {
+			byKey.set(key, j);
+		} else {
+			// Prefer the canonical server record (where Dexie id === pbId) over a local-UUID record
+			// that has pbId set. This keeps the "official" row from PB.
+			const existingIsCanonical = existing.id === existing.pbId;
+			const candidateIsCanonical = j.id === j.pbId;
+			if (candidateIsCanonical && !existingIsCanonical) {
+				byKey.set(key, j);
+			}
+			// otherwise keep existing (prefer first seen, or canonical)
+		}
+	}
+	return Array.from(byKey.values());
 }
 
 // )=- New paginated job query specifically for the expandable "Related Jobs" lists on the clients page.
@@ -450,18 +462,8 @@ export async function getPaginatedJobsForClient(
 		jobs = jobs.filter((j: Job) => j.status !== 'cancelled');
 	}
 
-	// )=- Deduplicate by canonical id (pbId || id). This prevents "double loading each job" in the
-	// client page related jobs expandable if Dexie has duplicate job records for the same logical
-	// job (one keyed by local id, one by pbId after sync). Matches the defensive logic used in
-	// loadClientsWithLastJob and pull jobs.
-	// Reference: JOBS_AND_INVOICES_SPEC.md
-	const seen = new Set<string>();
-	jobs = jobs.filter((j: Job) => {
-		const key = j.pbId || j.id || '';
-		if (seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
+	// Dedup using shared helper (prevents 2x in related jobs list when Dexie has local + synced records).
+	jobs = dedupJobs(jobs);
 
 	// Most recent first (consistent with existing client "last job" / "upcoming" logic)
 	jobs.sort((a: Job, b: Job) => new Date(b.start).getTime() - new Date(a.start).getTime());

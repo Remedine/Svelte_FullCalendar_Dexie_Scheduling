@@ -6,7 +6,8 @@
 		type Client,
 		getInvoiceForJob,
 		getUserPhotoSrc,
-		isInvoiceOverdue
+		isInvoiceOverdue,
+		dedupJobs
 	} from '$lib/db';
 	import { pullJobsFromServer, pullUsersFromServer, pullInvoicesFromServer, pb } from '$lib/db/pb';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -61,7 +62,9 @@
 				db.clients.toArray(),
 				db.users.toArray()
 			]);
-			jobs = allJobs;
+			// Dedup to avoid showing duplicates when Dexie has both local-UUID and PB-id versions of the same job
+			// (common after local create + pull). Matches logic used in calendar/clients/getJobsForRange.
+			jobs = dedupJobs(allJobs);
 			clients = allClients;
 			users = allUsers;
 

@@ -6,7 +6,8 @@
 		getPaginatedJobsForClient,
 		type Job,
 		getInvoiceForJob,
-		isInvoiceOverdue
+		isInvoiceOverdue,
+		dedupJobs
 	} from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor, getAccentAreaColor } from '$lib/utils/colors';
@@ -111,10 +112,12 @@
 
 		enhancedClients = allClients.map((client) => {
 			// )=- Match jobs by local id OR pbId (handles post-sync state correctly)
+			// Then dedup using shared helper to avoid 2x counts when Dexie has (local-uuid + pbId) duplicates for same logical job.
 			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-			const clientJobs = allJobs.filter(
+			const rawClientJobs = allJobs.filter(
 				(j) => j.clientId === client.id || (client.pbId && j.clientId === client.pbId)
 			);
+			const clientJobs = dedupJobs(rawClientJobs);
 			const lastJob = clientJobs[0] || null;
 
 			// )=- Compute next upcoming job for 'upcoming' sort and display (future jobs only, soonest first)
