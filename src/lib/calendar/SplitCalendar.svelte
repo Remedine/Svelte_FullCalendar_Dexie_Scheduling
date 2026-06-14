@@ -47,6 +47,11 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	let filtersOpen = $state(true);
 	let draggedJobId: string | null = null;
 
+	// Plain (non-$state) flag to ensure the FullCalendar instance is created only once
+	// per component mount. This stops the destroy/recreate loop that was the root cause
+	// of the idle "constant refreshing", repeated eventDidMount work, and memory growth.
+	let calendarInitialized = false;
+
 	// Persist filter panel state
 	$effect(() => {
 		const saved = localStorage.getItem('calendarFiltersOpen');
@@ -111,22 +116,43 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		const wrapper = document.querySelector('.split-calendar__day-wrapper');
 		if (!wrapper) return;
 
-		const observer = new ResizeObserver(() => {
-			// )=- Throttled with rAF + only updateSize (render is expensive and was causing jank).
-			// setTimeout + nested render was adding to the constant "reloading" feel.
-			// FullCalendar will handle most layout in updateSize during normal use.
-			// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-			requestAnimationFrame(() => {
+		let lastW = 0;
+		let lastH = 0;
+		let resizeTimeout: number | null = null;
+
+		const observer = new ResizeObserver((entries) => {
+			const rect = entries[0]?.contentRect;
+			if (!rect) return;
+
+			const w = rect.width;
+			const h = rect.height;
+
+			// Debounce + significant change only. Prevents constant updates from micro layout shifts
+			// during initial render or idle (e.g. image loads, subpixel rounding, FC internal adjustments).
+			// This was the main driver of repeated eventDidMount, provider calls, and "refreshing" feel at rest.
+			if (Math.abs(w - lastW) < 4 && Math.abs(h - lastH) < 4) return;
+
+			lastW = w;
+			lastH = h;
+
+			if (resizeTimeout) clearTimeout(resizeTimeout);
+			resizeTimeout = window.setTimeout(() => {
 				if (dayApi) {
 					dayApi.updateSize();
-					dayApi.setOption('height', 'auto');
 				}
-			});
+				resizeTimeout = null;
+			}, 50);  // small debounce
 		});
 
 		observer.observe(wrapper);
 
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (resizeTimeout) {
+				clearTimeout(resizeTimeout);
+				resizeTimeout = null;
+			}
+		};
 	});
 	// === FILTERS ===
 	let filters = $state({
@@ -170,6 +196,38 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#64748b';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === job.areaOfTown);
 		return getDisplayAreaColor(area?.color);
+	}
+
+	// === OPTIMISTIC DATE PATCH (Phase 1) ===
+	// After a successful drag or resize, we immediately update the local `jobs` $state snapshot
+	// used by `filteredJobs` $derived and the FullCalendar `events` provider.
+	// This gives instant visual update + correct placement without the heavy `refreshAfterUpdate`
+	// (which does server pull + full range query + splice + refetch + syncing toast).
+	// The real DB update still happens via `updateJobDates` (Dexie + queue + optional processSyncQueue).
+	// Full heavy refresh is kept for creates, cancels, status changes, and explicit sync paths.
+	// This directly addresses "drag not registering", "no DB call visible", and "feels like reloading on drag".
+	// All features preserved: internal D&D, external MonthPicker drops, revert on error, filters, avatars, etc.
+	// Reference: approved calendar perf plan.
+	function applyOptimisticDatePatch(jobId: string, start: Date, end: Date | null) {
+		const idx = jobs.findIndex((j: any) => j.id === jobId);
+		if (idx === -1) return false;
+
+		const original = jobs[idx];
+		const finalEnd = end || new Date(start.getTime() + 4 * 60 * 60 * 1000);
+
+		const patched = {
+			...original,
+			start,
+			end: finalEnd,
+		};
+
+		// Reassign $state array (new reference) to trigger reactivity for filteredJobs + events provider.
+		jobs = [
+			...jobs.slice(0, idx),
+			patched,
+			...jobs.slice(idx + 1),
+		];
+		return true;
 	}
 
 	async function loadData() {
@@ -315,31 +373,35 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 		try {
 			await updateJobDates(jobId, newDate, newEnd);
-			await refreshAfterUpdate();
+			// Phase 1: optimistic patch for external drops (MonthPicker target).
+			// The drag gesture is already over (this is called from eventDragStop), so it's safe to refetch
+			// to remove the event from its old position in the main calendar and let the provider see the new date.
+			applyOptimisticDatePatch(jobId, newDate, newEnd);
+			dayApi?.refetchEvents();
 		} catch (e) {
 			toast.error('Failed to move job');
 		}
 	}
 
 	$effect(() => {
-		// )=- Use a *local* `api` variable for this effect execution (Svelte 5 best practice
-		// for imperative libs like FullCalendar). Added early `if (dayApi) return;` to
-		// prevent the effect from even scheduling creation on re-runs (e.g. other state
-		// changes in the component or parent re-renders). This avoids accumulation of
-		// multiple FC instances (each holding significant memory: internal date state,
-		// event renderers, DOM structures, plugins, closures) which was likely causing
-		// the 700MB+ usage even with 1 job.
-		// Previous cleanup still destroys on teardown.
-		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		if (dayApi) return;
+		if (calendarInitialized || dayApi) {
+			return;
+		}
+
+		calendarInitialized = true;
 
 		let api: Calendar | null = null;
 
 		const container = dayEl;
-		if (!container) return;
+		if (!container) {
+			calendarInitialized = false;
+			return;
+		}
 
 		loadData().then(() => {
-			if (api || !container.isConnected) return;
+			if (api || !container.isConnected || dayApi) {
+				return;
+			}
 
 			api = new Calendar(container, {
 				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
@@ -366,21 +428,25 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 					// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 					info.el.classList.add('fc-event--draggable');
 
-					const handle = document.createElement('div');
-					handle.className = 'fc-event__drag-handle';
+					// Only create the drag handle once per event element (idempotent).
+					// Previously this + avatars were recreated on every refetch, contributing to "refreshing" feel and memory churn.
+					if (!info.el.querySelector('.fc-event__drag-handle')) {
+						const handle = document.createElement('div');
+						handle.className = 'fc-event__drag-handle';
 
-					handle.innerHTML = `
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-							<rect x="3" y="11" width="18" height="2" rx="1"/>
-							<rect x="11" y="3" width="2" height="18" rx="1"/>
-							<polygon points="12,1 8,6 16,6"/>
-							<polygon points="12,23 8,18 16,18"/>
-							<polygon points="1,12 6,8 6,16"/>
-							<polygon points="23,12 18,8 18,16"/>
-						</svg>
-					`;
+						handle.innerHTML = `
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+								<rect x="3" y="11" width="18" height="2" rx="1"/>
+								<rect x="11" y="3" width="2" height="18" rx="1"/>
+								<polygon points="12,1 8,6 16,6"/>
+								<polygon points="12,23 8,18 16,18"/>
+								<polygon points="1,12 6,8 6,16"/>
+								<polygon points="23,12 18,8 18,16"/>
+							</svg>
+						`;
 
-					info.el.appendChild(handle);
+						info.el.appendChild(handle);
+					}
 
 					// )=- Force the area color on the event element in didMount.
 					// This ensures colors show immediately even if the events function provided a default
@@ -530,7 +596,14 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 					}
 					try {
 						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await refreshAfterUpdate();
+						// Phase 1: optimistic patch to our jobs $state source (drives MonthPicker + future provider calls).
+						// Do NOT refetch here — FullCalendar has already committed the visual move/resize for this event
+						// as part of the gesture. Calling refetch immediately can cause the placement to "reload" or snap
+						// due to timing with $derived + provider. We rely on the source update + FC's own handling.
+						// This eliminates the constant refresh feel on drag and reduces eventDidMount churn + memory.
+						applyOptimisticDatePatch(info.event.id!, info.event.start!, info.event.end!);
+						// If you ever need to force a provider sync for this event (rare), use a deferred refetch:
+						// queueMicrotask(() => dayApi?.refetchEvents());
 					} catch (e) {
 						info.revert();
 					}
@@ -539,7 +612,8 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				eventResize: async (info) => {
 					try {
 						await updateJobDates(info.event.id!, info.event.start!, info.event.end!);
-						await refreshAfterUpdate();
+						// Phase 1: same as drop — optimistic source update, no immediate refetch to avoid interrupting the resize gesture.
+						applyOptimisticDatePatch(info.event.id!, info.event.start!, info.event.end!);
 					} catch (e) {
 						info.revert();
 					}
@@ -577,11 +651,14 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
+				api?.setOption('height', 'auto'); // only once, during initial creation. Repeated calls from observers were a major source of idle "refreshing" and layout churn.
 				api?.gotoDate(parseLocalDate(selectedDate));
 			});
 		});
 
 		return () => {
+			// Do NOT reset calendarInitialized here.
+			// (See comment at declaration for why.)
 			if (api) {
 				api.destroy();
 				api = null;

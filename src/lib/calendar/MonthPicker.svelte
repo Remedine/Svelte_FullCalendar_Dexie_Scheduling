@@ -72,9 +72,21 @@
 		return getDisplayAreaColor(area?.color);
 	}
 
+	// Efficient lookup: build once when jobs change instead of filtering all jobs on every day render.
+	// Previously getJobsForDay did a full scan for each of the ~42 days on every render of the picker.
+	const jobsByDate = $derived.by(() => {
+		const map = new Map<string, any[]>();
+		for (const j of jobs || []) {
+			const d = toDateString(j.start);
+			if (!map.has(d)) map.set(d, []);
+			map.get(d)!.push(j);
+		}
+		return map;
+	});
+
 	function getJobsForDay(date: Date) {
 		const dateStr = toDateString(date);
-		return jobs.filter((j: any) => toDateString(j.start) === dateStr);
+		return jobsByDate.get(dateStr) || [];
 	}
 
 	function selectDay(day: any) {
