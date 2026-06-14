@@ -396,7 +396,7 @@ export async function getJobsForRange(
 	end: Date,
 	includeCancelled = false
 ): Promise<Job[]> {
-	return await db.jobs
+	const raw = await db.jobs
 		.where('start')
 		.between(start, end, true, true)
 		.and((job) => {
@@ -404,6 +404,23 @@ export async function getJobsForRange(
 			return job.status !== 'cancelled';
 		})
 		.toArray();
+
+	return dedupJobs(raw);
+}
+
+/**
+ * Deduplicate an array of jobs by canonical key (pbId preferred, then local id).
+ * Central helper so the calendar snapshot, client page lists, etc. all see the same unique set
+ * even when Dexie has accumulated (pbId + local-uuid) records for the same logical job.
+ */
+export function dedupJobs(list: Job[]): Job[] {
+	const seen = new Set<string>();
+	return list.filter((j: Job) => {
+		const key = j.pbId || j.id || '';
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 }
 
 // )=- New paginated job query specifically for the expandable "Related Jobs" lists on the clients page.

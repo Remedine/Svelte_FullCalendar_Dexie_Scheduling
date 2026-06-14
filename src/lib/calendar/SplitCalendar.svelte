@@ -5,7 +5,7 @@
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers } from '$lib/db/index';
+	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs } from '$lib/db/index';
 	import { pullJobsFromServer, pb } from '$lib/db/pb';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
@@ -198,6 +198,8 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		return getDisplayAreaColor(area?.color);
 	}
 
+	// We import the shared dedupJobs from $lib/db (centralized logic that also powers getJobsForRange).
+
 	// === OPTIMISTIC DATE PATCH (Phase 1) ===
 	// After a successful drag or resize, we immediately update the local `jobs` $state snapshot
 	// used by `filteredJobs` $derived and the FullCalendar `events` provider.
@@ -209,7 +211,9 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	// All features preserved: internal D&D, external MonthPicker drops, revert on error, filters, avatars, etc.
 	// Reference: approved calendar perf plan.
 	function applyOptimisticDatePatch(jobId: string, start: Date, end: Date | null) {
-		const idx = jobs.findIndex((j: any) => j.id === jobId);
+		// Find by the id passed to the FC event (the job.id from the current snapshot).
+		// Also match on pbId for robustness when a logical job exists under different Dexie keys.
+		const idx = jobs.findIndex((j: any) => j.id === jobId || j.pbId === jobId);
 		if (idx === -1) return false;
 
 		const original = jobs[idx];
@@ -222,11 +226,12 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		};
 
 		// Reassign $state array (new reference) to trigger reactivity for filteredJobs + events provider.
-		jobs = [
+		// Always dedup to keep the snapshot healthy even if Dexie has accumulated duplicates.
+		jobs = dedupJobs([
 			...jobs.slice(0, idx),
 			patched,
 			...jobs.slice(idx + 1),
-		];
+		]);
 		return true;
 	}
 
