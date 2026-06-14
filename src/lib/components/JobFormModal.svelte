@@ -21,7 +21,7 @@
 	import BillableItemRow from './BillableItemRow.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
-	import { db, type Client } from '$lib/db';
+	import { db, type Client, cleanupDuplicateUsers } from '$lib/db';
 
 	let show = $state(false);
 	let isEditing = $state(false);
@@ -125,11 +125,16 @@
 
 	// Load crew members
 	$effect(() => {
-		db.users.toArray().then((users: any[]) => {
-			crewOptions = users
-				.filter((u) => u.active)
-				.map((u) => u.name)
-				.sort();
+		cleanupDuplicateUsers().then(() => {
+			db.users.toArray().then((users: any[]) => {
+				crewOptions = Array.from(
+					new Set(
+						users
+							.filter((u) => u.active)
+							.map((u) => u.name)
+					)
+				).sort();
+			});
 		});
 	});
 
