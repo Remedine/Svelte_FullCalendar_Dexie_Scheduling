@@ -1,8 +1,11 @@
 import { BREVO_API_KEY } from '$env/static/private';
-import * as env from '$env/dynamic/private';
 
-const BREVO_SENDER_EMAIL = env.BREVO_SENDER_EMAIL;
-const BREVO_SENDER_NAME = env.BREVO_SENDER_NAME;
+// Use process.env directly for optional sender config so the build doesn't
+// require them to be present in the build environment (avoids MISSING_EXPORT
+// errors for $env/dynamic/private when vars aren't set at build time).
+// They are still read at runtime via Railway shared vars.
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || '';
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || '';
 
 /**
  * Brevo (API) email sender.
