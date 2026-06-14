@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { createEventDispatcher } from 'svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	const dispatch = createEventDispatcher();
 
@@ -66,9 +67,9 @@
 	}
 
 	function getJobColor(job: any) {
-		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#6b7280';
+		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#64748b';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === job.areaOfTown);
-		return area?.color || '#6b7280';
+		return getDisplayAreaColor(area?.color);
 	}
 
 	function getJobsForDay(date: Date) {
@@ -115,7 +116,7 @@
 
 <div class="month-picker">
 	<div class="month-picker__header">
-		<button class="month-picker__nav" onclick={() => changeMonth(-1)}>←</button>
+		<button class="month-picker__nav" onclick={() => changeMonth(-1)} aria-label="Previous month">←</button>
 
 		<div class="month-picker__title">
 			{monthNames[currentMonth]}
@@ -124,7 +125,7 @@
 
 		<div class="month-picker__header-actions">
 			<button class="month-picker__today-btn" onclick={goToToday}>Today</button>
-			<button class="month-picker__nav" onclick={() => changeMonth(1)}>→</button>
+			<button class="month-picker__nav" onclick={() => changeMonth(1)} aria-label="Next month">→</button>
 		</div>
 	</div>
 
@@ -165,54 +166,68 @@
 </div>
 
 <style>
+	/* MonthPicker — full tokens + BEM for cohesion with app look & feel (dark mode, spacing scale, etc.) */
 	.month-picker {
 		container-type: inline-size;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		padding: 0.5rem;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-2);
 	}
 
 	.month-picker__header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 0.35rem;
+		margin-bottom: var(--space-2);
 	}
 
 	.month-picker__header-actions {
 		display: flex;
 		align-items: center;
-		gap: 0.35rem;
+		gap: var(--space-1);
 	}
 
 	.month-picker__nav {
 		width: 28px;
 		height: 28px;
-		border: none;
-		background: #f1f5f9;
-		border-radius: 6px;
+		border: 1px solid var(--color-border);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 1rem;
+		font-size: var(--font-size-base);
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		color: var(--color-text);
+		transition: background var(--transition-fast);
+	}
+
+	.month-picker__nav:hover {
+		background: var(--color-border);
 	}
 
 	.month-picker__today-btn {
-		font-size: 0.75rem;
-		padding: 0.2rem 0.5rem;
-		background: #e0f2fe;
-		color: #0369a1;
-		border: none;
-		border-radius: 6px;
+		font-size: var(--font-size-xs);
+		padding: var(--space-1) var(--space-2);
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+		border: 1px solid var(--color-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-weight: 500;
+		font-weight: var(--font-weight-medium);
+		transition: background var(--transition-fast);
+	}
+
+	.month-picker__today-btn:hover {
+		background: var(--color-primary);
+		color: white;
 	}
 
 	.month-picker__title {
-		font-weight: 600;
-		font-size: 0.95rem;
+		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
 	}
 
 	.month-picker__weekdays,
@@ -224,9 +239,10 @@
 
 	.month-picker__weekday {
 		text-align: center;
-		font-size: 0.65rem;
-		color: #64748b;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
 		padding: 1px 0;
+		font-weight: var(--font-weight-medium);
 	}
 
 	.month-picker__day {
@@ -234,50 +250,54 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding: 3px 1px;
+		padding: var(--space-1);
 		min-height: 42px;
-		border: none;
+		border: 1px solid transparent;
 		background: transparent;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.85rem;
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+		transition: background var(--transition-fast), border-color var(--transition-fast);
 	}
 
 	.month-picker__day:hover {
-		background: #f8fafc;
+		background: var(--color-surface-alt);
 	}
+
 	.month-picker__day--other {
-		color: #94a3b8;
+		color: var(--color-text-subtle);
 	}
+
 	.month-picker__day--selected {
-		background: #dbeafe;
-		font-weight: 600;
+		background: var(--color-primary-soft);
+		border-color: var(--color-primary);
+		font-weight: var(--font-weight-semibold);
 	}
+
 	.month-picker__day--today {
-		border: 2px solid #3b82f6;
-		font-weight: 700;
+		border-color: var(--color-primary);
+		font-weight: var(--font-weight-bold);
+		box-shadow: 0 0 0 1px var(--color-primary);
 	}
 
 	.month-picker__number {
-		font-size: 0.85rem;
+		font-size: var(--font-size-sm);
+		line-height: 1;
 	}
 
 	.month-picker__dots {
 		display: flex;
-		gap: 3px;
+		gap: 2px;
 		margin-top: 2px;
 		align-items: center;
 	}
 
 	.month-picker__dot {
-		width: 6px;
-		height: 6px;
+		width: 5px;
+		height: 5px;
 		border-radius: 50%;
-		border: 1px solid #111;
-	}
-
-	.month-picker__day--drag-over {
-		background-color: #dbeafe !important;
-		border: 2px solid #3b82f6;
+		/* subtle border for visibility on any bg; color comes from inline area color */
+		border: 1px solid var(--color-border);
 	}
 </style>

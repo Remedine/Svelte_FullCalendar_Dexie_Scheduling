@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { db, type Client, createClient, updateClient } from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { z } from 'zod';
 
 	const ClientSchema = z.object({
@@ -54,10 +55,11 @@
 	});
 
 	// )=- Explicit derived color so the left border updates instantly when user changes the dropdown
+	// Uses getDisplayAreaColor for automatic dark mode adaptation.
 	const selectedAreaColor = $derived.by(() => {
 		if (!formData.areaOfTown || !areaOptions.length) return '#64748b';
 		const area = areaOptions.find((a: any) => a.id === formData.areaOfTown);
-		return area?.color || '#64748b';
+		return getDisplayAreaColor(area?.color);
 	});
 
 	// Safe trigger to ensure options are loaded when the form opens
@@ -159,77 +161,80 @@
 			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 			<form id="client-form" onsubmit={handleSubmit} class="client-form-modal__form">
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Full Name <span class="required">*</span>
-						<input bind:value={formData.name} class="client-form-modal__input" />
+						<input bind:value={formData.name} class="client-form-modal__input input" />
 					</label>
 					{#if errors.name}<small class="error">{errors.name}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Email
-						<input type="email" bind:value={formData.email} class="client-form-modal__input" />
+						<input type="email" bind:value={formData.email} class="client-form-modal__input input" />
 					</label>
 					{#if errors.email}<small class="error">{errors.email}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Phone
 						<input
 							type="tel"
 							bind:value={formData.phone}
 							oninput={(e) => (formData.phone = formatPhone((e.target as HTMLInputElement).value))}
 							placeholder="(503) 555-1234"
-							class="client-form-modal__input"
+							class="client-form-modal__input input"
 						/>
 					</label>
 					{#if errors.phone}<small class="error">{errors.phone}</small>{/if}
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Street Address
-						<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input" />
+						<input bind:value={formData.serviceAddressStreet} class="client-form-modal__input input" />
 					</label>
 				</div>
 
 				<div class="client-form-modal__address-row">
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">
+						<label class="client-form-modal__label label">
 							City
-							<input bind:value={formData.serviceAddressCity} class="client-form-modal__input" />
+							<input bind:value={formData.serviceAddressCity} class="client-form-modal__input input" />
 						</label>
 					</div>
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">
+						<label class="client-form-modal__label label">
 							State
 							<input
 								bind:value={formData.serviceAddressState}
 								maxlength="2"
-								class="client-form-modal__input"
+								class="client-form-modal__input input"
 							/>
 						</label>
 					</div>
 					<div class="client-form-modal__field">
-						<label class="client-form-modal__label">
+						<label class="client-form-modal__label label">
 							ZIP
-							<input bind:value={formData.serviceAddressZip} class="client-form-modal__input" />
+							<input bind:value={formData.serviceAddressZip} class="client-form-modal__input input" />
 						</label>
 					</div>
 				</div>
 
 				<!-- Area with Colored Left Border -->
 				<div class="client-form-modal__field">
-					<label for="area-of-town" class="client-form-modal__label"
+					<label for="area-of-town" class="client-form-modal__label label"
 						>Area of Town <span class="required">*</span></label
 					>
 					<div class="area-field-wrapper" style="border-left: 6px solid {selectedAreaColor};">
-						<select id="area-of-town" bind:value={formData.areaOfTown} class="client-form-modal__input area-select">
+						<select id="area-of-town" bind:value={formData.areaOfTown} class="area-select input">
 							<option value="">Select area...</option>
 							{#each areaOptions as area}
-								<option value={area.id}>{area.label}</option>
+								<option 
+									value={area.id}
+									style="color: {getDisplayAreaColor(area.color)};"
+								>■ {area.label}</option>
 							{/each}
 						</select>
 					</div>
@@ -237,9 +242,9 @@
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Preferred Billing
-						<select bind:value={formData.preferredBillingMethod} class="client-form-modal__input">
+						<select bind:value={formData.preferredBillingMethod} class="client-form-modal__input input">
 							<option value="email">Email</option>
 							<option value="check">Check</option>
 							<option value="invoice">Invoice</option>
@@ -248,9 +253,9 @@
 				</div>
 
 				<div class="client-form-modal__field">
-					<label class="client-form-modal__label">
+					<label class="client-form-modal__label label">
 						Notes
-						<textarea bind:value={formData.notes} class="client-form-modal__input" rows="4"
+						<textarea bind:value={formData.notes} class="client-form-modal__input input" rows="4"
 						></textarea>
 					</label>
 				</div>
@@ -262,7 +267,7 @@
 			<div class="client-form-modal__footer">
 				<button
 					type="button"
-					class="client-form-modal__btn client-form-modal__btn--cancel"
+					class="client-form-modal__btn client-form-modal__btn--cancel button button--ghost"
 					onclick={closeForm}
 				>
 					Cancel
@@ -270,7 +275,7 @@
 				<button
 					type="submit"
 					form="client-form"
-					class="client-form-modal__btn client-form-modal__btn--primary"
+					class="client-form-modal__btn client-form-modal__btn--primary button button--primary"
 				>
 					{isEditing ? 'Save Changes' : 'Create Client'}
 				</button>
@@ -280,6 +285,9 @@
 {/if}
 
 <style>
+	/* ClientForm standardized to tokens + base primitives for full cohesion (Phase 2 of overhaul).
+	   Follows same pattern as JobFormModal / JobDetailsModal. */
+
 	.client-form-modal {
 		position: fixed;
 		inset: 0;
@@ -287,18 +295,15 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
-		z-index: 1200;
+		z-index: var(--z-modal-backdrop);
 	}
 
-	/* )=- Content is now a flex column (like new-job-modal__content) so the form can be flex:1 + overflow auto
-	     while the footer is sticky at the bottom inside the scroll container.
-	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.client-form-modal__content {
-		background: white;
+		background: var(--color-surface);
 		width: 100%;
 		max-width: 560px;
-		border-radius: 16px 16px 0 0;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+		box-shadow: var(--shadow-modal);
 		max-height: 95vh;
 		overflow-y: auto;
 		display: flex;
@@ -308,68 +313,56 @@
 	}
 
 	.client-form-modal__title {
-		margin: 0 0 1.5rem 0;
-		font-size: 1.4rem;
-		font-weight: 600;
-		color: #1e2937;
-		padding: 1.5rem 1rem 0;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+		padding: var(--space-6) var(--space-4) 0;
 	}
 
-	/* )=- Scrollable fields container. Matches new-job-modal__form behavior.
-	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.client-form-modal__form {
 		flex: 1;
 		overflow-y: auto;
-		padding: 0 1rem;
+		padding: 0 var(--space-4);
 		display: flex;
 		flex-direction: column;
-		gap: 1.25rem;
+		gap: var(--space-5);
 	}
 
 	.client-form-modal__field {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: var(--space-2);
 	}
 
 	.client-form-modal__address-row {
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr;
-		gap: 1rem;
+		gap: var(--space-4);
 	}
 
 	.client-form-modal__label {
-		font-weight: 500;
-		color: #334155;
-		font-size: 0.95rem;
+		/* inherits from .label in globals */
 	}
 
 	.client-form-modal__input {
-		padding: 0.75rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-size: 1rem;
-		width: 100%;
-		box-sizing: border-box;
+		/* inherits from .input in globals */
 	}
 
 	.error {
-		color: #ef4444;
-		font-size: 0.85rem;
-		margin-top: 4px;
+		color: var(--color-danger);
+		font-size: var(--font-size-sm);
+		margin-top: var(--space-1);
 	}
 
-	/* )=- Sticky footer exactly modeled on .new-job-modal__footer (position:sticky, bottom:0, shadow, border, margin-top:auto).
-	     Buttons use the existing btn classes (now flex inside the footer).
-	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	.client-form-modal__footer {
 		position: sticky;
 		bottom: 0;
-		background: white;
-		padding: 1rem 1.25rem;
-		border-top: 1px solid #e5e7eb;
+		background: var(--color-surface);
+		padding: var(--space-4) var(--space-5);
+		border-top: 1px solid var(--color-border);
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		justify-content: flex-end;
 		align-items: center;
 		z-index: 10;
@@ -377,47 +370,60 @@
 		margin-top: auto;
 	}
 
-	/* Equal width like the previous actions row, while still inside the sticky footer */
 	.client-form-modal__footer .client-form-modal__btn {
 		flex: 1;
 	}
 
 	.client-form-modal__btn {
-		padding: 0.85rem 1.5rem;
-		border-radius: 8px;
-		font-weight: 500;
+		padding: var(--space-3) var(--space-6);
+		border-radius: var(--radius-md);
+		font-weight: var(--font-weight-medium);
 		border: none;
 		cursor: pointer;
 	}
 
 	.client-form-modal__btn--cancel {
-		background: #f1f5f9;
-		color: #475569;
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
 	}
 
 	.client-form-modal__btn--primary {
-		background: #3b82f6;
+		background: var(--color-primary);
 		color: white;
 	}
 
-	/* Colored Area Field */
+	/* Colored Area Field - uses display-adapted color in dark. Styled consistently with job form version. */
 	.area-field-wrapper {
 		display: flex;
 		align-items: center;
-		padding: 0.75rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 8px;
-		background: white;
-		min-height: 52px;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		min-height: 44px;
+		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+	}
+
+	.area-field-wrapper:focus-within {
+		border-color: var(--color-primary);
+		box-shadow: var(--focus-ring);
 	}
 
 	.area-select {
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 0;
-		font-size: 1rem;
+		padding: var(--space-2) var(--space-4);
+		font-size: var(--font-size-base);
+		color: var(--color-text);
 		outline: none;
+		cursor: pointer;
+		width: 100%;
+		appearance: none;
+	}
+
+	.area-select option {
+		background: var(--color-surface);
 	}
 
 	@container client-form (max-width: 520px) {
@@ -428,8 +434,8 @@
 
 	@container client-form (min-width: 521px) {
 		.client-form-modal__content {
-			border-radius: 16px;
-			padding: 2rem 0 0; /* top padding now handled by title; footer has its own */
+			border-radius: var(--radius-xl);
+			padding: var(--space-8) 0 0;
 		}
 	}
 </style>

@@ -15,6 +15,7 @@
 	// that was the source of multiple due-date / calendar jump bugs.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
 	import { getLocalDateString, parseLocalDate, toDateString } from '$lib/utils/dates';
+import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
 	// and $effects (which do refetch/update) on every pointer event during drag.
@@ -171,9 +172,9 @@
 	// )=- Local date functions were extracted to $lib/utils/dates (imported above).
 	// getJobColor remains local because it depends on the optionsStore (not a pure date util).
 	function getJobColor(job: any): string {
-		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#6b7280';
+		if (!job?.areaOfTown || !optionsStore.data?.areasOfTown) return '#64748b';
 		const area = optionsStore.data.areasOfTown.find((a: any) => a.id === job.areaOfTown);
-		return area?.color || '#6b7280';
+		return getDisplayAreaColor(area?.color);
 	}
 
 	async function loadData() {
@@ -640,21 +641,21 @@
 			<MonthPicker jobs={filteredJobs} bind:selectedDate onDateSelect={handleDateSelect} />
 
 			<!-- Filters -->
-			<div class="filters">
+			<div class="split-calendar__filters">
 				<details bind:open={filtersOpen}>
-					<summary class="filters__summary">
+					<summary class="split-calendar__filters-summary">
 						<span>Filters</span>
 						{#if activeFilterCount > 0}
-							<span class="filters__badge">{activeFilterCount}</span>
+							<span class="split-calendar__filters-badge">{activeFilterCount}</span>
 						{/if}
 					</summary>
 
 					<!-- Crew -->
-					<div class="filter-group">
-						<div class="filter-group__label">Crew</div>
-						<div class="filter-options">
+					<div class="split-calendar__filter-group">
+						<div class="split-calendar__filter-group-label">Crew</div>
+						<div class="split-calendar__filter-options">
 							{#each crewOptions as crew}
-								<label class="filter-option">
+								<label class="split-calendar__filter-option">
 									<input
 										type="checkbox"
 										checked={filters.crew.includes(crew)}
@@ -667,11 +668,11 @@
 					</div>
 
 					<!-- Area -->
-					<div class="filter-group">
-						<div class="filter-group__label">Area</div>
-						<div class="filter-options">
+					<div class="split-calendar__filter-group">
+						<div class="split-calendar__filter-group-label">Area</div>
+						<div class="split-calendar__filter-options">
 							{#each optionsStore.data?.areasOfTown || [] as area}
-								<label class="filter-option">
+								<label class="split-calendar__filter-option">
 									<input
 										type="checkbox"
 										checked={filters.areas.includes(area.id)}
@@ -684,24 +685,24 @@
 					</div>
 
 					<!-- Status -->
-					<div class="filter-group">
-						<div class="filter-group__label">Status</div>
-						<div class="filter-options">
+					<div class="split-calendar__filter-group">
+						<div class="split-calendar__filter-group-label">Status</div>
+						<div class="split-calendar__filter-options">
 							{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
-								<label class="filter-option">
+								<label class="split-calendar__filter-option">
 									<input
 										type="checkbox"
 										checked={filters.statuses.includes(status)}
 										onchange={() => toggleFilter('statuses', status)}
 									/>
-									<span class="status-{status}">{status}</span>
+									<span class="split-calendar__status split-calendar__status--{status}">{status}</span>
 								</label>
 							{/each}
 						</div>
 					</div>
 
 					{#if activeFilterCount > 0}
-						<button class="filters__clear-btn" onclick={clearFilters}> Clear all filters </button>
+						<button class="split-calendar__filters-clear-btn" onclick={clearFilters}> Clear all filters </button>
 					{/if}
 				</details>
 			</div>
@@ -711,18 +712,18 @@
 		<div class="split-calendar__main">
 			<div class="split-calendar__view-switcher">
 				<button
-					class="view-btn"
-					class:active={currentView === 'timeGridDay'}
+					class="split-calendar__view-btn"
+					class:split-calendar__view-btn--active={currentView === 'timeGridDay'}
 					onclick={() => changeView('timeGridDay')}>Day</button
 				>
 				<button
-					class="view-btn"
-					class:active={currentView === 'timeGridWeek'}
+					class="split-calendar__view-btn"
+					class:split-calendar__view-btn--active={currentView === 'timeGridWeek'}
 					onclick={() => changeView('timeGridWeek')}>Week</button
 				>
 				<button
-					class="view-btn"
-					class:active={currentView === 'dayGridMonth'}
+					class="split-calendar__view-btn"
+					class:split-calendar__view-btn--active={currentView === 'dayGridMonth'}
 					onclick={() => changeView('dayGridMonth')}>Month</button
 				>
 			</div>
@@ -739,13 +740,15 @@
 		container-type: inline-size;
 		container-name: split-calendar;
 		width: 100%;
+		height: auto;
 	}
 
 	.split-calendar {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: var(--space-4);
 		width: 100%;
+		height: auto;
 		min-width: 0;
 	}
 
@@ -753,8 +756,9 @@
 	@container split-calendar (min-width: 900px) {
 		.split-calendar {
 			flex-direction: row;
-			gap: 1.5rem;
-			align-items: flex-start;
+			gap: var(--space-6);
+			align-items: flex-start; /* allow main column to grow taller than sidebar */
+			height: auto; /* let content determine height */
 		}
 
 		.split-calendar__sidebar {
@@ -762,11 +766,13 @@
 			flex-shrink: 0;
 			width: auto;
 			max-width: 340px;
+			align-self: flex-start; /* don't stretch to force short height */
 		}
 
 		.split-calendar__main {
 			flex: 1;
 			min-width: 0;
+			min-height: 0;
 		}
 	}
 
@@ -778,13 +784,15 @@
 		flex: 1;
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		min-width: 0;
+		min-height: 0;
+		height: auto;
 	}
 
 	.split-calendar__view-switcher {
-		display: none;
-		gap: 0.25rem;
+		display: flex;
+		gap: var(--space-1);
 	}
 
 	@container split-calendar (min-width: 900px) {
@@ -793,36 +801,88 @@
 		}
 	}
 
-	.view-btn {
-		padding: 0.4rem 1rem;
-		border: 1px solid #e2e8f0;
-		background: white;
-		border-radius: 6px;
-		font-size: 0.9rem;
+	.split-calendar__view-btn {
+		padding: var(--space-1) var(--space-3);
+		border: 1px solid var(--color-border);
+		background: var(--color-surface);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
 		cursor: pointer;
+		color: var(--color-text);
 	}
 
-	.view-btn:hover {
-		background: #f8fafc;
+	.split-calendar__view-btn:hover {
+		background: var(--color-surface-alt);
 	}
 
-	.view-btn.active {
-		background: #3b82f6;
+	.split-calendar__view-btn--active {
+		background: var(--color-primary);
 		color: white;
-		border-color: #3b82f6;
+		border-color: var(--color-primary);
 	}
 
 	.split-calendar__day-wrapper {
-		flex: 1;
+		flex: 1 0 auto; /* grow with content, don't shrink below natural size */
+		min-height: 300px;
 		display: flex;
 		flex-direction: column;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 12px;
-		overflow: hidden;
-		min-height: 650px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		overflow: hidden; /* clip inner content to rounded edges */
 		transition: opacity 0.2s ease;
 		width: 100%; /* Helps FullCalendar detect size changes */
+		margin-bottom: var(--space-4); /* extra gap below the calendar box itself so it doesn't hit page bottom */
+	}
+
+	/* Mobile: prevent smooshed day schedule. Let the time grid breathe. */
+	@media (max-width: 768px) {
+		.split-calendar__day-wrapper {
+			min-height: 300px;
+			border-radius: var(--radius-md);
+		}
+	}
+
+	/* Better density and readability on small screens for the day schedule view */
+	@media (max-width: 480px) {
+		:global(.fc-timegrid-slot-label) {
+			font-size: 0.7rem;
+		}
+		:global(.fc-timegrid-event) {
+			font-size: 0.75rem;
+		}
+	}
+
+	/* Dark mode FullCalendar overrides (tokens + subtle area color adaptation already handled in JS) */
+	:global(.dark .fc) {
+		--fc-border-color: var(--color-border);
+		--fc-page-bg-color: var(--color-surface);
+		--fc-neutral-bg-color: var(--color-surface-alt);
+		--fc-neutral-text-color: var(--color-text-muted);
+	}
+
+	/* Ensure the FullCalendar root itself has rounded corners to match the wrapper and avoid square inner box showing through */
+	:global(.fc) {
+		border-radius: var(--radius-lg);
+		overflow: hidden;
+	}
+
+	:global(.dark .fc-timegrid-slot) {
+		border-color: var(--color-border) !important;
+	}
+
+	/* No internal clipping/scroll desired; calendar content should determine height and use page scroll */
+	:global(.fc-timegrid-body) {
+		padding-bottom: 0;
+	}
+
+	:global(.dark .fc-col-header-cell) {
+		background: var(--color-surface-alt);
+		border-color: var(--color-border);
+	}
+
+	:global(.dark .fc-event) {
+		box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
 	}
 
 	.split-calendar__day-wrapper.refreshing {
@@ -832,87 +892,101 @@
 
 	.split-calendar__day {
 		flex: 1;
-		min-height: 600px;
+		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
 		width: 100%; /* Important for responsive width */
+		border-radius: var(--radius-lg); /* ensure inner mount point is also rounded */
 	}
 
-	/* Filters */
-	.filters {
-		margin-top: 1rem;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		padding: 1rem;
-		font-size: 0.95rem;
+	/* Filters — BEM + full design tokens for dark mode and cohesion */
+	.split-calendar__filters {
+		margin-top: var(--space-4);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-4);
+		font-size: var(--font-size-sm);
 	}
 
-	.filters__summary {
-		font-weight: 600;
+	.split-calendar__filters-summary {
+		font-weight: var(--font-weight-semibold);
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-2);
+		cursor: pointer;
+		color: var(--color-text);
 	}
 
-	.filters__badge {
-		background: #3b82f6;
+	.split-calendar__filters-badge {
+		background: var(--color-primary);
 		color: white;
-		font-size: 0.75rem;
-		padding: 0.1rem 0.45rem;
-		border-radius: 9999px;
+		font-size: var(--font-size-xs);
+		padding: 0.1rem 0.4rem;
+		border-radius: var(--radius-full);
 		min-width: 18px;
 		text-align: center;
+		font-weight: var(--font-weight-medium);
 	}
 
-	.filters__clear-btn {
-		margin-top: 0.75rem;
+	.split-calendar__filters-clear-btn {
+		margin-top: var(--space-3);
 		width: 100%;
-		padding: 0.5rem;
-		background: #fee2e2;
-		color: #b91c1c;
-		border: none;
-		border-radius: 6px;
-		font-size: 0.85rem;
-		font-weight: 500;
+		padding: var(--space-2);
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border: 1px solid var(--color-danger);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
 		cursor: pointer;
+		transition: background var(--transition-fast);
 	}
 
-	.filters__clear-btn:hover {
-		background: #fecaca;
+	.split-calendar__filters-clear-btn:hover {
+		background: var(--color-danger);
+		color: white;
 	}
 
-	.filter-group {
-		margin-bottom: 0.85rem;
+	.split-calendar__filter-group {
+		margin-bottom: var(--space-3);
 	}
-	.filter-group__label {
-		font-weight: 600;
-		font-size: 0.85rem;
-		color: #334155;
-		margin-bottom: 0.35rem;
+
+	.split-calendar__filter-group-label {
+		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		margin-bottom: var(--space-1);
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
 	}
-	.filter-options {
+
+	.split-calendar__filter-options {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
-	}
-	.filter-option {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.9rem;
-		padding: 0.15rem 0;
-		cursor: pointer;
-	}
-	.filter-option input {
-		margin: 0;
+		gap: var(--space-1);
 	}
 
-	.status-completed {
-		color: #166534;
+	.split-calendar__filter-option {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-base);
+		padding: 0.1rem 0;
+		cursor: pointer;
+		color: var(--color-text);
 	}
-	.status-cancelled {
-		color: #991b1b;
+
+	.split-calendar__filter-option input {
+		margin: 0;
+		accent-color: var(--color-primary);
+	}
+
+	.split-calendar__status--completed {
+		color: var(--color-success);
+	}
+	.split-calendar__status--cancelled {
+		color: var(--color-danger-emphasis);
 	}
 
 	/* === Visual Drag Handle (Top Right) === */
@@ -954,7 +1028,7 @@
 	}
 
 	:global(.fc-event--draggable:hover) {
-		box-shadow: 0 0 0 1px #3b82f6;
+		box-shadow: 0 0 0 1px var(--color-primary);
 	}
 
 	/* Event status styling */
@@ -971,7 +1045,7 @@
 	}
 	:global(.event-cancelled .fc-event-title) {
 		text-decoration: line-through;
-		color: #991b1b;
+		color: var(--color-danger-emphasis);
 	}
 
 	/* )=- Crew avatars placed *inside* the event card (no more overhanging to the right).
@@ -1009,9 +1083,9 @@
 		height: 24px;
 		border-radius: 50%;
 		overflow: hidden;
-		border: 1px solid #fff;
-		background: #64748b;
-		color: #fff;
+		border: 1px solid var(--color-surface);
+		background: var(--color-text-muted);
+		color: var(--color-surface);
 		font-size: 10px;
 		font-weight: 700;
 		line-height: 1;

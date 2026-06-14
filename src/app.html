@@ -9,7 +9,9 @@
 		     If you want a .ico fallback for very old browsers, drop a favicon.ico in static/ too.
 		     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
-		%sveltekit.head%
+		<!-- %sveltekit.head% removed because ssr=false globally (see +layout.server.ts and (app)/+layout.js).
+		     All <svelte:head> content (favicons etc.) is injected client-side by the root layout.
+		     Leaving the placeholder was causing the literal string to appear in the DOM on some loads. -->
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>

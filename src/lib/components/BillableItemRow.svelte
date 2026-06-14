@@ -1,6 +1,7 @@
 <!-- src/lib/components/BillableItemRow.svelte -->
 <script lang="ts">
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	let {
 		item = $bindable({
@@ -73,7 +74,7 @@
 				onblur={handleBlur}
 				onkeydown={handleKeydown}
 				placeholder="Billable item description"
-				class="billable-item-row__input"
+				class="billable-item-row__input input"
 			/>
 
 			{#if showSuggestions && filteredTemplates.length > 0}
@@ -110,7 +111,7 @@
 					type="number"
 					bind:value={item.price}
 					placeholder="0.00"
-					class="billable-item-row__input billable-item-row__input--price"
+					class="billable-item-row__input billable-item-row__input--price input"
 					bind:this={priceInputEl}
 					step="0.01"
 				/>
@@ -122,7 +123,7 @@
 					type="number"
 					bind:value={item.quantity}
 					min="1"
-					class="billable-item-row__input billable-item-row__input--qty"
+					class="billable-item-row__input billable-item-row__input--qty input"
 				/>
 			</div>
 		</div>
@@ -135,21 +136,29 @@
 </div>
 
 <style>
+	/* BillableItemRow updated for design system cohesion (tokens + BEM). */
+
 	.billable-item-row {
-		padding: 1.25rem;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		margin-bottom: 1.25rem;
+		padding: var(--space-5);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		margin-bottom: var(--space-5);
 		container-type: inline-size;
 		container-name: billable-row;
+		transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+	}
+
+	.billable-item-row:hover {
+		border-color: var(--color-border-strong);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.billable-item-row__grid {
 		display: grid;
 		grid-template-columns: 70% 30%;
 		grid-template-rows: auto auto;
-		gap: 0.75rem 1.25rem;
+		gap: var(--space-3) var(--space-5);
 		align-items: start;
 	}
 
@@ -167,19 +176,19 @@
 		align-self: start;
 		background: none;
 		border: none;
-		color: #ef4444;
-		font-size: 1.6rem;
+		color: var(--color-danger);
+		font-size: var(--font-size-2xl);
 		cursor: pointer;
 		width: 44px;
 		height: 44px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 
 	.billable-item-row__remove:hover {
-		background: #fee2e2;
+		background: var(--color-danger-soft);
 	}
 
 	.billable-item-row__price-qty {
@@ -187,26 +196,23 @@
 		grid-row: 2;
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
+		gap: var(--space-3);
 	}
 
 	.billable-item-row__total {
 		grid-column: 2;
 		grid-row: 2;
 		text-align: right;
-		font-weight: 600;
-		color: #1e2937;
-		font-size: 1.25rem;
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+		font-size: var(--font-size-xl);
 		align-self: end;
 	}
 
 	.billable-item-row__input {
-		padding: 0.65rem 0.75rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-size: 0.95rem;
-		width: 100%;
-		box-sizing: border-box;
+		background: var(--color-surface);
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--font-size-sm);
 	}
 
 	.billable-item-row__input--price,
@@ -218,11 +224,11 @@
 	.billable-item-row__currency,
 	.billable-item-row__qty-label {
 		position: absolute;
-		left: 0.75rem;
+		left: var(--space-3);
 		top: 50%;
 		transform: translateY(-50%);
-		color: #64748b;
-		font-weight: 500;
+		color: var(--color-text-muted);
+		font-weight: var(--font-weight-medium);
 		pointer-events: none;
 	}
 
@@ -236,24 +242,24 @@
 		top: 100%;
 		left: 0;
 		right: 0;
-		background: white;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		margin-top: 4px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		margin-top: var(--space-1);
 		max-height: 200px;
 		overflow-y: auto;
-		z-index: 20;
-		box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+		z-index: var(--z-dropdown);
+		box-shadow: var(--shadow-md);
 	}
 
 	.billable-item-row__suggestion {
-		padding: 0.65rem 0.9rem;
+		padding: var(--space-2) var(--space-3);
 		cursor: pointer;
-		font-size: 0.95rem;
+		font-size: var(--font-size-sm);
 	}
 
 	.billable-item-row__suggestion:hover {
-		background: #f8fafc;
+		background: var(--color-surface-alt);
 	}
 
 	/* Mobile */
@@ -272,14 +278,14 @@
 	}
 
 	.billable-item-row__suggestion {
-		padding: 0.65rem 0.9rem;
+		padding: var(--space-2) var(--space-3);
 		cursor: pointer;
-		font-size: 0.95rem;
+		font-size: var(--font-size-sm);
 		width: 100%;
 		text-align: left;
 		background: none;
 		border: none;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.billable-item-row__suggestion:last-child {
@@ -288,6 +294,6 @@
 
 	.billable-item-row__suggestion:hover,
 	.billable-item-row__suggestion:focus {
-		background: #f8fafc;
+		background: var(--color-surface-alt);
 	}
 </style>

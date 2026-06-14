@@ -39,6 +39,7 @@
 	import { openJobModal } from './JobFormModal.svelte';
 	import { goto } from '$app/navigation';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import JobInvoicePanel from './JobInvoicePanel.svelte';
 
 	// )=- Module-level singleton so any page can call openJobDetailsModal(job) without prop drilling.
@@ -379,7 +380,7 @@
 						{:else}
 							<div>Client: {job.clientId}</div>
 						{/if}
-						<div style="color: {area?.color || '#64748b'};">
+						<div style="color: {getDisplayAreaColor(area?.color) || '#64748b'};">
 							Area: {area?.label || job.areaOfTown || '—'}
 						</div>
 					</div>
@@ -520,7 +521,9 @@
 {/if}
 
 <style>
-	/* BEM naming strictly followed as required by AGENTS.md */
+	/* JobDetailsModal standardized to design tokens + BEM. Base classes (.button, etc.) used in markup where possible.
+	   Hardcoded colors and sizes replaced with vars and --space-* scale for full cohesion with the rest of the app. */
+
 	.job-details-modal {
 		position: fixed;
 		inset: 0;
@@ -528,15 +531,15 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
-		z-index: 1100;
+		z-index: var(--z-modal-backdrop);
 	}
 
 	.job-details-modal__content {
-		background: white;
+		background: var(--color-surface);
 		width: 100%;
 		max-width: 560px;
-		border-radius: 16px 16px 0 0;
-		box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+		box-shadow: var(--shadow-modal);
 		max-height: 92vh;
 		overflow-y: auto;
 		display: flex;
@@ -545,280 +548,215 @@
 
 	.job-details-modal__loading,
 	.job-details-modal__empty {
-		padding: 3rem 1rem;
+		padding: var(--space-8) var(--space-4);
 		text-align: center;
-		color: #64748b;
+		color: var(--color-text-muted);
 	}
 
 	.job-details-modal__header {
-		padding: 1.25rem 1rem 0.75rem;
-		border-bottom: 1px solid #e2e8f0;
+		padding: var(--space-5) var(--space-4) var(--space-3);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.job-details-modal__title {
-		margin: 0 0 0.25rem;
-		font-size: 1.25rem;
-		font-weight: 700;
+		margin: 0 0 var(--space-1);
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-bold);
 	}
 
 	.job-details-modal__context {
-		font-size: 0.85rem;
-		color: #0369a1;
-		margin-bottom: 0.5rem;
+		font-size: var(--font-size-sm);
+		color: var(--color-primary);
+		margin-bottom: var(--space-2);
 	}
 
 	.job-details-modal__badges {
 		display: flex;
-		gap: 0.5rem;
-		margin-top: 0.5rem;
+		gap: var(--space-2);
+		margin-top: var(--space-2);
 		flex-wrap: wrap;
 	}
 
 	.job-details-modal__status {
-		font-size: 0.7rem;
+		font-size: var(--font-size-xs);
 		padding: 0.15rem 0.6rem;
-		border-radius: 999px;
-		font-weight: 600;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
 		text-transform: uppercase;
 	}
-	.job-details-modal__status--draft {
-		background: #fef3c7;
-		color: #92400e;
-	}
-	.job-details-modal__status--generated {
-		background: #dbeafe;
-		color: #1e40af;
-	}
-	.job-details-modal__status--sent {
-		background: #d1fae5;
-		color: #166534;
-	}
-	.job-details-modal__status--paid {
-		background: #a7f3d0;
-		color: #065f46;
-	}
+	.job-details-modal__status--draft { background: var(--color-warning-soft); color: var(--color-warning); }
+	.job-details-modal__status--generated { background: var(--color-primary-soft); color: var(--color-primary-emphasis); }
+	.job-details-modal__status--sent { background: var(--color-success-soft); color: var(--color-success); }
+	.job-details-modal__status--paid { background: var(--color-success-soft); color: var(--color-success); }
 	.job-details-modal__overdue {
-		background: #fee2e2;
-		color: #991b1b;
-		font-size: 0.65rem;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		font-size: var(--font-size-xs);
 		padding: 0.1rem 0.5rem;
-		border-radius: 999px;
+		border-radius: var(--radius-full);
 	}
 
 	.job-details-modal__totals {
-		padding: 0.75rem 1rem;
-		background: #f8fafc;
-		font-size: 1.1rem;
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-surface-alt);
+		font-size: var(--font-size-lg);
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 	}
 
 	.job-details-modal__section {
-		padding: 1rem;
-		border-bottom: 1px solid #f1f5f9;
+		padding: var(--space-4);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.job-details-modal__section-title {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #475569;
-		margin: 0 0 0.5rem;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		margin: 0 0 var(--space-2);
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
 	}
 
 	.job-details-modal__meta {
-		font-size: 0.95rem;
-		color: #334155;
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
 	}
 
 	.job-details-modal__crew {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.35rem;
+		gap: var(--space-2);
 	}
 
 	.job-details-modal__crew-pill {
-		background: #f1f5f9;
-		padding: 0.2rem 0.6rem;
-		border-radius: 999px;
-		font-size: 0.8rem;
+		background: var(--color-surface-alt);
+		padding: var(--space-1) var(--space-3);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
 		display: inline-flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-details-modal__crew-avatar {
 		width: 16px;
 		height: 16px;
 		border-radius: 50%;
 		object-fit: cover;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--color-border);
 	}
 	.job-details-modal__crew-initial {
 		font-size: 0.6rem;
-		font-weight: 600;
+		font-weight: var(--font-weight-semibold);
 	}
 
 	.job-details-modal__billables {
-		margin-bottom: 0.75rem;
+		margin-bottom: var(--space-3);
 	}
 
 	.job-details-modal__billable-row {
 		display: flex;
 		justify-content: space-between;
-		font-size: 0.9rem;
-		padding: 0.25rem 0;
-		border-bottom: 1px dotted #e2e8f0;
+		font-size: var(--font-size-sm);
+		padding: var(--space-1) 0;
+		border-bottom: 1px dotted var(--color-border);
 	}
 
 	.job-details-modal__empty-text {
-		color: #94a3b8;
-		font-size: 0.9rem;
-	}
-
-	.job-details-modal__invoice-meta {
-		margin-bottom: 0.5rem;
-		font-size: 0.95rem;
-	}
-
-	.job-details-modal__invoice-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-bottom: 0.5rem;
+		color: var(--color-text-subtle);
+		font-size: var(--font-size-sm);
 	}
 
 	.job-details-modal__notes {
 		white-space: pre-wrap;
-		font-size: 0.9rem;
-		color: #475569;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
 	.job-details-modal__cancel {
-		color: #b91c1c;
-		font-size: 0.85rem;
-		margin-top: 0.5rem;
+		color: var(--color-danger-emphasis);
+		font-size: var(--font-size-sm);
+		margin-top: var(--space-2);
 	}
 
 	.job-details-modal__footer {
-		padding: 1rem;
-		border-top: 1px solid #e2e8f0;
+		padding: var(--space-4);
+		border-top: 1px solid var(--color-border);
 		display: flex;
 		justify-content: space-between;
-		gap: 0.5rem;
-		background: white;
+		gap: var(--space-2);
+		background: var(--color-surface);
 		position: sticky;
 		bottom: 0;
 	}
 
 	.job-details-modal__footer-left {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 
 	.job-details-modal__btn {
-		padding: 0.55rem 1rem;
-		border-radius: 8px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		border: 1px solid #cbd5e1;
-		background: white;
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
 		cursor: pointer;
 	}
 
 	.job-details-modal__btn--primary {
-		background: #3b82f6;
+		background: var(--color-primary);
 		color: white;
-		border-color: #3b82f6;
+		border-color: var(--color-primary);
 	}
 
 	.job-details-modal__btn--edit {
-		background: #e0f2fe;
-		color: #0369a1;
-		border-color: #bae6fd;
-	}
-
-	.job-details-modal__btn--draft {
-		width: 100%;
-		margin-top: 0.5rem;
-		background: #fef3c7;
-		color: #92400e;
-		border-color: #fde68c;
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
+		border-color: var(--color-primary);
 	}
 
 	.job-details-modal__btn--close {
-		background: #f1f5f9;
+		background: var(--color-surface-alt);
 	}
 
 	.job-details-modal__btn--small {
-		font-size: 0.7rem;
+		font-size: var(--font-size-xs);
 		padding: 0.15rem 0.5rem;
 	}
 
-	.job-details-modal__upload-hint {
-		font-size: 0.8rem;
-		color: #64748b;
-		margin-top: 0.25rem;
-	}
-
-	/* )=- BEM for Phase 7 offline file messaging on supporting docs.
-	   .not-available for inline per-file note when !pbId.
-	   .offline-note for the explanatory paragraph (matches spec "File not available offline").
-	   Small button reuses the existing --small style for download actions when available. */
-	.job-details-modal__not-available {
-		font-size: 0.65rem;
-		color: #94a3b8;
-		font-style: italic;
-		margin-left: 0.4rem;
-	}
-	.job-details-modal__offline-note {
-		font-size: 0.75rem;
-		color: #64748b;
-		margin-top: 0.4rem;
-		font-style: italic;
-	}
-	.job-details-modal__small-btn {
-		font-size: 0.65rem;
-		padding: 0.1rem 0.35rem;
-		margin-left: 0.5rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 3px;
-		background: white;
-		cursor: pointer;
-	}
-
-	/* )=- BEM for cancel form (Phase 7). Simple stacked layout for reason select + notes + actions.
-	   Reuses small-btn pattern; cancel buttons get red tint for destructive action.
-	   )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 + Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	/* Cancel form uses tokens */
 	.job-details-modal__cancel-form {
-		padding: 0.75rem 1rem;
-		background: #f8fafc;
-		border-top: 1px solid #e2e8f0;
-		border-bottom: 1px solid #e2e8f0;
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-surface-alt);
+		border-top: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--color-border);
 	}
 	.job-details-modal__cancel-select,
 	.job-details-modal__cancel-notes {
 		width: 100%;
-		margin-bottom: 0.5rem;
-		padding: 0.35rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 4px;
-		font-size: 0.85rem;
+		margin-bottom: var(--space-2);
+		padding: var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
+		background: var(--color-surface);
 	}
 	.job-details-modal__cancel-actions {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 	.job-details-modal__btn--cancel {
-		background: #fee2e2;
-		color: #991b1b;
-		border-color: #fecaca;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border-color: var(--color-danger);
 	}
 	.job-details-modal__btn--cancel-confirm {
-		background: #991b1b;
+		background: var(--color-danger-emphasis);
 		color: white;
-		border-color: #991b1b;
+		border-color: var(--color-danger-emphasis);
 	}
 	.job-details-modal__btn--cancel-confirm:disabled {
 		opacity: 0.5;

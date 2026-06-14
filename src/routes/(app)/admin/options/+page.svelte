@@ -232,11 +232,12 @@
 			<div class="form-section">
 				<h3>General</h3>
 				<div class="form-grid">
-					<label for="opt-duration">Default Job Duration (hours)</label>
+					<label for="opt-duration" class="label">Default Job Duration (hours)</label>
 					<input
 						id="opt-duration"
 						type="number"
 						step="0.25"
+						class="input"
 						bind:value={editingOptions.defaultJobDurationHours}
 					/>
 				</div>
@@ -254,7 +255,7 @@
 						{#each editingOptions.areasOfTown as area, index (area.id)}
 							<div class="area-item {isDefaultArea(index) ? 'area-item--default' : ''}">
 								<input
-									class="area-item__label-input"
+									class="area-item__label-input input"
 									bind:value={area.label}
 									placeholder="Area name"
 								/>
@@ -312,7 +313,7 @@
 									: ''}"
 							>
 								<input
-									class="cancel-reason-item__input"
+									class="cancel-reason-item__input input"
 									bind:value={editingOptions.cancelReasons[index]}
 									placeholder="Enter cancellation reason"
 								/>
@@ -360,10 +361,10 @@
 			<div class="form-section">
 				<h3>Billing & Tax</h3>
 				<div class="form-grid">
-					<label for="opt-tax">Tax Rate (%)</label>
-					<input id="opt-tax" type="number" step="0.01" bind:value={editingOptions.taxRate} />
-					<label for="opt-due">Invoice Due Days</label>
-					<input id="opt-due" type="number" bind:value={editingOptions.invoiceDueDays} />
+					<label for="opt-tax" class="label">Tax Rate (%)</label>
+					<input id="opt-tax" type="number" step="0.01" class="input" bind:value={editingOptions.taxRate} />
+					<label for="opt-due" class="label">Invoice Due Days</label>
+					<input id="opt-due" type="number" class="input" bind:value={editingOptions.invoiceDueDays} />
 				</div>
 			</div>
 
@@ -376,34 +377,51 @@
 						{#each editingOptions.defaultBillableItems as item, index (index)}
 							<div class="billable-item {isDefaultBillable(index) ? 'billable-item--default' : ''}">
 								<input
-									class="billable-item__input"
+									class="billable-item__input input"
 									bind:value={item.title}
 									placeholder="Service name"
 								/>
+								<div class="billable-item__type-toggle">
+									<button
+										type="button"
+										class="billable-item__type-btn"
+										class:active={item.hours === undefined}
+										onclick={() => {
+											if (item.hours !== undefined) {
+												item.quantity = item.hours ?? 1;
+												delete item.hours;
+											}
+										}}
+									>
+										Per Qty
+									</button>
+									<button
+										type="button"
+										class="billable-item__type-btn"
+										class:active={item.hours !== undefined}
+										onclick={() => {
+											if (item.hours === undefined) {
+												item.hours = item.quantity ?? 1;
+												delete item.quantity;
+											}
+										}}
+									>
+										Per Hour
+									</button>
+								</div>
 								<div class="billable-item__price">
-									<span>$</span>
+									<span>{item.hours !== undefined ? '$' : '#'}</span>
 									<input
 										type="number"
-										class="billable-item__input billable-item__input--price"
+										class="billable-item__input billable-item__input--price input"
 										bind:value={item.price}
+										onfocus={(e) => {
+											if (item.price === 0) {
+												e.currentTarget.select();
+											}
+										}}
 									/>
 								</div>
-								<select
-									value={item.hours !== undefined ? 'hours' : 'quantity'}
-									onchange={(e) => {
-										const val = (e.target as HTMLSelectElement).value;
-										if (val === 'hours') {
-											item.hours = item.hours ?? 1;
-											delete item.quantity;
-										} else {
-											item.quantity = item.quantity ?? 1;
-											delete item.hours;
-										}
-									}}
-								>
-									<option value="quantity">Quantity</option>
-									<option value="hours">Hours</option>
-								</select>
 
 								<div class="billable-item__controls">
 									<button
@@ -440,7 +458,7 @@
 					class="options-page__btn options-page__btn--add"
 					onclick={() => {
 						if (!editingOptions.defaultBillableItems) editingOptions.defaultBillableItems = [];
-						editingOptions.defaultBillableItems.push({ title: '', price: 0, hours: 1 });
+						editingOptions.defaultBillableItems.push({ title: '', price: 0, quantity: 1 });
 					}}
 				>
 					+ Add New Billable Item
@@ -466,114 +484,117 @@
 
 <style>
 	.options-page {
-		padding: 2rem;
+		padding: var(--space-8);
 		max-width: 1100px;
 		margin: 0 auto;
 	}
 	.options-page__header {
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-8);
 	}
 	.options-page__title {
-		font-size: 2.1rem;
-		font-weight: 700;
-		color: #1e2937;
+		font-size: var(--font-size-3xl);
+		font-weight: var(--font-weight-bold);
+		color: var(--color-text);
 	}
 	.options-page__subtitle {
-		color: #64748b;
+		color: var(--color-text-muted);
 	}
 	.options-page__tabs {
 		display: flex;
-		gap: 0.5rem;
-		border-bottom: 2px solid #e2e8f0;
-		margin-bottom: 2rem;
+		gap: var(--space-2);
+		border-bottom: 2px solid var(--color-border);
+		margin-bottom: var(--space-8);
 		flex-wrap: wrap;
 	}
 	.options-page__tab {
-		padding: 0.9rem 1.75rem;
+		padding: var(--space-3) var(--space-6);
 		background: none;
 		border: none;
-		font-size: 1.05rem;
-		font-weight: 500;
-		color: #64748b;
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
 		cursor: pointer;
 		border-bottom: 3px solid transparent;
+		transition: all var(--transition-fast);
+	}
+	.options-page__tab:hover {
+		color: var(--color-text);
 	}
 	.options-page__tab--active {
-		color: #2563eb;
-		border-bottom: 3px solid #2563eb;
-		font-weight: 600;
+		color: var(--color-primary);
+		border-bottom: 3px solid var(--color-primary);
+		font-weight: var(--font-weight-semibold);
 	}
 	.options-page__content {
-		background: white;
-		border-radius: 12px;
-		padding: 2.5rem;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		background: var(--color-surface);
+		border-radius: var(--radius-lg);
+		padding: var(--space-8);
+		box-shadow: var(--shadow-sm);
 		min-height: 520px;
 	}
 	.form-grid {
 		display: grid;
-		grid-template-columns: 200px 1fr;
-		gap: 1rem;
+		grid-template-columns: 12rem 1fr;
+		gap: var(--space-4);
 		align-items: center;
 		max-width: 600px;
 	}
 	.form-section {
-		margin-bottom: 2.5rem;
+		margin-bottom: var(--space-8);
 	}
 	.options-page__help {
-		color: #64748b;
-		margin-bottom: 1.5rem;
+		color: var(--color-text-muted);
+		margin-bottom: var(--space-6);
 	}
 
 	.areas-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-3);
+		margin-bottom: var(--space-6);
 	}
 	.area-item {
 		display: grid;
-		grid-template-columns: 3fr 80px 120px;
-		gap: 1rem;
+		grid-template-columns: 3fr 5rem 8rem;
+		gap: var(--space-4);
 		align-items: center;
-		background: #f8fafc;
-		padding: 1rem;
-		border-radius: 8px;
+		background: var(--color-surface-alt);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
 		position: relative;
 	}
 	.area-item--default::before {
 		content: '★ Default';
 		position: absolute;
-		top: 8px;
-		left: 12px;
-		background: #22c55e;
+		top: var(--space-2);
+		left: var(--space-3);
+		background: var(--color-success);
 		color: white;
-		font-size: 0.7rem;
-		font-weight: 700;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-bold);
 		padding: 1px 7px 2px;
-		border-radius: 9999px;
+		border-radius: var(--radius-full);
 		line-height: 1;
 		z-index: 2;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.area-item__label-input {
-		padding: 0.6rem 0.75rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
+		/* inherits global .input */
 	}
 	.area-item__color {
-		width: 80px;
-		height: 42px;
+		width: 5rem;
+		height: var(--space-8);
 		padding: 0;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
+		background: var(--color-surface);
 	}
 
 	.area-item__controls {
 		display: flex;
-		gap: 4px;
+		gap: var(--space-1);
 	}
 	.area-item__move-btn {
 		width: 32px;
@@ -581,74 +602,103 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #e2e8f0;
+		background: var(--color-surface-alt);
 		border: none;
-		border-radius: 6px;
-		font-size: 1.1rem;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-lg);
 		cursor: pointer;
-		color: #475569;
+		color: var(--color-text-muted);
 	}
 	.area-item__move-btn:hover:not(:disabled) {
-		background: #cbd5e1;
+		background: var(--color-border);
 	}
 	.area-item__move-btn:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
 	.area-item__remove {
-		background: #fee2e2;
-		color: #dc2626;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 		border: none;
-		width: 38px;
-		height: 38px;
-		border-radius: 6px;
+		width: 32px;
+		height: 32px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 1.1rem;
 	}
 
 	.billable-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-3);
+		margin-bottom: var(--space-6);
 	}
 	.billable-item {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		background: #f8fafc;
-		padding: 0.75rem 1rem;
-		border-radius: 8px;
+		gap: var(--space-3);
+		background: var(--color-surface-alt);
+		padding: var(--space-3) var(--space-4);
+		border-radius: var(--radius-md);
 		position: relative;
 	}
 	.billable-item--default::before {
 		content: '★ Default';
 		position: absolute;
-		top: 8px;
-		left: 12px;
-		background: #22c55e;
+		top: var(--space-2);
+		left: var(--space-3);
+		background: var(--color-success);
 		color: white;
-		font-size: 0.7rem;
-		font-weight: 700;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-bold);
 		padding: 1px 7px 2px;
-		border-radius: 9999px;
+		border-radius: var(--radius-full);
 		line-height: 1;
 		z-index: 2;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.billable-item__input {
+		/* inherits global .input */
 		flex: 1;
-		padding: 0.5rem 0.75rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
+		min-width: 140px; /* prevent title from collapsing too small */
 	}
 	.billable-item__input--price {
-		width: 100px;
+		width: 90px;
+	}
+	.billable-item__price {
+		flex-shrink: 0;
+	}
+	.billable-item__type-toggle {
+		display: flex;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+		flex-shrink: 0;
+		font-size: var(--font-size-xs);
+	}
+	.billable-item__type-btn {
+		padding: var(--space-1) var(--space-2);
+		border: none;
+		background: var(--color-surface);
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition: background var(--transition-fast), color var(--transition-fast);
+		white-space: nowrap;
+	}
+	.billable-item__type-btn + .billable-item__type-btn {
+		border-left: 1px solid var(--color-border-strong);
+	}
+	.billable-item__type-btn.active {
+		background: var(--color-primary);
+		color: white;
+	}
+	.billable-item__type-btn:hover:not(.active) {
+		background: var(--color-surface-alt);
 	}
 	.billable-item__controls {
 		display: flex;
-		gap: 4px;
+		gap: var(--space-1);
+		flex-shrink: 0;
 	}
 	.billable-item__move-btn {
 		width: 32px;
@@ -656,27 +706,27 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #e2e8f0;
+		background: var(--color-surface-alt);
 		border: none;
-		border-radius: 6px;
-		font-size: 1.1rem;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-lg);
 		cursor: pointer;
-		color: #475569;
+		color: var(--color-text-muted);
 	}
 	.billable-item__move-btn:hover:not(:disabled) {
-		background: #cbd5e1;
+		background: var(--color-border);
 	}
 	.billable-item__move-btn:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
 	.billable-item__remove {
-		background: #fee2e2;
-		color: #dc2626;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 		border: none;
 		width: 32px;
 		height: 32px;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 
@@ -684,45 +734,43 @@
 	.cancel-reasons-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-3);
+		margin-bottom: var(--space-6);
 	}
 
 	.cancel-reason-item {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		background: #f8fafc;
-		padding: 0.75rem 1rem;
-		border-radius: 8px;
+		gap: var(--space-3);
+		background: var(--color-surface-alt);
+		padding: var(--space-3) var(--space-4);
+		border-radius: var(--radius-md);
 		position: relative;
 	}
 	.cancel-reason-item--default::before {
 		content: '★ Default';
 		position: absolute;
-		top: 8px;
-		left: 12px;
-		background: #22c55e;
+		top: var(--space-2);
+		left: var(--space-3);
+		background: var(--color-success);
 		color: white;
-		font-size: 0.7rem;
-		font-weight: 700;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-bold);
 		padding: 1px 7px 2px;
-		border-radius: 9999px;
+		border-radius: var(--radius-full);
 		line-height: 1;
 		z-index: 2;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.cancel-reason-item__input {
+		/* inherits global .input */
 		flex: 1;
-		padding: 0.5rem 0.75rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
 	}
 
 	.cancel-reason-item__controls {
 		display: flex;
-		gap: 4px;
+		gap: var(--space-1);
 	}
 
 	.cancel-reason-item__move-btn {
@@ -731,16 +779,16 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #e2e8f0;
+		background: var(--color-surface-alt);
 		border: none;
-		border-radius: 6px;
-		font-size: 1.1rem;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-lg);
 		cursor: pointer;
-		color: #475569;
+		color: var(--color-text-muted);
 	}
 
 	.cancel-reason-item__move-btn:hover:not(:disabled) {
-		background: #cbd5e1;
+		background: var(--color-border);
 	}
 
 	.cancel-reason-item__move-btn:disabled {
@@ -749,32 +797,32 @@
 	}
 
 	.cancel-reason-item__remove {
-		background: #fee2e2;
-		color: #dc2626;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 		border: none;
 		width: 32px;
 		height: 32px;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 
 	.options-page__btn {
-		padding: 0.9rem 2.25rem;
-		border-radius: 8px;
-		font-weight: 600;
+		padding: var(--space-3) var(--space-6);
+		border-radius: var(--radius-md);
+		font-weight: var(--font-weight-semibold);
 		cursor: pointer;
 	}
 	.options-page__btn--save {
-		background: #2563eb;
+		background: var(--color-primary);
 		color: white;
 		border: none;
 	}
 	.options-page__btn--add {
-		background: #e0f2fe;
-		color: #0369a1;
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
 		border: none;
-		padding: 0.75rem 1.5rem;
-		font-weight: 500;
+		padding: var(--space-3) var(--space-6);
+		font-weight: var(--font-weight-medium);
 	}
 
 	/* )=- Sticky bottom action bar modeled directly on the job/client modal footers.
@@ -784,12 +832,12 @@
 	.options-page__footer {
 		position: sticky;
 		bottom: 0;
-		background: white;
-		padding: 1rem 1.25rem;
-		border-top: 1px solid #e5e7eb;
+		background: var(--color-surface);
+		padding: var(--space-4) var(--space-5);
+		border-top: 1px solid var(--color-border);
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 		z-index: 10;
 		text-align: right;
-		margin-top: 1rem; /* small gap from last section when not stuck */
+		margin-top: var(--space-4);
 	}
 </style>

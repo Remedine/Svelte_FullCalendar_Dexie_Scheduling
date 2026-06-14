@@ -253,7 +253,7 @@
 			onkeydown={handleKeydown}
 			onblur={handleBlur}
 			{placeholder}
-			class="client-picker__input"
+			class="client-picker__input input"
 			role="combobox"
 			aria-expanded={isOpen}
 			aria-controls="client-listbox"
@@ -331,6 +331,8 @@
 </div>
 
 <style>
+	/* ClientPicker updated for design tokens and base primitives (Phase 2). */
+
 	.client-picker {
 		font-family: inherit;
 		width: 100%;
@@ -342,61 +344,57 @@
 		align-items: center;
 	}
 	.client-picker__input {
-		width: 100%;
-		padding: 0.75rem 2.5rem 0.75rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-size: 1rem;
-		background: white;
-		outline: none;
+		/* base .input + overrides for the clear button space */
+		padding-right: 2.5rem;
 	}
 	.client-picker__input:focus {
-		border-color: #3b82f6;
-		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+		border-color: var(--color-primary);
+		box-shadow: var(--focus-ring);
 	}
 	.client-picker__clear {
 		position: absolute;
-		right: 0.75rem;
+		right: var(--space-3);
 		background: none;
 		border: none;
-		color: #64748b;
+		color: var(--color-text-muted);
 		font-size: 1.2rem;
 		cursor: pointer;
 	}
 	.client-picker__clear:hover {
-		color: #ef4444;
+		color: var(--color-danger);
 	}
 	.client-picker__dropdown {
 		position: absolute;
 		top: 100%;
 		left: 0;
 		right: 0;
-		background: white;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
 		margin-top: 4px;
 		max-height: 320px;
 		overflow-y: auto;
-		box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-		z-index: 100;
+		box-shadow: var(--shadow-md);
+		z-index: var(--z-dropdown);
 	}
 	.client-picker__option {
-		padding: 0.75rem 1rem;
+		padding: var(--space-3) var(--space-4);
 		cursor: pointer;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--color-border);
+		font-size: var(--font-size-sm);
 	}
 	.client-picker__option:hover,
 	.client-picker__option--active {
-		background: #f8fafc;
+		background: var(--color-surface-alt);
 	}
 	.client-picker__option--create {
-		background: #f0fdf4;
-		border-bottom: 2px solid #86efac;
-		font-weight: 600;
+		background: var(--color-success-soft);
+		border-bottom: 2px solid var(--color-success);
+		font-weight: var(--font-weight-semibold);
 	}
 	.client-picker__option--create:hover,
 	.client-picker__option--create.client-picker__option--active {
-		background: #dcfce7;
+		background: var(--color-success-soft);
 	}
 	.client-picker__option--loading {
 		opacity: 0.7;
@@ -405,17 +403,17 @@
 	.client-picker__hint {
 		display: block;
 		margin-top: 4px;
-		font-size: 0.75rem;
-		color: #16a34a;
+		font-size: var(--font-size-xs);
+		color: var(--color-success);
 	}
 	.client-picker__loading {
-		font-size: 0.85rem;
-		color: #16a34a;
-		margin-left: 0.5rem;
+		font-size: var(--font-size-sm);
+		color: var(--color-success);
+		margin-left: var(--space-2);
 	}
 	.client-picker__no-results {
-		padding: 1rem;
+		padding: var(--space-4);
 		text-align: center;
-		color: #64748b;
+		color: var(--color-text-muted);
 	}
 </style>

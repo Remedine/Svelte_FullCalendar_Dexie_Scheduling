@@ -25,7 +25,8 @@ export function isAuthenticated(): boolean {
 // Email Login
 export async function loginWithEmail(email: string, password: string) {
 	try {
-		const authData = await pb.collection('users').authWithPassword(email, password);
+		const normalizedEmail = (email || '').trim().toLowerCase();
+		const authData = await pb.collection('users').authWithPassword(normalizedEmail, password);
 
 		const pbUser = authData.record;
 
@@ -33,9 +34,9 @@ export async function loginWithEmail(email: string, password: string) {
 		// Prefer by email (unique), then firstName/name guess, then by pbId.
 		// This prevents duplicate records in Dexie when a locally-created crew (with local UUID id) later does email login.
 		// For pure PB users (no prior local), we'll create with PB id as key.
-		let existing = await db.users.where('email').equalsIgnoreCase(email).first();
+		let existing = await db.users.where('email').equalsIgnoreCase(normalizedEmail).first();
 		if (!existing) {
-			const guess = email.split('@')[0];
+			const guess = normalizedEmail.split('@')[0];
 			existing =
 				(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
 				(await db.users.where('name').equalsIgnoreCase(guess).first());
@@ -76,7 +77,11 @@ export async function loginWithEmail(email: string, password: string) {
 				active: pbUser.active ?? existing.active ?? true,
 				forcePinUpdate: pbUser.forcePinUpdate ?? existing.forcePinUpdate ?? false,
 				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? existing.forcePhotoUpdate ?? false,
-				verified: !!pbUser.verified,
+				// Preserve local "verified: false" marker from admin creation (hybrid local-UUID record).
+				// This keeps the WelcomeModal (temp password → real password) + chained ForcePhoto gate working
+				// even though we create the PB record with verified:true (required for authWithPassword to succeed).
+				// The local flag is flipped to true only by the WelcomeModal success path (Dexie updateUser).
+				verified: existing.verified === false ? false : !!pbUser.verified,
 				createdAt: new Date(pbUser.created || pbUser.createdAt || existing.createdAt),
 				updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt)
 			};
@@ -114,7 +119,7 @@ export async function loginWithEmail(email: string, password: string) {
 
 		// )=- Cleanup any duplicate records with the same email but different Dexie key (the old loginWithEmail always-put-pb-id logic + prior admin creation could leave a local-UUID record and a PB-id record).
 		// This cleans historical dups like the two Joe Poe in Dexie. UI loads also dedup now.
-		const dups = await db.users.where('email').equalsIgnoreCase(email).toArray();
+		const dups = await db.users.where('email').equalsIgnoreCase(normalizedEmail).toArray();
 		for (const d of dups) {
 			if (d.id !== localUser.id) {
 				await db.users.delete(d.id!);
@@ -429,7 +434,8 @@ export async function pullUsersFromServer(force = false) {
 			active: currentAuth.active ?? true,
 			forcePinUpdate: existingSelf?.forcePinUpdate ?? currentAuth.forcePinUpdate ?? false,
 			forcePhotoUpdate: currentAuth.forcePhotoUpdate ?? false,
-			verified: !!currentAuth.verified,
+			// For self (current admin) preserve local false marker if present (defensive).
+			verified: existingSelf?.verified === false ? false : !!currentAuth.verified,
 			createdAt: new Date(
 				currentAuth.created || currentAuth.createdAt || existingSelf?.createdAt || Date.now()
 			),
@@ -476,8 +482,15 @@ export async function pullUsersFromServer(force = false) {
 					active: rec.active ?? true,
 					forcePinUpdate: existingLocal?.forcePinUpdate ?? false,
 					forcePhotoUpdate: rec.forcePhotoUpdate ?? false,
+					// Preserve a local verified:false (from initial admin creation of a temp-password crew member)
+					// so the first-login Welcome + ForcePhoto gates still trigger even after roster pulls.
+					// PB record is created with verified:true for immediate auth; local flag is the onboarding signal.
 					verified:
-						typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
+						existingLocal?.verified === false
+							? false
+							: typeof rec.verified === 'boolean'
+								? rec.verified
+								: (existingLocal?.verified ?? false),
 					createdAt: new Date(rec.created || rec.createdAt),
 					updatedAt: new Date(rec.updated || rec.updatedAt)
 				};

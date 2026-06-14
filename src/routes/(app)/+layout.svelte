@@ -6,6 +6,10 @@
 	import { processSyncQueue } from '$lib/db';
 	import { getUserPhotoSrc } from '$lib/db';
 	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+
+	// Import global design tokens + base styles (tokens power the entire overhaul)
+	import '$lib/styles/globals.css';
 
 	const { children } = $props();
 
@@ -100,6 +104,8 @@
 		</nav>
 
 		<div class="top-nav__user">
+			<ThemeToggle />
+
 			{#if auth.currentUser}
 				<!-- )=- Moved profile access here. Avatar (photo or initial) instead of "Logged in as" text.
 				     Hover over wrapper to reveal menu with Profile and Logout.
@@ -147,6 +153,66 @@
 		{/if}
 	</main>
 
+	<!-- Bottom tab bar (mobile-first solution for wide menu problem).
+	     Per approved look-and-feel plan: Schedule always visible. Admins get Clients/Jobs/Crew/Options.
+	     Desktop hides this via media query; top-nav menu remains for wide screens.
+	     BEM: bottom-nav, bottom-nav__tab, bottom-nav__tab--active. Uses emoji icons for zero-dep consistency with existing nav. -->
+	<nav class="bottom-nav" role="tablist" aria-label="Primary navigation">
+		<a
+			href="/calendar"
+			class="bottom-nav__tab"
+			class:bottom-nav__tab--active={currentPath === '/calendar' || currentPath === '/'}
+			role="tab"
+			aria-selected={currentPath === '/calendar' || currentPath === '/'}
+		>
+			<span class="bottom-nav__icon">📅</span>
+			<span class="bottom-nav__label">Schedule</span>
+		</a>
+
+		{#if auth.currentUser?.role === 'admin'}
+			<a
+				href="/clients"
+				class="bottom-nav__tab"
+				class:bottom-nav__tab--active={currentPath.startsWith('/clients')}
+				role="tab"
+				aria-selected={currentPath.startsWith('/clients')}
+			>
+				<span class="bottom-nav__icon">👥</span>
+				<span class="bottom-nav__label">Clients</span>
+			</a>
+			<a
+				href="/jobs"
+				class="bottom-nav__tab"
+				class:bottom-nav__tab--active={currentPath.startsWith('/jobs')}
+				role="tab"
+				aria-selected={currentPath.startsWith('/jobs')}
+			>
+				<span class="bottom-nav__icon">📋</span>
+				<span class="bottom-nav__label">Jobs</span>
+			</a>
+			<a
+				href="/admin/crew"
+				class="bottom-nav__tab"
+				class:bottom-nav__tab--active={currentPath.startsWith('/admin/crew')}
+				role="tab"
+				aria-selected={currentPath.startsWith('/admin/crew')}
+			>
+				<span class="bottom-nav__icon">👷</span>
+				<span class="bottom-nav__label">Crew</span>
+			</a>
+			<a
+				href="/admin/options"
+				class="bottom-nav__tab"
+				class:bottom-nav__tab--active={currentPath.startsWith('/admin/options')}
+				role="tab"
+				aria-selected={currentPath.startsWith('/admin/options')}
+			>
+				<span class="bottom-nav__icon">⚙️</span>
+				<span class="bottom-nav__label">Options</span>
+			</a>
+		{/if}
+	</nav>
+
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
 	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
 	     This makes the details modal (with invoice support) available from jobs page, clients related jobs, etc. -->
@@ -154,52 +220,66 @@
 </div>
 
 <style>
+	/* Adopt design tokens from globals.css for cohesion (Phase 1 of look-and-feel overhaul) */
 	.app-layout {
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;
-		background-color: #f8fafc;
+		background-color: var(--color-bg);
 	}
 
-	/* Top Navigation */
+	/* Top Navigation — now token-driven + mobile slimmed */
 	.top-nav {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0.75rem 1.25rem;
-		background: white;
-		border-bottom: 1px solid #e2e8f0;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+		padding: var(--space-3) var(--space-5);
+		background: var(--color-surface);
+		border-bottom: 1px solid var(--color-border);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.top-nav__brand h1 {
 		margin: 0;
-		font-size: 1.4rem;
-		font-weight: 700;
-		color: #0f172a;
+		font-size: var(--font-size-2xl);
+		font-weight: var(--font-weight-bold);
+		color: var(--color-text);
 	}
 
+	/* Wide horizontal menu: hidden on mobile (bottom tab bar takes over per plan) */
 	.top-nav__menu {
 		display: flex;
-		gap: 2rem;
+		gap: var(--space-6);
+	}
+
+	@media (max-width: 768px) {
+		.top-nav__menu {
+			display: none; /* bottom-nav handles navigation on mobile */
+		}
+		.top-nav {
+			padding: var(--space-2) var(--space-4);
+		}
+		.top-nav__brand h1 {
+			font-size: var(--font-size-xl);
+		}
 	}
 
 	.top-nav__link {
 		text-decoration: none;
-		color: #475569;
-		font-weight: 500;
-		padding: 0.5rem 0.75rem;
-		border-radius: 6px;
-		transition: all 0.2s;
+		color: var(--color-text-muted);
+		font-weight: var(--font-weight-medium);
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-sm);
+		transition: all var(--transition-fast);
 	}
 
 	.top-nav__link:hover {
-		background-color: #f1f5f9;
-		color: #0f172a;
+		background-color: var(--color-surface-alt);
+		color: var(--color-text);
 	}
 
 	.top-nav__link.active {
-		background-color: #1e40af;
+		background-color: var(--color-primary);
 		color: white;
 	}
 
@@ -210,31 +290,19 @@
 		padding: 0;
 	}
 
-	/* Responsive adjustments 
-	@media (max-width: 768px) {
-		.top-nav__menu {
-			gap: 1rem;
-			font-size: 0.95rem;
-		}
-	}*/
-	/*  User section styling */
+	/* User section */
 	.top-nav__user {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: var(--space-3);
 	}
 
 	.top-nav__user-info {
-		font-size: 0.95rem;
-		color: #475569;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
-	/* )=- Removed unused .top-nav__logout-btn styles (replaced by avatar dropdown menu). */
-
-	/* )=- Avatar dropdown for profile access. Wrapper is relative for positioning the menu on hover.
-	   Avatar is small circle with photo or placeholder initial. Menu appears below on hover.
-	   BEM: top-nav__user-avatar-wrapper, top-nav__user-avatar, top-nav__avatar-img etc.
-	   Menu is simple vertical list of items. Logout item styled differently. */
+	/* Avatar dropdown (token updates only; behavior unchanged) */
 	.top-nav__user-avatar-wrapper {
 		position: relative;
 		cursor: pointer;
@@ -245,8 +313,8 @@
 		height: 32px;
 		border-radius: 50%;
 		overflow: hidden;
-		border: 1px solid #e2e8f0;
-		background: #f1f5f9;
+		border: 1px solid var(--color-border);
+		background: var(--color-surface-alt);
 		flex-shrink: 0;
 	}
 
@@ -263,10 +331,10 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #475569;
-		background: #e2e8f0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		background: var(--color-border);
 	}
 
 	.top-nav__user-menu {
@@ -274,16 +342,14 @@
 		position: absolute;
 		top: 100%;
 		right: 0;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 6px;
-		box-shadow:
-			0 4px 6px -1px rgb(0 0 0 / 0.1),
-			0 2px 4px -2px rgb(0 0 0 / 0.1);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		box-shadow: var(--shadow-md);
 		min-width: 130px;
-		z-index: 100;
-		padding: 0.25rem 0;
-		margin-top: 4px;
+		z-index: var(--z-dropdown);
+		padding: var(--space-1) 0;
+		margin-top: var(--space-1);
 	}
 
 	.top-nav__user-avatar-wrapper:hover .top-nav__user-menu {
@@ -292,9 +358,9 @@
 
 	.top-nav__user-menu-item {
 		display: block;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.9rem;
-		color: #475569;
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 		text-decoration: none;
 		white-space: nowrap;
 		background: none;
@@ -302,28 +368,93 @@
 		width: 100%;
 		text-align: left;
 		cursor: pointer;
-		font-weight: 500;
+		font-weight: var(--font-weight-medium);
 	}
 
 	.top-nav__user-menu-item:hover {
-		background: #f1f5f9;
-		color: #1e2937;
+		background: var(--color-surface-alt);
+		color: var(--color-text);
 	}
 
 	.top-nav__user-menu-item--logout {
-		color: #ef4444;
+		color: var(--color-danger);
 	}
 
 	.top-nav__user-menu-item--logout:hover {
-		background: #fef2f2;
-		color: #dc2626;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 	}
+
 	.loading-screen {
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		height: 100%;
-		font-size: 1.1rem;
-		color: #64748b;
+		font-size: var(--font-size-lg);
+		color: var(--color-text-muted);
+	}
+
+	/* ============================================
+	   BOTTOM TAB NAV (mobile primary nav)
+	   Fixed at bottom on small screens. Desktop hidden via media query.
+	   BEM strictly followed.
+	   ============================================ */
+	.bottom-nav {
+		display: none; /* shown only on mobile via media query below */
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: var(--z-fixed);
+		background: var(--color-surface);
+		border-top: 1px solid var(--color-border);
+		box-shadow: 0 -2px 8px rgb(0 0 0 / 0.06);
+	}
+
+	@media (max-width: 768px) {
+		.bottom-nav {
+			display: flex;
+		}
+
+		/* Prevent fixed bottom nav from covering page content (especially calendar day views) */
+		.main-content {
+			padding-bottom: 62px;
+		}
+	}
+
+	.bottom-nav__tab {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-2) var(--space-1);
+		text-decoration: none;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-xs);
+		min-height: 56px; /* solid touch target */
+		transition: color var(--transition-fast), background var(--transition-fast);
+	}
+
+	.bottom-nav__tab--active {
+		color: var(--color-primary);
+		font-weight: var(--font-weight-semibold);
+		background: var(--color-surface-alt);
+		border-top: 3px solid var(--color-primary);
+	}
+
+	.bottom-nav__tab--active .bottom-nav__icon {
+		transform: scale(1.1);
+	}
+
+	.bottom-nav__icon {
+		font-size: var(--font-size-lg);
+		line-height: 1;
+		margin-bottom: var(--space-1);
+	}
+
+	.bottom-nav__label {
+		font-size: var(--font-size-xs);
+		letter-spacing: 0.2px;
 	}
 </style>

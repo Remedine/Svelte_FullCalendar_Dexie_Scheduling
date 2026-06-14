@@ -1,0 +1,433 @@
+/**
+ * globals.css — Design Tokens + Base Styles for Cohesive Look & Feel
+ * 
+ * Project: Capital City Windows Scheduling (Remedine/Svelte_FullCalendar_Dexie_Scheduling)
+ * 
+ * - Strict BEM encouraged for component/page blocks.
+ * - All colors, spacing, radii, type, shadows, etc. route through these tokens.
+ * - Light is the "base" :root. .dark provides the dark theme (dark-by-default per product decision).
+ * - Primary palette chosen for good accessibility/contrast on both light surfaces and dark surfaces
+ *   (slightly adjusted tint in dark for pop while meeting contrast needs for text on colored elements).
+ * - Spacing uses a consistent 0.25rem (4px) scale.
+ * - Used by (app) layout, all pages, modals, calendar globals, etc.
+ * - Area colors (dynamic from options) remain user-provided inline; adaptation for dark happens in
+ *   calendar/components via a small helper (see Phase 3).
+ */
+
+:root {
+	/* === COLOR - LIGHT (default) === */
+	--color-bg: #f8fafc;
+	--color-surface: #ffffff;
+	--color-surface-alt: #f1f5f9;
+	--color-border: #e2e8f0;
+	--color-border-strong: #cbd5e1;
+
+	--color-text: #0f172a;
+	--color-text-strong: #020617;
+	--color-text-muted: #64748b;
+	--color-text-subtle: #94a3b8;
+
+	/* Primary — familiar blue, tuned for contrast */
+	--color-primary: #2563eb;        /* slightly deeper for reliable contrast */
+	--color-primary-hover: #1d4ed8;
+	--color-primary-emphasis: #1e40af;
+	--color-primary-soft: #dbeafe;
+
+	/* Semantic (used for status, buttons, feedback) */
+	--color-success: #10b981;
+	--color-success-soft: #d1fae5;
+	--color-warning: #f59e0b;
+	--color-warning-soft: #fef3c7;
+	--color-danger: #ef4444;
+	--color-danger-soft: #fee2e2;
+	--color-danger-emphasis: #b91c1c;
+
+	/* === SPACING (4px base scale) === */
+	--space-0: 0;
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.25rem;
+	--space-6: 1.5rem;
+	--space-7: 1.75rem;
+	--space-8: 2rem;
+
+	/* === RADIUS === */
+	--radius-sm: 6px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+	--radius-xl: 16px;
+	--radius-full: 9999px;
+
+	/* === TYPOGRAPHY === */
+	--font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	--font-size-xs: 0.75rem;   /* 12px */
+	--font-size-sm: 0.85rem;   /* ~13.6px */
+	--font-size-base: 1rem;    /* 16px */
+	--font-size-lg: 1.1rem;
+	--font-size-xl: 1.25rem;
+	--font-size-2xl: 1.5rem;
+	--font-size-3xl: 1.75rem;
+	--font-size-4xl: 2rem;
+
+	--font-weight-normal: 400;
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+	--font-weight-bold: 700;
+
+	--line-height-tight: 1.15;
+	--line-height-normal: 1.4;
+	--line-height-relaxed: 1.6;
+
+	/* === SHADOWS === */
+	--shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
+	--shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+	--shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+	--shadow-modal: 0 10px 30px rgba(0, 0, 0, 0.25);
+
+	/* === TRANSITIONS & FOCUS === */
+	--transition-fast: 0.15s ease;
+	--transition-base: 0.2s ease;
+
+	--focus-ring: 0 0 0 3px rgb(37 99 235 / 0.25); /* based on primary */
+	--focus-ring-offset: 2px;
+
+	/* Z-index scale */
+	--z-dropdown: 100;
+	--z-sticky: 200;
+	--z-fixed: 300;
+	--z-modal-backdrop: 1000;
+	--z-modal: 1100;
+	--z-toast: 10000;
+}
+
+/* === DARK THEME (default per product decision — dark by default + toggle) === */
+.dark {
+	--color-bg: #1e1e1e;           /* neutral dark grey — baseline */
+	--color-surface: #252526;
+	--color-surface-alt: #2d2d30;
+	--color-border: #3c3c3c;
+	--color-border-strong: #505050;
+
+	--color-text: #d4d4d4;
+	--color-text-strong: #ffffff;
+	--color-text-muted: #9d9d9d;
+	--color-text-subtle: #6e6e6e;
+
+	/* Primary tuned for dark surfaces (good pop + contrast) */
+	--color-primary: #60a5fa;
+	--color-primary-hover: #3b82f6;
+	--color-primary-emphasis: #2563eb;
+	--color-primary-soft: #1e3a5f;
+
+	/* Semantic stays strong on dark */
+	--color-success: #34d399;
+	--color-success-soft: #064e3b;
+	--color-warning: #fbbf24;
+	--color-warning-soft: #78350f;
+	--color-danger: #f87171;
+	--color-danger-soft: #7f1d1d;
+	--color-danger-emphasis: #ef4444;
+
+	/* Shadows become softer / inset feel on dark */
+	--shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+	--shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+	--shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+
+	--focus-ring: 0 0 0 3px rgb(96 165 250 / 0.35);
+}
+
+/* === TEST APPLE DARK (scoped to a few pages) === */
+/* Based on https://developer.apple.com/design/human-interface-guidelines/dark-mode
+   and the color guidelines. Uses Apple's system background levels for dark mode,
+   high-contrast labels, and vibrant accents to give a more iOS-native feel. */
+.test-apple-dark {
+	--color-bg: #000000;                 /* Apple systemBackground (primary dark) */
+	--color-surface: #1C1C1E;            /* Apple secondarySystemBackground (cards, elevated content) */
+	--color-surface-alt: #2C2C2E;        /* Apple tertiarySystemBackground (further elevation, e.g. modals) */
+	--color-border: #38383A;             /* Apple separator / divider */
+	--color-border-strong: #48484A;
+
+	--color-text: #FFFFFF;               /* Apple label (primary text) */
+	--color-text-strong: #FFFFFF;
+	--color-text-muted: #8E8E93;         /* Apple secondaryLabel */
+	--color-text-subtle: #636366;        /* Apple tertiaryLabel / quaternary */
+
+	/* Primary: vibrant Apple-like systemBlue in dark */
+	--color-primary: #0A84FF;
+	--color-primary-hover: #409CFF;
+	--color-primary-emphasis: #007AFF;
+	--color-primary-soft: #0A3D91;
+
+	/* Semantic: Apple's system colors in dark */
+	--color-success: #30D158;
+	--color-success-soft: #0A3D1F;
+	--color-warning: #FFD60A;
+	--color-warning-soft: #3D2E00;
+	--color-danger: #FF453A;
+	--color-danger-soft: #4D1F1D;
+	--color-danger-emphasis: #FF6961;
+
+	/* Shadows softer to mimic material elevation */
+	--shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+	--shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+	--shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+
+	--focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ============================================
+   BASE / RESET (light touch — BEM is still king)
+   ============================================ */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	font-family: var(--font-family);
+	font-size: var(--font-size-base);
+	line-height: var(--line-height-normal);
+	color: var(--color-text);
+	background: var(--color-bg);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Improve tap targets globally for mobile */
+button,
+a,
+input,
+select,
+textarea,
+label[for] {
+	touch-action: manipulation;
+}
+
+/* ============================================
+   PRIMITIVE BASE BLOCKS (usable with or inside BEM)
+   These are intentionally short blocks so they compose cleanly.
+   Prefer .foo__button--primary inside a page block when it makes sense,
+   but these globals reduce duplication across 23 style blocks.
+   ============================================ */
+
+/* Buttons */
+.button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-5);
+	border-radius: var(--radius-md);
+	font-size: var(--font-size-base);
+	font-weight: var(--font-weight-medium);
+	line-height: 1;
+	border: 1px solid var(--color-border);
+	background: var(--color-surface);
+	color: var(--color-text);
+	cursor: pointer;
+	transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+	min-height: 44px; /* reliable touch target */
+	white-space: nowrap;
+}
+
+.button:hover:not(:disabled) {
+	background: var(--color-surface-alt);
+}
+
+.button:focus-visible {
+	outline: none;
+	box-shadow: var(--focus-ring);
+}
+
+.button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.button--primary {
+	background: var(--color-primary);
+	color: white;
+	border-color: var(--color-primary);
+}
+
+.button--primary:hover:not(:disabled) {
+	background: var(--color-primary-hover);
+	border-color: var(--color-primary-hover);
+}
+
+.button--danger {
+	background: var(--color-danger-soft);
+	color: var(--color-danger-emphasis);
+	border-color: var(--color-danger);
+}
+
+.button--danger:hover:not(:disabled) {
+	background: var(--color-danger);
+	color: white;
+}
+
+.button--ghost {
+	background: transparent;
+	border-color: transparent;
+}
+
+.button--ghost:hover:not(:disabled) {
+	background: var(--color-surface-alt);
+}
+
+.button--sm {
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--font-size-sm);
+	min-height: 36px;
+}
+
+.button--lg {
+	padding: var(--space-4) var(--space-6);
+	font-size: var(--font-size-lg);
+	min-height: 52px;
+}
+
+/* Form controls */
+.input,
+select,
+textarea {
+	width: 100%;
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	color: var(--color-text);
+	font-size: var(--font-size-base);
+	font-family: inherit;
+	transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input:focus,
+select:focus,
+textarea:focus {
+	outline: none;
+	border-color: var(--color-primary);
+	box-shadow: var(--focus-ring);
+}
+
+.input::placeholder {
+	color: var(--color-text-subtle);
+}
+
+.label {
+	display: block;
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-text-muted);
+	margin-bottom: var(--space-2);
+}
+
+/* Cards / surfaces */
+.card {
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-sm);
+}
+
+/* Modal shell (used as base; individual modals keep their __content BEM) */
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.6);
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
+	z-index: var(--z-modal-backdrop);
+}
+
+.modal-content {
+	background: var(--color-surface);
+	width: 100%;
+	max-width: 560px;
+	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	box-shadow: var(--shadow-modal);
+	max-height: 95vh;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+/* Status / badge primitives */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 0.15rem 0.55rem;
+	border-radius: var(--radius-full);
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-semibold);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.badge--scheduled { background: var(--color-primary-soft); color: var(--color-primary-emphasis); }
+.badge--confirmed { background: var(--color-success-soft); color: var(--color-success); }
+.badge--completed { background: var(--color-success-soft); color: var(--color-success); }
+.badge--cancelled { background: var(--color-danger-soft); color: var(--color-danger-emphasis); }
+
+.badge--overdue {
+	background: var(--color-danger-soft);
+	color: var(--color-danger-emphasis);
+}
+
+/* Area / filter chips */
+.chip {
+	padding: var(--space-2) var(--space-4);
+	border-radius: var(--radius-full);
+	font-size: var(--font-size-sm);
+	cursor: pointer;
+	border: 1px solid;
+	transition: all var(--transition-fast);
+}
+
+.chip.active {
+	font-weight: var(--font-weight-semibold);
+	box-shadow: 0 0 0 3px currentColor;
+}
+
+/* Small utility for sticky footers in modals / pages (already used in several) */
+.sticky-footer {
+	position: sticky;
+	bottom: 0;
+	background: var(--color-surface);
+	padding: var(--space-4) var(--space-5);
+	border-top: 1px solid var(--color-border);
+	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+	z-index: var(--z-sticky);
+}
+
+/* Toast base alignment (Toast.svelte will continue to own its full BEM but can adopt tokens) */
+.toast {
+	background: var(--color-primary);
+	color: white;
+}
+
+/* Reduced motion respect */
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition: none !important;
+		animation: none !important;
+	}
+}
+
+/* Mobile-first: slightly tighter defaults on very small screens */
+@media (max-width: 380px) {
+	.button {
+		padding-left: var(--space-4);
+		padding-right: var(--space-4);
+	}
+}
+
+/* The rest of the app (per-page BEM blocks) should @import or simply inherit these vars.
+   Individual component <style> blocks will use var(--color-*) etc. instead of hard-coded hex.
+   This file is imported in the (app) layout (and root where appropriate). */

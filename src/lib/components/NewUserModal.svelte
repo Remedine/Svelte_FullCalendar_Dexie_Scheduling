@@ -6,7 +6,7 @@
 	// )=- No PIN anywhere (PIN login completely removed; only email/password auth).
 	// Zod for the admin creation form. BEM + runes used.
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	import { createUser } from '$lib/db';
+	import { createUser, db } from '$lib/db';
 	import { z } from 'zod';
 
 	interface Props {
@@ -54,26 +54,47 @@
 		const tempPass = crypto.randomUUID().slice(0, 12) + 'Aa1!'; // temporary fallback; the welcome email provides the main link to set password + activate account
 
 		try {
-			await createUser({
+			// Always store/pass emails in lowercase to PB (avoids validation/auth errors on capital letters).
+			const localId = await createUser({
 				firstName: data.firstName,
 				lastName: data.lastName,
-				email: data.email,
+				email: data.email.trim().toLowerCase(),
 				role: data.role,
 				active: true,
+				verified: false, // will be set true either via the welcome email link or via the welcome modal if the user logs in directly with the temp password
 				forcePhotoUpdate: true, // admin retains ability to force photo update via edit toggle (PIN removed)
 				password: tempPass, // temporary; the welcome email link sets the real password (and activates the account via hook)
 				photo: undefined
 			} as any);
 			tempPasswordForUser = tempPass; // show to admin (user will normally use the welcome email link instead)
 
+			// After the queue has processed (createUser awaits processSyncQueue), the local record has pbId.
+			// Use the elevated mark-verified route (internal secret) to set verified:true on PB, since direct
+			// update after create often 400s depending on collection rules (the admin token may not write verified).
+			// This ensures PB shows verified after creation.
+			try {
+				const created = await db.users.get(localId);
+				if (created) {
+					await fetch('/api/auth/mark-verified', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ pbId: created.pbId, email: created.email })
+					});
+				}
+			} catch (e) {
+				console.warn('Failed to call mark-verified after creation (non-blocking):', e);
+			}
+
 			// Send a single welcome email with one action: set password + activate account.
-			// On successful password reset, a server hook in PocketBase also marks the user as verified.
-			// This calls the welcome route which hits the PB internal password-reset endpoint then Brevo.
+			// (The email link path uses a server hook + internal request-password-reset.)
+			// For the direct temp-password login path (shown temp pass), the WelcomeModal itself calls
+			// /api/auth/mark-verified (internal secret) after the user sets their real password.
+			const normalizedForWelcome = data.email.trim().toLowerCase();
 			try {
 				await fetch('/api/auth/send-welcome', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ email: data.email })
+					body: JSON.stringify({ email: normalizedForWelcome })
 				});
 			} catch (e) {
 				console.warn('Failed to send welcome email for new user (non-blocking):', e);
@@ -105,7 +126,7 @@
 				<h3>User created successfully!</h3>
 				<p>
 					Share this <strong>temporary password</strong> with the new crew member (they will use the email
-					+ this password for their first login to verify and set their real password + photo):
+					+ this password for their first login; the app will immediately prompt them to set a real password and photo):
 				</p>
 				<div class="temp-pass-box">{tempPasswordForUser}</div>
 				<p class="note">
@@ -113,50 +134,50 @@
 					their password and photo in Profile. Admin can later force photo reset via the edit
 					toggle.
 				</p>
-				<button onclick={closeModal} class="modal__btn modal__btn--save">Done</button>
+				<button onclick={closeModal} class="modal__btn modal__btn--save button button--primary">Done</button>
 			</div>
 		{:else}
 			<div class="modal__form">
 				<!-- Admin only enters first/last/email/role. Password auto-generated for initial email verification (user sets real password after first login). -->
 				<div class="modal__field">
-					<label for="nu-first" class="modal__label">First Name *</label>
+					<label for="nu-first" class="modal__label label">First Name *</label>
 					<input
 						id="nu-first"
 						type="text"
 						bind:value={firstName}
-						class="modal__input"
+						class="modal__input input"
 						placeholder="John"
 					/>
 					{#if errors.firstName}<small class="error">{errors.firstName}</small>{/if}
 				</div>
 
 				<div class="modal__field">
-					<label for="nu-last" class="modal__label">Last Name *</label>
+					<label for="nu-last" class="modal__label label">Last Name *</label>
 					<input
 						id="nu-last"
 						type="text"
 						bind:value={lastName}
-						class="modal__input"
+						class="modal__input input"
 						placeholder="Doe"
 					/>
 					{#if errors.lastName}<small class="error">{errors.lastName}</small>{/if}
 				</div>
 
 				<div class="modal__field">
-					<label for="nu-email" class="modal__label">Email *</label>
+					<label for="nu-email" class="modal__label label">Email *</label>
 					<input
 						id="nu-email"
 						type="email"
 						bind:value={email}
-						class="modal__input"
+						class="modal__input input"
 						placeholder="john.doe@company.com"
 					/>
 					{#if errors.email}<small class="error">{errors.email}</small>{/if}
 				</div>
 
 				<div class="modal__field">
-					<label for="nu-role" class="modal__label">Role</label>
-					<select id="nu-role" bind:value={role} class="modal__select">
+					<label for="nu-role" class="modal__label label">Role</label>
+					<select id="nu-role" bind:value={role} class="modal__select input">
 						<option value="crew">Crew</option>
 						<option value="admin">Admin</option>
 					</select>
@@ -172,15 +193,15 @@
 			</div>
 
 			<div class="modal__actions">
-				<button onclick={closeModal} class="modal__btn modal__btn--cancel">Cancel</button>
-				<button onclick={handleSubmit} class="modal__btn modal__btn--save">Create User</button>
+				<button onclick={closeModal} class="modal__btn modal__btn--cancel button button--ghost">Cancel</button>
+				<button onclick={handleSubmit} class="modal__btn modal__btn--save button button--primary">Create User</button>
 			</div>
 		{/if}
 	</div>
 </div>
 
 <style>
-	/* BEM - unchanged */
+	/* Fully updated to design tokens + base primitives for cohesion (matches JobFormModal etc.) */
 	.modal-overlay {
 		position: fixed;
 		inset: 0;
@@ -188,63 +209,78 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 1000;
+		z-index: var(--z-modal-backdrop);
 	}
 	.modal-content {
-		background: white;
-		border-radius: 8px;
+		background: var(--color-surface);
+		border-radius: var(--radius-md);
 		width: 90%;
 		max-width: 420px;
-		padding: 2rem;
+		padding: var(--space-6);
 	}
 	.modal__title {
-		margin: 0 0 1.5rem 0;
-		font-size: 1.5rem;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
 	}
 	.modal__form {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: var(--space-4);
 	}
 	.modal__label {
-		font-weight: 600;
-		margin-bottom: 0.25rem;
+		font-weight: var(--font-weight-semibold);
+		margin-bottom: var(--space-1);
 		display: block;
 	}
 	.modal__input,
 	.modal__select {
-		padding: 0.75rem;
-		border: 1px solid #ccc;
-		border-radius: 6px;
-		font-size: 1rem;
+		/* base .input */
+		padding: var(--space-3);
 	}
 	.modal__placeholder {
-		padding: 1rem;
-		background: #f9f9f9;
-		border-radius: 6px;
-		font-size: 0.9rem;
-		color: #666;
+		padding: var(--space-4);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 		text-align: center;
 	}
 	.modal__actions {
 		display: flex;
-		gap: 1rem;
+		gap: var(--space-3);
 		justify-content: flex-end;
-		margin-top: 2rem;
+		margin-top: var(--space-6);
 	}
 	.modal__btn {
-		padding: 0.75rem 1.5rem;
+		padding: var(--space-3) var(--space-6);
 		border: none;
-		border-radius: 6px;
-		font-weight: 600;
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-semibold);
 		cursor: pointer;
 	}
 	.modal__btn--cancel {
-		background: #9e9e9e;
-		color: white;
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
 	}
 	.modal__btn--save {
-		background: #4caf50;
+		background: var(--color-primary);
 		color: white;
+	}
+	.temp-pass-box {
+		background: var(--color-success-soft);
+		border: 1px solid var(--color-success);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		font-family: monospace;
+		font-size: var(--font-size-base);
+		margin: var(--space-4) 0;
+		word-break: break-all;
+		color: var(--color-text);
+	}
+	.note {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
 	}
 </style>

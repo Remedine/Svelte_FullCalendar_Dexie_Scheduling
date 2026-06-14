@@ -14,16 +14,15 @@
 
 <style>
 	.split-page {
-		padding: 1rem;
-
+		padding: var(--space-4);
 		margin: 0 auto;
 	}
 
 	/* )=- Removed unused .split-page__header / __title / __subtitle (current layout uses different structure). */
 
 	.split-page__content {
-		background: #f8fafc;
-		border-radius: 12px;
-		padding: 1rem;
+		background: var(--color-bg);
+		border-radius: var(--radius-lg);
+		padding: var(--space-4);
 	}
 </style>

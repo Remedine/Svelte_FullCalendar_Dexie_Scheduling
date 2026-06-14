@@ -12,6 +12,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
 
 	// )=- Phase 5 overhaul of /jobs page per JOBS_AND_INVOICES_SPEC.md.
@@ -393,7 +394,7 @@
 					class="job-page__card"
 					role="button"
 					tabindex="0"
-					style="border-left: 6px solid {area?.color || '#64748b'};"
+					style="border-left: 6px solid {getDisplayAreaColor(area?.color) || '#64748b'};"
 					onclick={() => openDetails(job)}
 					onkeydown={(e) => {
 						if (e.key === 'Enter' || e.key === ' ') {
@@ -403,14 +404,14 @@
 					}}
 				>
 					<div class="job-page__card-header">
-						<span class="job-page__status job-page__status--{job.status}">{job.status}</span>
+						<span class="badge badge--{job.status}">{job.status}</span>
 						<span class="job-page__total">${(job.totalAmount || 0).toFixed(2)}</span>
 						{#if job.id && invoiceMap[job.id]}
 							{@const info = invoiceStatus[job.id]}
-							<span class="job-page__invoice-badge" class:overdue={info?.isOverdue}>
+							<span class="job-page__invoice-badge badge" class:overdue={info?.isOverdue}>
 								📄 Invoice
 								{#if info?.isOverdue}
-									<span class="job-page__overdue-pill">OVERDUE</span>
+									<span class="badge--overdue-pill">OVERDUE</span>
 								{/if}
 							</span>
 						{/if}
@@ -481,18 +482,18 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 	}
 	.job-page__title {
-		font-size: 1.75rem;
-		font-weight: 700;
-		color: #0f172a;
+		font-size: var(--font-size-3xl);
+		font-weight: var(--font-weight-bold);
+		color: var(--color-text);
 		margin: 0;
 	}
 	.job-page__subtitle {
-		color: #64748b;
+		color: var(--color-text-muted);
 		margin: 0.25rem 0 0;
-		font-size: 0.9rem;
+		font-size: var(--font-size-sm);
 	}
 
 	.job-page__filters {
@@ -507,191 +508,178 @@
 		gap: 0.25rem;
 	}
 	.job-page__quick button {
-		padding: 0.35rem 0.75rem;
-		border: 1px solid #cbd5e1;
-		background: white;
-		border-radius: 6px;
-		font-size: 0.8rem;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
 		cursor: pointer;
+		color: var(--color-text);
 	}
 	.job-page__quick button.active {
-		background: #1e40af;
+		background: var(--color-primary);
 		color: white;
-		border-color: #1e40af;
+		border-color: var(--color-primary);
 	}
 
 	.job-page__search {
 		flex: 1;
 		min-width: 220px;
-		padding: 0.55rem 0.8rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 8px;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 	.job-page__date-range {
 		display: flex;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-page__date-range input {
-		padding: 0.35rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-size: 0.8rem;
+		padding: var(--space-1);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 	.job-page__toggle {
-		font-size: 0.8rem;
+		font-size: var(--font-size-xs);
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
+		color: var(--color-text-muted);
 	}
 
 	.job-page__btn {
-		padding: 0.45rem 0.9rem;
-		border-radius: 6px;
-		font-weight: 500;
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-medium);
 		cursor: pointer;
-		border: 1px solid #cbd5e1;
-		background: white;
-		font-size: 0.85rem;
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
 	}
 	.job-page__btn--primary {
-		background: #3b82f6;
+		background: var(--color-primary);
 		color: white;
-		border-color: #3b82f6;
+		border-color: var(--color-primary);
 	}
 
 	.job-page__facets {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
 	}
 	.job-page__facet {
 		display: flex;
-		gap: 0.25rem;
+		gap: var(--space-1);
 		align-items: center;
 	}
 	.area-chip {
-		padding: 0.2rem 0.6rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 999px;
-		font-size: 0.75rem;
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
 		cursor: pointer;
-		background: white;
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 	.area-chip.active {
-		background: #1e40af;
+		background: var(--color-primary);
 		color: white;
-		border-color: #1e40af;
+		border-color: var(--color-primary);
 	}
 	.job-page__amount input {
 		width: 80px;
-		padding: 0.25rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 4px;
-		font-size: 0.8rem;
+		padding: var(--space-1);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.job-page__list {
 		display: grid;
-		gap: 0.75rem;
+		gap: var(--space-3);
 	}
 	.job-page__card {
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		padding: 0.9rem 1rem;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		padding: var(--space-3) var(--space-4);
 		cursor: pointer;
 		transition:
 			box-shadow 0.1s,
 			transform 0.1s;
 	}
 	.job-page__card:hover {
-		box-shadow: 0 3px 10px rgb(15 23 42 / 0.08);
+		box-shadow: var(--shadow-md);
 		transform: translateY(-1px);
 	}
 	.job-page__card-header {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		align-items: center;
-		margin-bottom: 0.4rem;
+		margin-bottom: var(--space-2);
 		flex-wrap: wrap;
 	}
-	.job-page__status {
-		padding: 0.15rem 0.55rem;
-		border-radius: 999px;
-		font-size: 0.65rem;
-		font-weight: 600;
-		text-transform: uppercase;
-	}
-	.job-page__status--scheduled {
-		background: #dbeafe;
-		color: #1e40af;
-	}
-	.job-page__status--confirmed {
-		background: #d1fae5;
-		color: #166534;
-	}
-	.job-page__status--completed {
-		background: #a7f3d0;
-		color: #065f46;
-	}
-	.job-page__status--cancelled {
-		background: #fee2e2;
-		color: #991b1b;
-	}
+	/* Status badges now use global .badge + .badge--* primitives (tokens + dark support).
+	   Overdue uses .badge--overdue (defined in globals). The inner pill is a small variant. */
 	.job-page__invoice-badge {
-		font-size: 0.65rem;
-		background: #ecfdf5;
-		color: #166534;
-		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
 		display: inline-flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
+		padding: 0.1rem 0.4rem;
+		font-size: var(--font-size-xs);
+		border-radius: var(--radius-sm);
+		background: var(--color-success-soft);
+		color: var(--color-success);
 	}
-	/* )=- Overdue visual treatment on jobs cards (Phase 7). Red tint + small pill when the linked invoice is overdue (not paid + past dueDate).
-	   Uses the enriched invoiceStatus from loadJobs + shared isInvoiceOverdue helper. BEM modifier + nested pill for clarity.
-	   Matches the OVERDUE badge style in the details modal. */
 	.job-page__invoice-badge.overdue {
-		background: #fee2e2;
-		color: #991b1b;
-		border: 1px solid #fecaca;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border: 1px solid var(--color-danger);
 	}
-	.job-page__overdue-pill {
-		font-size: 0.55rem;
-		background: #991b1b;
+	.badge--overdue-pill {
+		font-size: var(--font-size-xs);
+		background: var(--color-danger);
 		color: white;
 		padding: 0 0.2rem;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		text-transform: uppercase;
+		font-weight: var(--font-weight-semibold);
 	}
 	.job-page__total {
-		font-weight: 700;
-		color: #0f172a;
+		font-weight: var(--font-weight-bold);
+		color: var(--color-text);
 		margin-left: auto;
 	}
 
 	.job-page__card-title {
 		margin: 0 0 0.3rem;
-		font-size: 1rem;
-		font-weight: 600;
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-semibold);
 	}
 	.job-page__meta {
 		display: flex;
 		gap: 0.75rem;
-		font-size: 0.8rem;
-		color: #64748b;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 	.job-page__crew {
-		font-weight: 500;
+		font-weight: var(--font-weight-medium);
 	}
 	.job-page__client {
-		font-weight: 500;
-		color: #1e40af;
+		font-weight: var(--font-weight-medium);
+		color: var(--color-primary-emphasis);
 	}
 	.job-page__area {
-		font-size: 0.75rem;
-		font-weight: 500;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
 		margin-left: auto;
 	}
 	.job-page__crew {
@@ -702,17 +690,17 @@
 	.job-page__crew-avatar {
 		width: 20px;
 		height: 20px;
-		border-radius: 50%;
+		border-radius: var(--radius-full);
 		overflow: hidden;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--color-border);
 		flex-shrink: 0;
-		background: #f1f5f9;
+		background: var(--color-surface-alt);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.65rem;
-		font-weight: 600;
-		color: #475569;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
 	}
 	.job-page__crew-avatar img {
 		width: 100%;
@@ -720,31 +708,32 @@
 		object-fit: cover;
 	}
 	.job-page__crew-initial {
-		font-size: 0.6rem;
+		font-size: var(--font-size-xs);
 	}
 	.job-page__crew-names {
-		font-size: 0.75rem;
-		color: #64748b;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 		margin-left: 0.25rem;
 	}
 	.job-page__notes {
 		margin: 0.4rem 0 0;
-		font-size: 0.8rem;
-		color: #475569;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
 	.job-page__pagination {
 		display: flex;
 		justify-content: center;
-		gap: 1rem;
-		margin-top: 1rem;
-		font-size: 0.9rem;
+		gap: var(--space-4);
+		margin-top: var(--space-4);
+		font-size: var(--font-size-sm);
 	}
 	.job-page__pagination button {
-		padding: 0.3rem 0.7rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 4px;
-		background: white;
+		padding: var(--space-1) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	/* )=- Loading / empty / error states with BEM (Phase 7 polish).
@@ -754,15 +743,16 @@
 	.job-page__empty,
 	.job-page__error {
 		text-align: center;
-		padding: 2.5rem;
-		color: #64748b;
-		border-radius: 8px;
+		padding: var(--space-8);
+		color: var(--color-text-muted);
+		border-radius: var(--radius-md);
+		background: var(--color-surface-alt);
 	}
 	.job-page__error {
-		background: #fee2e2;
-		color: #991b1b;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 	}
 	.job-page__error p {
-		margin: 0 0 0.5rem;
+		margin: 0 0 var(--space-2);
 	}
 </style>

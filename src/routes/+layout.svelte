@@ -4,6 +4,12 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import Toast from '$lib/components/Toast.svelte';
 
+	// Global tokens available on public surfaces (login, root loading)
+	import '$lib/styles/globals.css';
+
+	// Ensure theme store (and dark class application) runs for the entire app including login
+	import '$lib/stores/theme.svelte.ts';
+
 	const { children } = $props();
 </script>
 
@@ -32,16 +38,16 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		background: #f8fafc;
-		color: #64748b;
-		gap: 1rem;
+		background: var(--color-bg);
+		color: var(--color-text-muted);
+		gap: var(--space-4);
 	}
 
 	.loading-screen__spinner {
 		width: 48px;
 		height: 48px;
-		border: 5px solid #e2e8f0;
-		border-top: 5px solid #3b82f6;
+		border: 5px solid var(--color-border);
+		border-top: 5px solid var(--color-primary);
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
 	}

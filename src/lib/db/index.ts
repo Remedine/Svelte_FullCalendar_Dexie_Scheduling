@@ -988,6 +988,11 @@ export async function createUser(
 	const newId = crypto.randomUUID();
 	const fullName = `${firstName} ${lastName}`.trim();
 
+	// Normalize email to lowercase early (prevents PB validation issues with mixed case and keeps consistent storage).
+	if (typeof (rest as any).email === 'string') {
+		(rest as any).email = (rest as any).email.trim().toLowerCase();
+	}
+
 	const newUser = safeClone({
 		...rest,
 		id: newId,
@@ -1221,7 +1226,7 @@ export async function processSyncQueue() {
 					// PB still requires password + passwordConfirm for auth record creation.
 					const password = providedPassword || crypto.randomUUID().slice(0, 16) + 'Aa1!';
 					const email =
-						userData.email ||
+						(userData.email || '').trim().toLowerCase() ||
 						`${(userData.firstName || userData.name || 'user').toLowerCase().replace(/\s+/g, '')}@crew.local`;
 
 					const safeUserData = safeClone({
@@ -1238,8 +1243,23 @@ export async function processSyncQueue() {
 						safeUserData.photo = dataUrlToBlob(safeUserData.photo);
 					}
 
+					// Never include verified / emailConfirm / similar system auth fields in the *create* payload.
+					// PocketBase auth collections frequently reject them at create time (400 on "verified") depending on
+					// collection options, email confirmation settings, and whether the caller is a full superuser vs role-based admin.
+					// We create cleanly, then attempt a follow-up update (as the logged-in admin) to set verified:true on the server record.
+					// The local Dexie copy (created in createUser) keeps verified:false as the explicit marker for the
+					// first-login WelcomeModal (set real password) + ForcePhotoUpdate gate. Merge logic in pb.ts protects the marker.
+					delete (safeUserData as any).verified;
+					delete (safeUserData as any).emailConfirm;
+					delete (safeUserData as any).emailVisibility;
+
 					try {
 						const record = await pb.collection('users').create(safeUserData);
+
+						// Note: We no longer attempt direct verified update here (often 400s due to collection rules on non-superuser tokens).
+						// Instead, NewUserModal (after awaiting createUser which processes the queue) calls the elevated
+						// /api/auth/mark-verified route using the internal secret to set verified on PB reliably.
+						// The local Dexie marker (verified:false) is what drives the first-login Welcome gate.
 
 						const existing = await db.users.get(item.recordId);
 						if (existing) {
@@ -1261,7 +1281,10 @@ export async function processSyncQueue() {
 						}
 					} catch (err: any) {
 						console.error('❌ User sync failed with 400:', err.response?.data);
-						throw err;
+						// Clean up the bad/stale queue item (e.g. old pending NewUser create that included fields PB rules reject).
+						// Prevents the item from retrying (and spamming errors) on every subsequent login / processSyncQueue.
+						await db.syncQueue.delete(item.id!);
+						throw { __intentionallyDropped: true, reason: 'User create 400 (likely schema/rule on verified or similar); queue item removed' };
 					}
 				} else if (item.type === 'update') {
 					try {
@@ -1300,7 +1323,15 @@ export async function processSyncQueue() {
 						}
 					} catch (err: any) {
 						if (err.status === 404) {
+							// The pbId on this local record is stale/dead (common after dups, cleanups, or server deletes of test users).
+							// Clean the bad pbId so future queues/pulls can recover the correct one. Delete the queue item
+							// to stop repeated 404 spam on every login/sync.
 							await db.syncQueue.delete(item.id!);
+							const local = await db.users.get(item.recordId);
+							if (local?.pbId) {
+								await db.users.update(item.recordId, { pbId: undefined as any, updatedAt: new Date() });
+								console.warn(`🧹 Cleared stale pbId from local user ${item.recordId} after 404 on PB update`);
+							}
 						} else {
 							console.error('❌ User update failed:', JSON.stringify(err.response?.data, null, 2));
 							throw err;

@@ -78,7 +78,7 @@
 			Offline — will sync when connected
 		{/if}
 	</span>
-	<button class="sync-status__btn" onclick={manualSync} disabled={isSyncing}>
+	<button class="sync-status__btn button" onclick={manualSync} disabled={isSyncing}>
 		{isSyncing ? 'Syncing...' : 'Sync Now'}
 	</button>
 </div>
@@ -87,12 +87,12 @@
 	.sync-status {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 0.5rem 1rem;
-		background: #f8fafc;
-		border-radius: 9999px;
-		font-size: 0.875rem;
-		color: #64748b;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-4);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
 	.sync-status__dot {
@@ -102,24 +102,16 @@
 	}
 
 	.sync-status__dot--online {
-		background: #22c55e;
+		background: var(--color-success);
 	}
 	.sync-status__dot--offline {
-		background: #ef4444;
+		background: var(--color-danger);
 	}
 
 	.sync-status__btn {
+		/* base button */
 		margin-left: auto;
-		padding: 0.25rem 0.75rem;
-		border-radius: 9999px;
-		border: 1px solid #e2e8f0;
-		background: white;
-		font-size: 0.8rem;
-		cursor: pointer;
-	}
-
-	.sync-status__btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
+		padding: var(--space-1) var(--space-3);
+		font-size: var(--font-size-xs);
 	}
 </style>

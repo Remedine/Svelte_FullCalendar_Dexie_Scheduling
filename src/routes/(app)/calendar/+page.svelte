@@ -15,33 +15,41 @@
 	.schedule-page {
 		display: flex;
 		flex-direction: column;
-		height: 100%;
+		height: auto; /* allow content (calendar) to determine full height */
 		min-height: 100dvh;
-		overflow: hidden;
-		background-color: #f8fafc;
+		overflow: visible; /* enable main page scroll for tall calendar content */
+		background-color: var(--color-bg);
 	}
 
 	.schedule-page__content {
-		flex: 1;
-		min-height: 0; /* Important for flex children */
-		overflow: hidden;
-		background: #f8fafc;
-		border-radius: 12px;
-		padding: 0.75rem;
-		margin: 0.5rem;
+		flex: 1 0 auto;
+		height: auto;
+		min-height: 0;
+		display: flex;
+		overflow: visible; /* let inner calendar push page scroll */
+		background: var(--color-bg);
+		padding: var(--space-3) var(--space-3) var(--space-4);
+		margin: 0;
 	}
 
-	/* Make sure SplitCalendar can grow properly */
+	/* Allow the day wrapper to size based on calendar content (no fixed cap) */
 	:global(.split-calendar__day-wrapper) {
-		min-height: 650px; /* Base height */
-		flex: 1; /* Allow it to grow */
+		flex: 1 0 auto;
+		min-height: 300px;
 	}
 
 	@media (max-width: 900px) {
 		.schedule-page__content {
-			margin: 0.25rem;
-			padding: 0.5rem;
-			border-radius: 8px;
+			margin: var(--space-1);
+			padding: var(--space-2) var(--space-2) var(--space-4); /* keep a bit of bottom gap on smaller screens */
+			border-radius: var(--radius-md);
+		}
+	}
+
+	/* Mobile relief for "smooshed day schedule" (timeGridDay inside Split view) */
+	@media (max-width: 768px) {
+		:global(.split-calendar__day-wrapper) {
+			min-height: 300px;
 		}
 	}
 </style>

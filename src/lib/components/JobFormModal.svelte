@@ -20,6 +20,7 @@
 	import ClientPicker from './ClientPicker.svelte';
 	import BillableItemRow from './BillableItemRow.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { db, type Client } from '$lib/db';
 
 	let show = $state(false);
@@ -198,7 +199,7 @@
 	function getAreaColor(areaId: string | undefined): string {
 		if (!areaId || !areaOptions.length) return '#64748b';
 		const area = areaOptions.find((a: any) => a.value === areaId);
-		return area?.color || '#64748b';
+		return getDisplayAreaColor(area?.color);
 	}
 
 	async function saveJob() {
@@ -300,13 +301,13 @@
 			<div class="new-job-modal__form">
 				<!-- Job Title -->
 				<div class="new-job-modal__field">
-					<label for="job-title" class="new-job-modal__label">Job Title (optional)</label>
-					<input id="job-title" class="new-job-modal__input" bind:value={currentJob.title} />
+					<label for="job-title" class="new-job-modal__label label">Job Title (optional)</label>
+					<input id="job-title" class="new-job-modal__input input" bind:value={currentJob.title} />
 				</div>
 
 				<!-- Client -->
 				<div class="new-job-modal__field">
-					<label for="client-picker" class="new-job-modal__label">Client</label>
+					<label for="client-picker" class="new-job-modal__label label">Client</label>
 
 					<ClientPicker
 						bind:value={currentJob.clientId}
@@ -331,19 +332,22 @@
              but the job does, we update the client. This keeps the common "client == job area" invariant
              without forcing the user to set it twice. -->
 				<div class="new-job-modal__field">
-					<label for="job-area" class="new-job-modal__label">Area of Town</label>
+					<label for="job-area" class="new-job-modal__label label">Area of Town</label>
 					<div
 						class="area-field-wrapper"
 						style="border-left: 6px solid {getAreaColor(currentJob.areaOfTown)};"
 					>
 						<select
 							id="job-area"
-							class="new-job-modal__input area-select"
+							class="area-select input"
 							bind:value={currentJob.areaOfTown}
 						>
 							<option value="">Select area...</option>
 							{#each areaOptions as option (option.value)}
-								<option value={option.value}>{option.label}</option>
+								<option 
+									value={option.value}
+									style="color: {getDisplayAreaColor(option.color)};"
+								>■ {option.label}</option>
 							{/each}
 						</select>
 					</div>
@@ -352,11 +356,11 @@
 				<!-- Dates -->
 				<div class="new-job-modal__field-group">
 					<div class="new-job-modal__field">
-						<label for="job-start" class="new-job-modal__label">Start</label>
+						<label for="job-start" class="new-job-modal__label label">Start</label>
 						<input
 							id="job-start"
 							type="datetime-local"
-							class="new-job-modal__input"
+							class="new-job-modal__input input"
 							value={toDatetimeLocal(currentJob?.start)}
 							oninput={(e) => {
 								const val = (e.target as HTMLInputElement).value;
@@ -366,11 +370,11 @@
 					</div>
 
 					<div class="new-job-modal__field">
-						<label for="job-end" class="new-job-modal__label">End</label>
+						<label for="job-end" class="new-job-modal__label label">End</label>
 						<input
 							id="job-end"
 							type="datetime-local"
-							class="new-job-modal__input"
+							class="new-job-modal__input input"
 							value={toDatetimeLocal(currentJob?.end)}
 							oninput={(e) => {
 								const val = (e.target as HTMLInputElement).value;
@@ -382,7 +386,7 @@
 
 				<!-- Crew -->
 				<fieldset class="new-job-modal__field">
-					<legend class="new-job-modal__label">Crew / Assigned Staff</legend>
+					<legend class="new-job-modal__label label">Crew / Assigned Staff</legend>
 					<div class="new-job-modal__crew-grid">
 						{#each crewOptions as crew (crew)}
 							<label class="new-job-modal__crew-option">
@@ -404,10 +408,10 @@
 
 				<!-- Notes -->
 				<div class="new-job-modal__field">
-					<label for="job-notes" class="new-job-modal__label">Notes / Special Instructions</label>
+					<label for="job-notes" class="new-job-modal__label label">Notes / Special Instructions</label>
 					<textarea
 						id="job-notes"
-						class="new-job-modal__input"
+						class="new-job-modal__input input"
 						rows="3"
 						bind:value={currentJob.notes}
 						placeholder="Gate code, dog in yard, ladder needed..."
@@ -416,7 +420,7 @@
 
 				<!-- Billable Items -->
 				<div class="new-job-modal__field">
-					<label id="billable-label" class="new-job-modal__label">Billable Items</label>
+					<label id="billable-label" class="new-job-modal__label label">Billable Items</label>
 					<div class="billable-items" role="group" aria-labelledby="billable-label">
 						{#each currentJob.billableItems as item, index (index)}
 							<BillableItemRow
@@ -428,7 +432,7 @@
 
 						<button
 							type="button"
-							class="new-job-modal__btn new-job-modal__btn-add"
+							class="new-job-modal__btn new-job-modal__btn-add button"
 							onclick={addBillableItem}
 						>
 							+ Add another item
@@ -438,8 +442,8 @@
 
 				<!-- Totals -->
 				<div class="totals-summary">
-					<div>Subtotal: <strong>${subtotal.toFixed(2)}</strong></div>
-					<div>Tax ({(optionsStore.data?.taxRate || 8).toFixed(1)}%):</div>
+					<div class="totals-summary__line">Subtotal: <strong>${subtotal.toFixed(2)}</strong></div>
+					<div class="totals-summary__line">Tax ({(optionsStore.data?.taxRate || 8).toFixed(1)}%):</div>
 					<div class="totals-summary__total">Total: <strong>${totalAmount.toFixed(2)}</strong></div>
 				</div>
 			</div>
@@ -456,11 +460,11 @@
 				{/if}
 
 				<div class="actions-right">
-					<button class="new-job-modal__btn new-job-modal__btn--cancel" onclick={closeModal}>
+					<button class="new-job-modal__btn button button--ghost" onclick={closeModal}>
 						{isEditing ? 'Close' : 'Cancel'}
 					</button>
 
-					<button class="new-job-modal__btn new-job-modal__btn--primary" onclick={saveJob}>
+					<button class="new-job-modal__btn button button--primary" onclick={saveJob}>
 						{isEditing ? 'Save Changes' : 'Create Job'}
 					</button>
 				</div>
@@ -510,13 +514,13 @@
 
 			<div class="cancel-confirm-modal__footer">
 				<button
-					class="new-job-modal__btn new-job-modal__btn--cancel"
+					class="new-job-modal__btn new-job-modal__btn--cancel button button--ghost"
 					onclick={() => (showCancelConfirm = false)}
 				>
 					Nevermind
 				</button>
 				<button
-					class="new-job-modal__btn new-job-modal__btn--cancel-job"
+					class="new-job-modal__btn new-job-modal__btn--cancel-job button"
 					onclick={confirmCancel}
 					disabled={!selectedCancelReason}
 				>
@@ -528,6 +532,9 @@
 {/if}
 
 <style>
+	/* JobFormModal now leans heavily on globals.css primitives (.input, .label, .button) + design tokens
+	   for cohesion. BEM kept for specific structure and overrides. All colors/spacing/radii via vars. */
+
 	.new-job-modal {
 		position: fixed;
 		inset: 0;
@@ -535,15 +542,15 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
-		z-index: 1000;
+		z-index: var(--z-modal-backdrop);
 	}
 
 	.new-job-modal__content {
-		background: white;
+		background: var(--color-surface);
 		width: 100%;
 		max-width: 560px;
-		border-radius: 16px 16px 0 0;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+		box-shadow: var(--shadow-modal);
 		max-height: 95vh;
 		overflow-y: auto;
 		display: flex;
@@ -551,92 +558,89 @@
 	}
 
 	.new-job-modal__title {
-		margin: 0 0 1.5rem 0;
-		font-size: 1.35rem;
-		font-weight: 600;
-		color: #1e2937;
-		padding: 1.5rem 1rem 0;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+		padding: var(--space-6) var(--space-4) 0;
 	}
 
 	.new-job-modal__form {
 		flex: 1;
 		overflow-y: auto;
-		padding: 0 1rem;
+		padding: 0 var(--space-4);
 		display: flex;
 		flex-direction: column;
-		gap: 1.25rem;
+		gap: var(--space-5);
 	}
 
 	.new-job-modal__field {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: var(--space-2);
 	}
 
 	.new-job-modal__field-group {
 		display: grid;
 		grid-template-columns: 1fr;
-		gap: 1rem;
+		gap: var(--space-4);
 	}
 
-	.new-job-modal__label {
-		font-weight: 500;
-		font-size: 0.95rem;
-		color: #334155;
-	}
+	/* .new-job-modal__label now relies entirely on the .label primitive from globals.css */
 
-	.new-job-modal__input {
-		padding: 0.75rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-size: 1rem;
-	}
+	/* .new-job-modal__input relies on global .input primitive */
 
 	.new-job-modal__crew-grid {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 1rem;
-		padding: 0.5rem 0;
+		gap: var(--space-4);
+		padding: var(--space-2) 0;
 	}
 
 	.new-job-modal__crew-option {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.95rem;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
 	}
 
 	.billable-items {
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		padding: 1rem;
-		background: #fafafa;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-4);
+		background: var(--color-surface-alt);
+		/* Group the billable rows with consistent internal spacing */
 	}
 
+
 	.totals-summary {
-		background: #f8fafc;
-		padding: 1rem;
-		border-radius: 8px;
-		border: 1px solid #e2e8f0;
-		font-size: 1.05rem;
-		margin-bottom: 0.75rem;
+		background: var(--color-surface-alt);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+		font-size: var(--font-size-base);
+		margin-bottom: var(--space-3);
+	}
+
+	.totals-summary__line {
+		color: var(--color-text-muted);
 	}
 
 	.totals-summary__total {
-		font-size: 1.25rem;
-		border-top: 2px solid #e2e8f0;
-		padding-top: 0.75rem;
-		margin-top: 0.75rem;
+		font-size: var(--font-size-xl);
+		border-top: 2px solid var(--color-border);
+		padding-top: var(--space-3);
+		margin-top: var(--space-3);
 	}
 
 	.new-job-modal__footer {
 		position: sticky;
 		bottom: 0;
-		background: white;
-		padding: 1rem 1.25rem;
-		border-top: 1px solid #e5e7eb;
+		background: var(--color-surface);
+		padding: var(--space-4) var(--space-5);
+		border-top: 1px solid var(--color-border);
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		justify-content: space-between;
 		align-items: center;
 		z-index: 10;
@@ -645,47 +649,50 @@
 	}
 
 	.new-job-modal__btn {
-		padding: 0.85rem 1.5rem;
-		border-radius: 8px;
-		font-weight: 500;
-		cursor: pointer;
-		border: none;
-	}
-
-	.new-job-modal__btn--cancel {
-		background: #f1f5f9;
-		color: #475569;
-	}
-
-	.new-job-modal__btn--primary {
-		background: #3b82f6;
-		color: white;
+		/* base .button provides core button styles; these add modal-specific sizing */
+		padding: var(--space-3) var(--space-6);
 	}
 
 	.new-job-modal__btn-add {
-		background: #e0f2fe;
-		color: #0369a1;
 		width: 100%;
-		margin-top: 0.5rem;
+		margin-top: var(--space-3);
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
 	}
 
 	.area-field-wrapper {
 		display: flex;
 		align-items: center;
-		padding: 0.75rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 8px;
-		background: white;
-		min-height: 52px;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		min-height: 44px; /* match input touch target */
+		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+	}
+
+	.area-field-wrapper:focus-within {
+		border-color: var(--color-primary);
+		box-shadow: var(--focus-ring);
 	}
 
 	.area-select {
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 0;
-		font-size: 1rem;
+		padding: var(--space-2) var(--space-4); /* padding + room for native dropdown arrow */
+		font-size: var(--font-size-base);
+		color: var(--color-text);
 		outline: none;
+		cursor: pointer;
+		width: 100%;
+		appearance: none; /* cleaner native look, arrow still shows in most browsers */
+	}
+
+	/* For the options in the native dropdown: use token bg for dark mode support.
+	   Inline style on each option sets the text color to the area color, making the color visible "next to"/for each option in the list. */
+	.area-select option {
+		background: var(--color-surface);
 	}
 
 	.cancel-confirm-modal {
@@ -695,13 +702,13 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 1100;
+		z-index: var(--z-modal-backdrop);
 	}
 
 	.cancel-confirm-modal__content {
-		background: white;
-		padding: 2rem;
-		border-radius: 12px;
+		background: var(--color-surface);
+		padding: var(--space-8);
+		border-radius: var(--radius-lg);
 		max-width: 420px;
 		width: 90%;
 	}
@@ -709,19 +716,19 @@
 	.cancel-confirm-modal__footer {
 		position: sticky;
 		bottom: 0;
-		background: white;
-		padding: 1rem 1.25rem;
-		border-top: 1px solid #e5e7eb;
+		background: var(--color-surface);
+		padding: var(--space-4) var(--space-5);
+		border-top: 1px solid var(--color-border);
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		justify-content: flex-end;
 		z-index: 10;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 	}
 
 	.cancel-job-text {
-		color: #dc2626;
-		font-weight: 600;
+		color: var(--color-danger-emphasis);
+		font-weight: var(--font-weight-semibold);
 		background: none;
 		border: none;
 		cursor: pointer;

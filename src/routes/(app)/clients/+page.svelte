@@ -9,6 +9,7 @@
 		isInvoiceOverdue
 	} from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
+	import { getDisplayAreaColor, getAccentAreaColor } from '$lib/utils/colors';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import ClientForm from '$lib/components/ClientForm.svelte';
@@ -188,8 +189,9 @@
 	}
 
 	function getAreaColor(areaId: string | undefined): string {
-		if (!areaId) return '#64748b';
-		return areaOptions.find((a: any) => a.id === areaId)?.color || '#64748b';
+		if (!areaId) return 'var(--color-text-muted)'; // fallback token (will be used in style)
+		const original = areaOptions.find((a: any) => a.id === areaId)?.color;
+		return getDisplayAreaColor(original);
 	}
 
 	function getAreaLabel(areaId: string | undefined): string {
@@ -486,7 +488,7 @@
 <style>
 	/* BEM naming maintained throughout */
 	.clients-page {
-		padding: 1.5rem 1rem;
+		padding: var(--space-6) var(--space-4);
 		max-width: 1200px;
 		margin: 0 auto;
 	}
@@ -495,65 +497,74 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-6);
 	}
 
 	.clients-page__title {
-		font-size: 2rem;
-		font-weight: 700;
+		font-size: var(--font-size-3xl);
+		font-weight: var(--font-weight-bold);
 		margin: 0;
+		color: var(--color-text);
 	}
 
 	.clients-page__btn-add {
-		background: #3b82f6;
+		background: var(--color-primary);
 		color: white;
 		border: none;
-		padding: 0.85rem 1.75rem;
-		border-radius: 8px;
-		font-weight: 600;
+		padding: var(--space-3) var(--space-6);
+		border-radius: var(--radius-md);
+		font-weight: var(--font-weight-semibold);
 		cursor: pointer;
+		transition: background var(--transition-fast);
+	}
+	.clients-page__btn-add:hover {
+		background: var(--color-primary-hover);
 	}
 
 	.clients-page__filters {
 		display: flex;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-4);
+		margin-bottom: var(--space-6);
 		flex-wrap: wrap;
 	}
 
 	.clients-page__search {
 		flex: 1;
 		min-width: 280px;
-		padding: 0.85rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 8px;
+		padding: var(--space-3) var(--space-4);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.clients-page__select {
-		padding: 0.85rem 1rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 8px;
+		padding: var(--space-3) var(--space-4);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
 		min-width: 180px;
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.area-filter__chips {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-6);
 	}
 
 	.area-chip {
-		padding: 0.45rem 1rem;
-		border-radius: 9999px;
-		font-size: 0.9rem;
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: all var(--transition-fast);
 		border: 1px solid;
 	}
 
 	.area-chip.active {
-		font-weight: 600;
+		font-weight: var(--font-weight-semibold);
 		box-shadow: 0 0 0 3px currentColor;
 	}
 
@@ -563,16 +574,16 @@
 		margin: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 1.25rem;
+		gap: var(--space-5);
 	}
 
 	.client-card {
 		display: flex;
 		justify-content: space-between;
-		background: white;
-		padding: 1.35rem;
-		border-radius: 12px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		background: var(--color-surface);
+		padding: var(--space-5);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-sm);
 		transition: transform 0.2s;
 	}
 
@@ -591,16 +602,17 @@
 	}
 	.client-card__name {
 		margin: 0;
-		font-size: 1.2rem;
-		font-weight: 600;
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
 	}
 
 	.client-card__contact {
-		margin-bottom: 0.5rem;
-		line-height: 1.5;
+		margin-bottom: var(--space-2);
+		line-height: var(--line-height-normal);
 	}
 	.contact-link {
-		color: #0369a1;
+		color: var(--color-primary);
 		text-decoration: none;
 	}
 	.contact-link:hover {
@@ -608,179 +620,179 @@
 	}
 
 	.client-card__address {
-		color: #1e40af;
+		color: var(--color-primary);
 		cursor: pointer;
-		margin-bottom: 0.75rem;
+		margin-bottom: var(--space-3);
 		text-decoration: underline dotted;
 	}
 	.client-card__address:hover {
-		color: #1e3a8a;
+		color: var(--color-primary-emphasis);
 		text-decoration: underline;
 	}
 
 	.client-card__meta {
-		font-size: 0.95rem;
-		color: #475569;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
 	.no-jobs {
-		color: #f59e0b;
+		color: var(--color-warning);
 	}
 
 	.client-card__actions {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
-		margin-left: 1rem;
+		gap: var(--space-2);
+		margin-left: var(--space-4);
 	}
 
 	.client-card__btn {
-		padding: 0.55rem 1.1rem;
-		border-radius: 6px;
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-sm);
 		border: none;
 		cursor: pointer;
-		font-size: 0.9rem;
+		font-size: var(--font-size-sm);
 		white-space: nowrap;
 	}
 
 	.client-card__btn--edit {
-		background: #e0f2fe;
-		color: #0369a1;
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
 	}
 	.client-card__btn--delete {
-		background: #fee2e2;
-		color: #ef4444;
+		background: var(--color-danger-soft);
+		color: var(--color-danger);
 	}
 
 	.client-card__btn--disabled {
-		background: #f1f5f9 !important;
-		color: #94a3b8 !important;
+		background: var(--color-surface-alt) !important;
+		color: var(--color-text-subtle) !important;
 		cursor: not-allowed;
 		opacity: 0.6;
 	}
 
 	.clients-page__empty {
 		text-align: center;
-		padding: 4rem 1rem;
-		color: #64748b;
-		background: white;
-		border-radius: 12px;
+		padding: var(--space-8) var(--space-4);
+		color: var(--color-text-muted);
+		background: var(--color-surface);
+		border-radius: var(--radius-lg);
 	}
 
 	/* Phase 6: Expandable related jobs styles (BEM) */
 	.client-card__related {
-		margin-top: 0.75rem;
-		border-top: 1px dashed #e2e8f0;
-		padding-top: 0.5rem;
+		margin-top: var(--space-3);
+		border-top: 1px dashed var(--color-border);
+		padding-top: var(--space-2);
 	}
 
 	.client-card__related-toggle {
-		font-size: 0.8rem;
-		color: #0369a1;
+		font-size: var(--font-size-xs);
+		color: var(--color-primary);
 		background: none;
 		border: none;
-		padding: 0.2rem 0;
+		padding: var(--space-1) 0;
 		cursor: pointer;
 		text-align: left;
 	}
 
 	.client-card__related-list {
-		margin-top: 0.4rem;
+		margin-top: var(--space-2);
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 
 	.client-card__related-job {
 		display: grid;
 		grid-template-columns: auto 1fr auto auto;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		align-items: center;
-		font-size: 0.8rem;
-		padding: 0.25rem 0.4rem;
-		background: #f8fafc;
-		border-radius: 4px;
+		font-size: var(--font-size-xs);
+		padding: var(--space-1) var(--space-2);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 	.client-card__related-job:hover {
-		background: #f1f5f9;
+		background: var(--color-surface);
 	}
 
 	.client-card__related-job .date {
-		color: #64748b;
-		font-size: 0.75rem;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-xs);
 	}
 	.client-card__related-job .title {
-		font-weight: 500;
+		font-weight: var(--font-weight-medium);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.client-card__related-job .status {
-		font-size: 0.65rem;
+		font-size: var(--font-size-xs);
 		padding: 0.1rem 0.35rem;
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		text-transform: uppercase;
 	}
 	.client-card__related-job .status--scheduled {
-		background: #dbeafe;
-		color: #1e40af;
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
 	}
 	.client-card__related-job .status--confirmed {
-		background: #d1fae5;
-		color: #166534;
+		background: var(--color-success-soft);
+		color: var(--color-success);
 	}
 	.client-card__related-job .status--completed {
-		background: #a7f3d0;
-		color: #065f46;
+		background: var(--color-success-soft);
+		color: var(--color-success);
 	}
 	.client-card__related-job .status--cancelled {
-		background: #fee2e2;
-		color: #991b1b;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 	}
 	.client-card__related-job .amount {
-		font-weight: 600;
+		font-weight: var(--font-weight-semibold);
 		text-align: right;
 	}
 	.client-card__related-job .invoice-badge {
-		font-size: 0.65rem;
-		background: #ecfdf5;
-		color: #166534;
+		font-size: var(--font-size-xs);
+		background: var(--color-success-soft);
+		color: var(--color-success);
 		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		display: inline-flex;
 		align-items: center;
-		gap: 0.2rem;
+		gap: var(--space-1);
 	}
 	/* )=- Overdue visual (Phase 7) on clients related jobs rows. Red background + small pill when overdue.
 	   Mirrors the treatment added to /jobs cards and the modal for consistency (BEM + shared isInvoiceOverdue). */
 	.client-card__related-job .invoice-badge.overdue {
-		background: #fee2e2;
-		color: #991b1b;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 	}
 	.client-card__related-job .overdue-pill {
-		font-size: 0.55rem;
-		background: #991b1b;
+		font-size: var(--font-size-xs);
+		background: var(--color-danger-emphasis);
 		color: white;
 		padding: 0 0.15rem;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		text-transform: uppercase;
 	}
 
 	.client-card__related-empty {
-		font-size: 0.75rem;
-		color: #94a3b8;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-subtle);
 	}
 
 	.client-card__related-more {
-		font-size: 0.75rem;
-		padding: 0.2rem 0.5rem;
+		font-size: var(--font-size-xs);
+		padding: var(--space-1) var(--space-2);
 		align-self: flex-start;
-		margin-top: 0.25rem;
-		background: #e0f2fe;
-		color: #0369a1;
+		margin-top: var(--space-1);
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 </style>

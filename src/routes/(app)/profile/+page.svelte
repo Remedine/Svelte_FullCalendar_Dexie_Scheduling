@@ -520,14 +520,6 @@
 									class="profile__input profile__input--email"
 								/>
 							</div>
-							<p class="profile__email-hint">
-								Uses PocketBase's <strong>requestEmailChange</strong>.<br />
-								A confirmation link will be sent to the <em>new</em> email address. The PB record
-								only updates after you click it.<br />
-								<strong>Tip for testing:</strong> Enter a real email address you can access (so you
-								receive the confirmation).<br />
-								<strong>Common failure:</strong> the new email is already taken by another user in PocketBase.
-							</p>
 						</div>
 						<div class="profile__field-actions">
 							<button
@@ -653,61 +645,65 @@
 		<!-- Compact password form (icon-only save/cancel). Appears when the Update Password pencil is clicked. -->
 		{#if editing === 'password'}
 			<div class="profile__inline-form profile__inline-form--password">
-				<input
-					type="password"
-					bind:value={oldPassword}
-					placeholder="Current"
-					class="profile__input"
-				/>
-				<input
-					type="password"
-					bind:value={newPassword}
-					placeholder="New (8+)"
-					class="profile__input"
-				/>
-				<input
-					type="password"
-					bind:value={confirmNewPassword}
-					placeholder="Confirm new"
-					class="profile__input"
-				/>
-				<button
-					onclick={changePassword}
-					disabled={loading}
-					class="profile__icon-btn"
-					title="Save password"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="3"
-						stroke-linecap="round"
-						stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg
+				<div class="profile__password-fields">
+					<input
+						type="password"
+						bind:value={oldPassword}
+						placeholder="Current"
+						class="profile__input"
+					/>
+					<input
+						type="password"
+						bind:value={newPassword}
+						placeholder="New (8+)"
+						class="profile__input"
+					/>
+					<input
+						type="password"
+						bind:value={confirmNewPassword}
+						placeholder="Confirm new"
+						class="profile__input"
+					/>
+				</div>
+				<div class="profile__field-actions">
+					<button
+						onclick={changePassword}
+						disabled={loading}
+						class="profile__icon-btn"
+						title="Save password"
 					>
-				</button>
-				<button
-					onclick={cancelEditing}
-					class="profile__icon-btn profile__icon-btn--cancel"
-					title="Cancel"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="3"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
-						></line></svg
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="3"
+							stroke-linecap="round"
+							stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg
+						>
+					</button>
+					<button
+						onclick={cancelEditing}
+						class="profile__icon-btn profile__icon-btn--cancel"
+						title="Cancel"
 					>
-				</button>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="3"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
+							></line></svg
+						>
+					</button>
+				</div>
 			</div>
 		{/if}
 
@@ -731,7 +727,7 @@
      )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 
 	.profile-page {
-		padding: 1rem;
+		padding: var(--space-4);
 		max-width: 440px;
 		margin: 0 auto;
 	}
@@ -739,13 +735,13 @@
 	/* === ID BADGE CARD === */
 	.profile__badge {
 		display: flex;
-		gap: 0.85rem;
-		background: linear-gradient(155deg, #f8fafc 0%, #ffffff 100%);
-		border: 1px solid #cbd5e1;
-		border-radius: 10px;
-		padding: 0.7rem;
-		box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
-		margin-bottom: 0.75rem;
+		gap: var(--space-3);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-lg);
+		padding: var(--space-3);
+		box-shadow: var(--shadow-sm);
+		margin-bottom: var(--space-3);
 	}
 
 	.profile__badge-photo {
@@ -759,16 +755,16 @@
 	.profile__badge-placeholder {
 		width: 100%;
 		height: 100%;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 		object-fit: cover;
-		border: 1px solid #e2e8f0;
-		background: #e2e8f0;
+		border: 1px solid var(--color-border);
+		background: var(--color-surface-alt);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 1.5rem;
-		font-weight: 700;
-		color: #475569;
+		font-size: var(--font-size-2xl);
+		font-weight: var(--font-weight-bold);
+		color: var(--color-text-muted);
 	}
 
 	/* Pencil stays overlaid bottom-right of the avatar (kept in place) */
@@ -776,9 +772,9 @@
 		position: absolute;
 		bottom: -2px;
 		right: -2px;
-		background: #ffffff;
-		border: 1px solid #94a3b8;
-		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.profile__badge-body {
@@ -786,7 +782,7 @@
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
+		gap: var(--space-1);
 	}
 
 	/* Field row: main content (label + value or inputs) takes remaining space;
@@ -794,11 +790,11 @@
 	.profile__badge-field {
 		display: flex;
 		align-items: flex-start;
-		gap: 0.5rem;
-		padding-bottom: 0.35rem;
+		gap: var(--space-2);
+		padding-bottom: var(--space-1);
 	}
 	.profile__badge-field:not(.profile__badge-field--static) {
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.profile__field-main {
@@ -806,46 +802,46 @@
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.1rem;
+		gap: var(--space-1);
 	}
 
 	.profile__badge-label {
-		font-size: 0.65rem;
-		font-weight: 600;
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-semibold);
 		text-transform: uppercase;
 		letter-spacing: 0.75px;
-		color: #64748b;
+		color: var(--color-text-muted);
 		line-height: 1;
 	}
 
 	.profile__badge-value {
-		font-size: 0.95rem;
-		color: #1e2937;
+		font-size: var(--font-size-base);
+		color: var(--color-text);
 		line-height: 1.15;
 		word-break: break-word;
 	}
 	.profile__badge-value--name {
-		font-weight: 600;
-		font-size: 1.05rem;
+		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-base);
 	}
 	.profile__badge-value--email {
-		font-size: 0.85rem;
-		color: #475569;
+		font-size: var(--font-size-base);
+		color: var(--color-text-muted);
 	}
 	.profile__badge-value--role {
-		font-size: 0.85rem;
+		font-size: var(--font-size-base);
 		text-transform: capitalize;
 	}
 
 	.profile__force {
 		display: inline-block;
-		margin-top: 0.15rem;
-		font-size: 0.6rem;
-		background: #fef2f2;
-		color: #b91c1c;
+		margin-top: var(--space-1);
+		font-size: var(--font-size-xs);
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 		padding: 1px 5px;
-		border-radius: 3px;
-		font-weight: 600;
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-semibold);
 		letter-spacing: 0.3px;
 	}
 
@@ -853,22 +849,22 @@
 	.profile__field-actions {
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 		flex-shrink: 0;
 	}
 
 	/* === EDIT BUTTONS (pure pencil icons, right-aligned for name/email) === */
 	.profile__edit-btn {
-		background: #e2e8f0;
+		background: var(--color-surface-alt);
 		border: none;
 		width: 22px;
 		height: 22px;
-		border-radius: 50%;
+		border-radius: var(--radius-full);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
-		color: #475569;
+		color: var(--color-text-muted);
 		flex-shrink: 0;
 		padding: 0;
 		line-height: 0;
@@ -877,8 +873,8 @@
 			color 0.1s ease;
 	}
 	.profile__edit-btn:hover:not(:disabled) {
-		background: #cbd5e1;
-		color: #1e2937;
+		background: var(--color-border);
+		color: var(--color-text);
 	}
 	.profile__edit-btn:disabled {
 		opacity: 0.5;
@@ -888,36 +884,37 @@
 	/* === INLINE EDITING (inside badge fields) === */
 	.profile__inline-edit {
 		display: flex;
-		gap: 0.3rem;
-		margin-top: 0.15rem;
+		gap: var(--space-1);
+		margin-top: var(--space-1);
 	}
 
 	.profile__input {
 		flex: 1;
-		padding: 0.22rem 0.4rem;
-		border: 1px solid #94a3b8;
-		border-radius: 4px;
-		font-size: 0.85rem;
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-base);
 		min-width: 0;
-		background: #fff;
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 	.profile__input:focus {
 		outline: none;
-		border-color: #64748b;
-		box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.15);
+		border-color: var(--color-primary);
+		box-shadow: var(--focus-ring);
 	}
 	.profile__input--email {
-		font-size: 0.82rem;
+		font-size: var(--font-size-base);
 	}
 
 	/* === ICON ACTION BUTTONS (check / x — no text) === */
 	.profile__icon-btn {
-		background: #0f172a;
-		color: white;
+		background: var(--color-text);
+		color: var(--color-surface);
 		border: none;
 		width: 22px;
 		height: 22px;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -925,17 +922,17 @@
 		flex-shrink: 0;
 		padding: 0;
 		line-height: 0;
-		transition: background 0.1s ease;
+		transition: background var(--transition-fast);
 	}
 	.profile__icon-btn:hover:not(:disabled) {
-		background: #1e2937;
+		background: var(--color-text-strong);
 	}
 	.profile__icon-btn--cancel {
-		background: #f1f5f9;
-		color: #475569;
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
 	}
 	.profile__icon-btn--cancel:hover:not(:disabled) {
-		background: #e2e8f0;
+		background: var(--color-border);
 	}
 	.profile__icon-btn:disabled {
 		opacity: 0.5;
@@ -945,98 +942,90 @@
 	.profile__security {
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
-		margin-bottom: 0.5rem;
+		gap: var(--space-1);
+		margin-bottom: var(--space-2);
 	}
 
 	.profile__security-item {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.5rem;
-		padding: 0.15rem 0;
+		gap: var(--space-2);
+		padding: var(--space-1) 0;
 	}
 
 	.profile__security-label {
-		font-size: 0.8rem;
-		font-weight: 500;
-		color: #475569;
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
 		letter-spacing: 0.2px;
 	}
 
 	/* === FORMS (compact, appear under security when a pencil is activated) === */
 	.profile__inline-form {
 		display: flex;
-		gap: 0.3rem;
+		gap: var(--space-1);
 		align-items: center;
-		margin-bottom: 0.45rem;
-		padding: 0.35rem;
-		background: #f8fafc;
-		border: 1px solid #e2e8f0;
-		border-radius: 6px;
+		margin-bottom: var(--space-2);
+		padding: var(--space-2);
+		background: var(--color-surface-alt);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 	}
 	.profile__inline-form--password {
-		flex-wrap: wrap;
+		flex-direction: column;
+	}
+	.profile__password-fields {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
 	}
 	.profile__inline-form--password .profile__input {
-		flex: 1 1 32%;
-		min-width: 64px;
+		width: 100%;
 	}
 
 	/* === STATUS MESSAGES === */
 	.profile__status {
-		font-size: 0.78rem;
-		margin-top: 0.2rem;
-		color: #475569;
+		font-size: var(--font-size-xs);
+		margin-top: var(--space-1);
+		color: var(--color-text-muted);
 	}
 	.profile__status--error {
-		color: #b91c1c;
+		color: var(--color-danger-emphasis);
 	}
 	.profile__status--success {
-		color: #166534;
-	}
-
-	/* Small explanatory text shown only while editing the email field */
-	.profile__email-hint {
-		font-size: 0.62rem;
-		color: #475569;
-		margin-top: 0.2rem;
-		line-height: 1.25;
-		background: #f8fafc;
-		border: 1px solid #e2e8f0;
-		border-radius: 4px;
-		padding: 0.25rem 0.4rem;
+		color: var(--color-success);
 	}
 
 	/* )=- Pending confirmation pill + resend button shown next to email value in the ID badge
      when a requestEmailChange has been issued but not yet confirmed on the PB server.
      BEM: profile__pending-pill, profile__resend-btn */
 	.profile__pending-pill {
-		font-size: 0.6rem;
-		background: #fef3c7;
-		color: #92400e;
+		font-size: var(--font-size-xs);
+		background: var(--color-warning-soft);
+		color: var(--color-warning);
 		padding: 1px 5px;
-		border-radius: 3px;
-		margin-left: 0.25rem;
+		border-radius: var(--radius-sm);
+		margin-left: var(--space-1);
 		vertical-align: middle;
-		font-weight: 500;
+		font-weight: var(--font-weight-medium);
 	}
 
 	.profile__resend-btn {
-		font-size: 0.62rem;
+		font-size: var(--font-size-xs);
 		background: none;
-		border: 1px solid #cbd5e1;
-		color: #475569;
+		border: 1px solid var(--color-border-strong);
+		color: var(--color-text-muted);
 		padding: 1px 5px;
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		margin-left: 0.25rem;
+		margin-left: var(--space-1);
 		vertical-align: middle;
 	}
 
 	.profile__resend-btn:hover:not(:disabled) {
-		background: #f1f5f9;
-		color: #1e2937;
+		background: var(--color-surface-alt);
+		color: var(--color-text);
 	}
 
 	.profile__resend-btn:disabled {
