@@ -28,8 +28,12 @@ export async function POST({ request }: { request: Request }) {
 
 	const { link } = await pbRes.json();
 
-	// Send via Brevo API (HTTPS, works on Railway Hobby)
-	await sendVerificationEmail(email, link);
+	try {
+		await sendVerificationEmail(email, link);
+	} catch (err: any) {
+		console.error('Failed to send verification email via Brevo:', err?.message || err);
+		return json({ error: 'Failed to send verification email', details: err?.message }, { status: 500 });
+	}
 
 	return json({ success: true });
 }

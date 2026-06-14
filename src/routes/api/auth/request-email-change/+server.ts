@@ -27,7 +27,12 @@ export async function POST({ request }: { request: Request }) {
 
 	const { link } = await pbRes.json();
 
-	await sendEmailChangeConfirmation(email, link);
+	try {
+		await sendEmailChangeConfirmation(email, link);
+	} catch (err: any) {
+		console.error('Failed to send email change confirmation via Brevo:', err?.message || err);
+		return json({ error: 'Failed to send email change confirmation', details: err?.message }, { status: 500 });
+	}
 
 	return json({ success: true });
 }

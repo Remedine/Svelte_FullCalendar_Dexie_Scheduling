@@ -51,7 +51,7 @@
 		}
 
 		const data = result.data;
-		const tempPass = crypto.randomUUID().slice(0, 12) + 'Aa1!'; // auto-generated; user will update via email link or forgot-password on login page
+		const tempPass = crypto.randomUUID().slice(0, 12) + 'Aa1!'; // temporary fallback; the welcome email provides the main link to set password + activate account
 
 		try {
 			await createUser({
@@ -61,21 +61,22 @@
 				role: data.role,
 				active: true,
 				forcePhotoUpdate: true, // admin retains ability to force photo update via edit toggle (PIN removed)
-				password: tempPass, // temp for initial PB auth / verification (user changes it on first login)
+				password: tempPass, // temporary; the welcome email link sets the real password (and activates the account via hook)
 				photo: undefined
 			} as any);
-			tempPasswordForUser = tempPass; // show to admin (user changes password on first email login)
+			tempPasswordForUser = tempPass; // show to admin (user will normally use the welcome email link instead)
 
-			// Send password reset email via our Brevo route so the new user gets a link to set their real password (in addition to the temp pass shown to admin).
-			// This uses the PB internal route to generate the secure link, then Brevo API.
+			// Send a single welcome email with one action: set password + activate account.
+			// On successful password reset, a server hook in PocketBase also marks the user as verified.
+			// This calls the welcome route which hits the PB internal password-reset endpoint then Brevo.
 			try {
-				await fetch('/api/auth/request-password-reset', {
+				await fetch('/api/auth/send-welcome', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ email: data.email })
 				});
 			} catch (e) {
-				console.warn('Failed to send initial password reset email for new user (non-blocking):', e);
+				console.warn('Failed to send welcome email for new user (non-blocking):', e);
 			}
 		} catch (err) {
 			console.error('Failed to create new user:', err);

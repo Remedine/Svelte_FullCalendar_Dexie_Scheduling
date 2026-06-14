@@ -27,7 +27,12 @@ export async function POST({ request }: { request: Request }) {
 
 	const { link } = await pbRes.json();
 
-	await sendPasswordResetEmail(email, link);
+	try {
+		await sendPasswordResetEmail(email, link);
+	} catch (err: any) {
+		console.error('Failed to send password reset email via Brevo:', err?.message || err);
+		return json({ error: 'Failed to send reset email', details: err?.message }, { status: 500 });
+	}
 
 	return json({ success: true });
 }
