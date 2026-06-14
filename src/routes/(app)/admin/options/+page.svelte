@@ -484,7 +484,7 @@
 
 <style>
 	.options-page {
-		padding: var(--space-8);
+		padding: var(--space-6) var(--space-4);
 		max-width: 1100px;
 		margin: 0 auto;
 	}
@@ -528,13 +528,13 @@
 	.options-page__content {
 		background: var(--color-surface);
 		border-radius: var(--radius-lg);
-		padding: var(--space-8);
+		padding: var(--space-6);
 		box-shadow: var(--shadow-sm);
 		min-height: 520px;
 	}
 	.form-grid {
 		display: grid;
-		grid-template-columns: 12rem 1fr;
+		grid-template-columns: minmax(8rem, 12rem) 1fr;
 		gap: var(--space-4);
 		align-items: center;
 		max-width: 600px;
@@ -839,5 +839,171 @@
 		z-index: 10;
 		text-align: right;
 		margin-top: var(--space-4);
+	}
+
+	/* ============================================
+	   MOBILE RESPONSIVE (match crew/clients/jobs)
+	   - Tighten padding
+	   - Stack form grids (labels above fields)
+	   - Collapse area / billable / cancel rows into mobile cards
+	   - Full-width add + save actions where helpful
+	   - BEM + tokens only. 768px matches layout bottom-nav breakpoint.
+	   ============================================ */
+	@media (max-width: 768px) {
+		.options-page {
+			padding: var(--space-3) var(--space-2);
+		}
+
+		.options-page__header {
+			margin-bottom: var(--space-4);
+		}
+
+		.options-page__title {
+			font-size: var(--font-size-2xl);
+		}
+
+		.options-page__tabs {
+			margin-bottom: var(--space-4);
+			gap: var(--space-1);
+		}
+
+		.options-page__tab {
+			padding: var(--space-2) var(--space-4);
+			font-size: var(--font-size-sm);
+		}
+
+		.options-page__content {
+			padding: var(--space-4);
+			min-height: auto;
+		}
+
+		.form-section {
+			margin-bottom: var(--space-6);
+		}
+
+		.options-page__help {
+			margin-bottom: var(--space-4);
+			font-size: var(--font-size-sm);
+		}
+
+		/* Billing & tax: stack label + input vertically */
+		.form-grid {
+			grid-template-columns: 1fr;
+			gap: var(--space-2);
+			max-width: 100%;
+		}
+
+		/* Areas of Town - wrap to avoid squeezing color + controls */
+		.areas-list {
+			gap: var(--space-2);
+			margin-bottom: var(--space-4);
+		}
+		.area-item {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-2);
+			padding: var(--space-3);
+		}
+		.area-item__label-input {
+			flex: 1 1 55%;
+			min-width: 120px;
+		}
+		.area-item__color {
+			width: 2.75rem;
+			height: 2.25rem;
+		}
+		.area-item__controls {
+			margin-left: auto;
+			gap: var(--space-2);
+		}
+		.area-item__move-btn,
+		.area-item__remove {
+			width: 36px;
+			height: 36px;
+			font-size: var(--font-size-base);
+		}
+
+		/* Default Billable Items - title full width on own line, then type + price + controls share a row */
+		.billable-list {
+			gap: var(--space-2);
+			margin-bottom: var(--space-4);
+		}
+		.billable-item {
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-2);
+			padding: var(--space-3);
+		}
+		.billable-item__input {
+			flex: 1 0 100%;
+			width: 100%;
+			min-width: 0;
+			margin-bottom: var(--space-1);
+		}
+		.billable-item__type-toggle {
+			flex-shrink: 0;
+		}
+		.billable-item__price {
+			display: flex;
+			align-items: center;
+			gap: var(--space-1);
+			flex-shrink: 0;
+		}
+		.billable-item__controls {
+			display: flex;
+			gap: var(--space-2);
+			margin-left: auto;
+			flex-shrink: 0;
+		}
+		.billable-item__move-btn,
+		.billable-item__remove {
+			width: 36px;
+			height: 36px;
+		}
+		.billable-item__type-btn {
+			padding: var(--space-1) var(--space-2);
+			font-size: var(--font-size-xs);
+		}
+
+		/* Cancellation Reasons - stack input, controls below */
+		.cancel-reasons-list {
+			gap: var(--space-2);
+			margin-bottom: var(--space-4);
+		}
+		.cancel-reason-item {
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-2);
+			padding: var(--space-3);
+		}
+		.cancel-reason-item__input {
+			width: 100%;
+			flex: 1 1 100%;
+		}
+		.cancel-reason-item__controls {
+			width: 100%;
+			justify-content: flex-end;
+			gap: var(--space-2);
+		}
+		.cancel-reason-item__move-btn,
+		.cancel-reason-item__remove {
+			width: 36px;
+			height: 36px;
+		}
+
+		/* Add buttons become prominent full-width taps on mobile */
+		.options-page__btn--add {
+			width: 100%;
+			justify-content: center;
+		}
+
+		.options-page__footer {
+			padding: var(--space-3) var(--space-4);
+			text-align: center;
+		}
+		.options-page__btn--save {
+			width: 100%;
+		}
 	}
 </style>
