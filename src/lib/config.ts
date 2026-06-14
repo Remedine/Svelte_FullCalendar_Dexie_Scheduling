@@ -9,7 +9,7 @@ export const BUSINESS_CONFIG = {
 	mission: 'JUNEAU BEAUTIFICATION',
 	ownerName: 'Brick Engstrom',
 	ownerPhone: '907-723-4617',
-	ownerEmail: 'brick@gotdirtywindows.com',
+	ownerEmail: 'tim@digitalseeds.dev',
 	mailingAddress: 'PO Box 20312, Juneau, AK 99802',
 
 	// === Tax Settings (Juneau) ===

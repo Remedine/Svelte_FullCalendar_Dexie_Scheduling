@@ -28,7 +28,7 @@ async function sendBrevoEmail(payload: BrevoEmailPayload) {
 
 const SENDER = {
 	name: 'Capital City Windows',
-	email: 'brick@gotdirtywindows.com'
+	email: 'tim@digitalseeds.dev'
 };
 
 const LOGO_HTML = `<img src="https://static.wixstatic.com/media/5bfb6f_e26c222c0bf648c39eeed8e67ae87701.png/v1/fill/w_71,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/5bfb6f_e26c222c0bf648c39eeed8e67ae87701.png" style="height:40px; vertical-align:middle;" alt="Capital City Windows"> <strong style="font-size:20px; vertical-align:middle;">Capital City Windows</strong>`;
