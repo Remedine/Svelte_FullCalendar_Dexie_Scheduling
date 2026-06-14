@@ -1,5 +1,8 @@
 import { BREVO_API_KEY } from '$env/static/private';
-import { BREVO_SENDER_EMAIL, BREVO_SENDER_NAME } from '$env/dynamic/private';
+import * as env from '$env/dynamic/private';
+
+const BREVO_SENDER_EMAIL = env.BREVO_SENDER_EMAIL;
+const BREVO_SENDER_NAME = env.BREVO_SENDER_NAME;
 
 /**
  * Brevo (API) email sender.
