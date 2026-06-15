@@ -286,6 +286,25 @@
 		gap: var(--space-6);
 	}
 
+	/* Center the nav menu on desktop (menu is absolutely positioned in the center,
+	   while user controls stay on the right via margin). Mobile top-nav is already hidden. */
+	@media (min-width: 769px) {
+		.top-nav {
+			position: relative;
+		}
+
+		.top-nav__menu {
+			position: absolute;
+			left: 50%;
+			transform: translateX(-50%);
+		}
+
+		.top-nav__user {
+			margin-left: auto;
+			z-index: 1; /* ensure user sits above the centered absolute menu if any overlap on narrow desktop */
+		}
+	}
+
 	@media (max-width: 768px) {
 		.top-nav__menu {
 			display: none;
@@ -509,6 +528,9 @@
 		.bottom-nav {
 			align-items: center;
 			padding: 0 4px 0 0;
+			box-sizing: border-box;
+			overflow: hidden; /* safety net: ensure no child content can force the fixed bar (or page) wider than viewport */
+			max-width: 100vw;
 		}
 
 		.bottom-nav__user {
@@ -617,6 +639,28 @@
 		.bottom-nav .theme-toggle__btn:hover {
 			background: var(--color-surface-alt);
 			border: 1px solid var(--color-border);
+		}
+
+		/* Size the main nav tabs compactly on mobile so 5-6 items (tabs + user section) fit without widening the viewport or causing horizontal overflow.
+		   Icons and labels reduced; tabs allowed to shrink properly. */
+		.bottom-nav__tab {
+			flex: 1;
+			min-width: 0; /* critical: allows shrinking below content size to prevent page widening */
+			padding: 2px 2px;
+			min-height: 50px;
+		}
+
+		.bottom-nav__icon {
+			font-size: 15px; /* smaller than base lg, but still visible */
+			margin-bottom: 0;
+		}
+
+		.bottom-nav__label {
+			font-size: 9px;
+			line-height: 1.1;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
 		}
 	}
 </style>
