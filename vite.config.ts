@@ -32,29 +32,40 @@ export default defineConfig({
 			//   "A preload for '<URL>' is found, but is not used because the request credentials mode does not match.
 			//    Consider taking a look at crossorigin attribute."
 			//   "The resource <URL> was preloaded using link preload but not used within a few seconds..."
-			// The transform runs on the shell HTML. Some dynamic/chunk preloads from SvelteKit runtime or Workbox
-			// may still appear; those are often speculative (for code-split routes/modals) and harmless once the
-			// user navigates. The polyfill:false below also reduces some noise.
+			//
+			// The transform runs on the shell HTML during build (transformIndexHtml + post order).
+			// SvelteKit still injects additional modulepreload links for the current page's chunks at runtime/render time.
+			// The changes below + `data-sveltekit-preload-data="false"` in app.html + polyfill:false reduce the volume.
+			// For fully static control one would need a custom adapter hook or post-build HTML rewrite, but this
+			// catches the ones emitted into the initial index.html and many of the Vite-generated ones.
 			name: 'add-crossorigin-to-preloads',
-			transformIndexHtml(html) {
-				let out = html.replace(
-					/<link([^>]*?)rel=["'](modulepreload|preload)["']([^>]*?)>/gi,
-					(match, before, rel, after) => {
-						if (/crossorigin/i.test(before) || /crossorigin/i.test(after)) return match;
-						// Try to preserve existing attributes and inject crossorigin early.
-						return `<link${before}rel="${rel}" crossorigin="anonymous"${after}>`;
-					}
-				);
-				// Also ensure common font preloads have crossorigin (required for CORS + avoids warnings).
-				out = out.replace(
-					/<link([^>]*?)rel=["']preload["']([^>]*?)as=["']font["']([^>]*?)>/gi,
-					(match, before, mid, after) => {
-						if (/crossorigin/i.test(before) || /crossorigin/i.test(mid) || /crossorigin/i.test(after)) return match;
-						return `<link${before}rel="preload"${mid}as="font" crossorigin="anonymous"${after}>`;
-					}
-				);
-				return out;
-			},
+			enforce: 'post',
+			transformIndexHtml: {
+				order: 'post',
+				handler(html) {
+					let out = html.replace(
+						/<link([^>]*?)rel=["'](modulepreload|preload)["']([^>]*?)>/gi,
+						(match, before, rel, after) => {
+							if (/crossorigin/i.test(before) || /crossorigin/i.test(after)) return match;
+							return `<link${before}rel="${rel}" crossorigin="anonymous"${after}>`;
+						}
+					);
+					// Font preloads require crossorigin to avoid CORS + warning.
+					out = out.replace(
+						/<link([^>]*?)rel=["']preload["']([^>]*?)as=["']font["']([^>]*?)>/gi,
+						(match, before, mid, after) => {
+							if (
+								/crossorigin/i.test(before) ||
+								/crossorigin/i.test(mid) ||
+								/crossorigin/i.test(after)
+							)
+								return match;
+							return `<link${before}rel="preload"${mid}as="font" crossorigin="anonymous"${after}>`;
+						}
+					);
+					return out;
+				}
+			}
 		}
 	],
 
@@ -73,8 +84,8 @@ export default defineConfig({
 	// in PWA setups with route-based code splitting). The crossorigin plugin above handles credentials mismatches.
 	build: {
 		modulePreload: {
-			polyfill: false,
-		},
+			polyfill: false
+		}
 	},
 
 	// )=- Stronger optimization settings to prevent 504 errors

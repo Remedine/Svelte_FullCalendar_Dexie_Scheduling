@@ -28,13 +28,29 @@
 		isOnline = true;
 
 		try {
-			currentSubscription = pb.collection('jobs').subscribe('*', async (e) => {
-				console.log('🔔 Realtime change:', e.action);
-				lastSynced = new Date();
-				await pullJobsFromServer();
+			// Force a clean realtime connection before (re)subscribing.
+			// This prevents "Invalid realtime client" 400s that can occur after login,
+			// token restore on refresh, or when a previous (possibly anonymous) realtime client
+			// is still registered on the server. Disconnect resets the internal clientId.
+			// Await the subscribe so errors are caught here and we know the connection succeeded.
+			if (pb.realtime && typeof (pb.realtime as any).disconnect === 'function') {
+				try {
+					(pb.realtime as any).disconnect();
+				} catch {}
+			}
+
+			// Wrap in IIFE because the $effect arrow itself is not async, but we want to await the PB subscribe promise.
+			(async () => {
+				currentSubscription = await pb.collection('jobs').subscribe('*', async (e) => {
+					console.log('🔔 Realtime change:', e.action);
+					lastSynced = new Date();
+					await pullJobsFromServer();
+				});
+			})().catch((err) => {
+				console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
 			});
 		} catch (err) {
-			console.error('Subscribe failed:', err);
+			console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
 		}
 
 		return () => {
@@ -45,6 +61,12 @@
 					}
 				} catch {}
 				currentSubscription = null;
+			}
+			// Also disconnect the realtime transport on unmount to avoid stale client IDs on next mount/login.
+			if (pb.realtime && typeof (pb.realtime as any).disconnect === 'function') {
+				try {
+					(pb.realtime as any).disconnect();
+				} catch {}
 			}
 		};
 	});
