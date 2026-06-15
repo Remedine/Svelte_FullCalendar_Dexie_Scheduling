@@ -288,7 +288,7 @@
 			padding: 0 var(--space-3);
 		}
 		.modal__actions {
-			flex-direction: column;
+			flex-direction: column-reverse; /* reverse so Save/Create appears above Cancel on mobile stack (Cancel was on top of Save) */
 			gap: var(--space-2);
 			margin-top: var(--space-4);
 		}
