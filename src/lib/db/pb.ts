@@ -32,6 +32,18 @@ export async function loginWithEmail(email: string, password: string) {
 
 		const pbUser = authData.record;
 
+		// Enforce the app-level "active" flag at login time.
+		// PocketBase authWithPassword itself succeeds for inactive records (no server-side block by default),
+		// but we treat active=false as a hard app-level deactivation (soft-delete / disable access).
+		// This prevents the previous bug where an inactive user could log in successfully but would be
+		// immediately logged out on any refresh (because restore checks active !== false, while the
+		// initial login path did not).
+		// We clear the PB token so the SDK doesn't consider the session valid.
+		if (pbUser.active === false) {
+			pb.authStore.clear();
+			throw new Error('Your account has been deactivated. Please contact an administrator.');
+		}
+
 		// )=- Find existing local Dexie record (for hybrid admin-created users that have local UUID + pbId).
 		// Prefer by email (unique), then firstName/name guess, then by pbId.
 		// This prevents duplicate records in Dexie when a locally-created crew (with local UUID id) later does email login.
@@ -68,6 +80,7 @@ export async function loginWithEmail(email: string, password: string) {
 					`${pbUser.firstName || existing.firstName || ''} ${pbUser.lastName || existing.lastName || ''}`.trim() ||
 					email.split('@')[0] ||
 					'Admin',
+				email: pbUser.email || existing.email || '',  // ensure email from PB is captured on login merge
 				pinHash: existing.pinHash || pbUser.pinHash || '',
 				role: pbUser.role || existing.role || 'admin',
 				// )=- Prefer local data: URL photo (from camera upload in /profile) over PB file reference for offline <img src> support.
@@ -100,6 +113,7 @@ export async function loginWithEmail(email: string, password: string) {
 					`${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() ||
 					email.split('@')[0] ||
 					'Admin',
+				email: pbUser.email || '',  // capture email from PB auth record for pure PB users (no prior local Dexie)
 				pinHash: pbUser.pinHash || '',
 				role: pbUser.role || 'admin',
 				photo: pbUser.photo ? pbUser.photo : undefined,
@@ -481,12 +495,23 @@ export async function pullUsersFromServer(force = false) {
 
 				const existingLocal = await db.users.where('pbId').equals(rec.id).first();
 
+				let first = rec.firstName || '';
+				let last = rec.lastName || '';
+				const full = rec.name || `${rec.firstName || ''} ${rec.lastName || ''}`.trim();
+				if ((!first || !last) && full) {
+					// Match the splitting logic used in loginWithEmail so Dexie records from roster pulls
+					// have consistent first/last for UI (edit forms, filters, etc.) even if PB only stores "name".
+					const parts = full.split(' ');
+					first = first || parts[0] || '';
+					last = last || parts.slice(1).join(' ') || '';
+				}
+
 				const serverUser = {
 					id: existingLocal ? existingLocal.id : rec.id,
 					pbId: rec.id,
-					firstName: rec.firstName || '',
-					lastName: rec.lastName || '',
-					name: rec.name || `${rec.firstName || ''} ${rec.lastName || ''}`.trim(),
+					firstName: first,
+					lastName: last,
+					name: full,
 					pinHash: rec.id === currentAuth.id ? rec.pinHash || existingLocal?.pinHash || '' : '',
 					email: rec.email || existingLocal?.email || '',
 					role: rec.role || 'crew',

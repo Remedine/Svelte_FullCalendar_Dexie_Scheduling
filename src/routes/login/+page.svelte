@@ -86,6 +86,8 @@
 			}
 		} catch (err: any) {
 			// Surface better messages from PocketBase auth errors (e.g. bad credentials, disabled, etc.)
+			// Our custom inactive-account rejection (thrown from loginWithEmail after successful PB auth but before
+			// establishing the session) will come through as err.message.
 			const pbData = err?.response?.data;
 			error = pbData?.password?.message || pbData?.email?.message || err?.message || 'Login failed';
 			console.error('Login attempt failed:', err);

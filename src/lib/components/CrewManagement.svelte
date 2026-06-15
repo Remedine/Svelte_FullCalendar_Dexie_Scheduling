@@ -43,7 +43,10 @@
 		await cleanupDuplicateUsers();
 
 		if (isAdmin && navigator.onLine) {
-			await pullUsersFromServer();
+			// Force a fresh roster pull so that any emails (or first/last names) that were added/edited
+			// directly in PocketBase (or via user profile updates) are brought down into Dexie.
+			// Without force, the per-session guard can cause emails to appear "not syncing".
+			await pullUsersFromServer(true);
 		}
 
 		const raw = await db.users.toArray();

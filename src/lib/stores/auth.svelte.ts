@@ -102,12 +102,17 @@ if (browser) {
 			} else {
 				auth.currentUser = null;
 				auth.isAuthenticated = false;
-				// Only clear the id if we truly have no PB session either
+
+				// When we reach here it means either no user record was found, or the record has active=false
+				// (deactivated via PB admin or the app's Crew management).
+				// In the inactive case we must clear any lingering PB token so the account is fully unusable
+				// until reactivated. We also remove the currentUserId to avoid the restore loop.
 				try {
 					const { pb } = await import('$lib/db/pb');
-					if (!pb.authStore.isValid) {
-						localStorage.removeItem('currentUserId');
+					if (pb.authStore.isValid) {
+						pb.authStore.clear();
 					}
+					localStorage.removeItem('currentUserId');
 				} catch {
 					localStorage.removeItem('currentUserId');
 				}
