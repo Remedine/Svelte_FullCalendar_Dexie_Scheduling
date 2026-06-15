@@ -1451,6 +1451,24 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 			transform: scale(1.01);
 		}
+
+		/* Touch-friendly event resizing on mobile.
+		   FullCalendar supports changing event duration (length) on touch devices via:
+		     1. Long-press the event (uses the eventLongPressDelay we set to 280ms).
+		     2. Then drag the resize handle at the bottom of the event up/down.
+		   This calls our eventResize handler which does optimistic update + updateJobDates.
+		   See https://fullcalendar.io/docs/event-dragging-resizing (Touch Support section).
+		   By default the resizer is very small, making it hard to target on touch.
+		   We enlarge it here + add subtle visual feedback, similar to how we improved the drag handle.
+		*/
+		:global(.fc-event-resizer) {
+			height: 22px; /* significantly larger touch target than the default ~4-8px */
+			bottom: -2px;
+			background-color: rgba(255, 255, 255, 0.3);
+			border-radius: 3px;
+			/* Make sure it doesn't get hidden by our bottom avatars */
+			z-index: 5;
+		}
 	}
 
 	/* Ghost / drag visual feedback.
