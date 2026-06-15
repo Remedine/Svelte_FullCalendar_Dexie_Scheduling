@@ -153,6 +153,7 @@
 						class="login-form__input"
 						bind:value={email}
 						placeholder="you@company.com"
+						autocomplete="email"
 						required
 					/>
 				</div>
@@ -165,6 +166,7 @@
 						class="login-form__input"
 						bind:value={password}
 						placeholder="••••••••"
+						autocomplete="current-password"
 						required
 					/>
 				</div>

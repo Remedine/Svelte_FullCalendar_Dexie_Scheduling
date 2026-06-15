@@ -27,16 +27,33 @@ export default defineConfig({
 			includeAssets: ['favicon.svg']
 		}),
 		{
-			// Add crossorigin="anonymous" to all generated preload/modulepreload links.
-			// This fixes "A preload ... is found, but is not used because the request credentials mode does not match"
-			// warnings (common with SvelteKit + Vite PWA + service workers, especially on platforms like Railway).
-			// The browser's preload hints will then use a consistent (anonymous) credentials mode.
+			// Add crossorigin="anonymous" (and ensure proper as= for common cases) to generated preload/modulepreload links.
+			// This addresses the repeated live console warnings:
+			//   "A preload for '<URL>' is found, but is not used because the request credentials mode does not match.
+			//    Consider taking a look at crossorigin attribute."
+			//   "The resource <URL> was preloaded using link preload but not used within a few seconds..."
+			// The transform runs on the shell HTML. Some dynamic/chunk preloads from SvelteKit runtime or Workbox
+			// may still appear; those are often speculative (for code-split routes/modals) and harmless once the
+			// user navigates. The polyfill:false below also reduces some noise.
 			name: 'add-crossorigin-to-preloads',
 			transformIndexHtml(html) {
-				return html.replace(
-					/<link rel="(modulepreload|preload)"((?![^>]*crossorigin)[^>]*)>/g,
-					'<link rel="$1" crossorigin="anonymous"$2>'
+				let out = html.replace(
+					/<link([^>]*?)rel=["'](modulepreload|preload)["']([^>]*?)>/gi,
+					(match, before, rel, after) => {
+						if (/crossorigin/i.test(before) || /crossorigin/i.test(after)) return match;
+						// Try to preserve existing attributes and inject crossorigin early.
+						return `<link${before}rel="${rel}" crossorigin="anonymous"${after}>`;
+					}
 				);
+				// Also ensure common font preloads have crossorigin (required for CORS + avoids warnings).
+				out = out.replace(
+					/<link([^>]*?)rel=["']preload["']([^>]*?)as=["']font["']([^>]*?)>/gi,
+					(match, before, mid, after) => {
+						if (/crossorigin/i.test(before) || /crossorigin/i.test(mid) || /crossorigin/i.test(after)) return match;
+						return `<link${before}rel="preload"${mid}as="font" crossorigin="anonymous"${after}>`;
+					}
+				);
+				return out;
 			},
 		}
 	],

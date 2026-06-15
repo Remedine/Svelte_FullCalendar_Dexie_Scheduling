@@ -5,7 +5,9 @@ import { setCurrentUser } from '$lib/stores/auth.svelte';
 
 // PocketBase client singleton
 import { PUBLIC_POCKETBASE_URL } from '$env/static/public';
-console.log('[DEBUG] PUBLIC_POCKETBASE_URL =', PUBLIC_POCKETBASE_URL);
+if (import.meta.env.DEV) {
+	console.log('[DEBUG] PUBLIC_POCKETBASE_URL =', PUBLIC_POCKETBASE_URL);
+}
 
 // Fail fast in production if the required public env var is missing (prevents silent localhost fallback)
 if (!PUBLIC_POCKETBASE_URL) {

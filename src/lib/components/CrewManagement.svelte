@@ -6,7 +6,8 @@
 		updateUser,
 		deleteUser as deleteUserFromDb,
 		getUserPhotoSrc,
-		cleanupDuplicateUsers
+		cleanupDuplicateUsers,
+		getJobsForCrewMember
 	} from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -83,9 +84,9 @@
 
 		// Check if this user (by name) is still assigned to any jobs.
 		// If so, hide the delete button (only allow deactivate).
-		// Note: 'assignedCrew' is now indexed (DB v20) so this query is efficient and doesn't throw DexieError.
+		// Uses the safe helper (tries the *assignedCrew multiEntry index; falls back to scan on SchemaError).
 		const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim();
-		const assigned = await db.jobs.where('assignedCrew').equals(userName).toArray();
+		const assigned = await getJobsForCrewMember(userName);
 		editUserHasJobs = assigned.length > 0;
 
 		showEditModal = true;
@@ -174,7 +175,8 @@
 		// Only allow deactivation in that case. This check now only runs on Save.
 		const userName =
 			userToDelete.name || `${userToDelete.firstName || ''} ${userToDelete.lastName || ''}`.trim();
-		const assignedJobs = await db.jobs.where('assignedCrew').equals(userName).toArray();
+		// Safe helper (index or full scan fallback) so SchemaError on assignedCrew never crashes delete path.
+		const assignedJobs = await getJobsForCrewMember(userName);
 		if (assignedJobs.length > 0) {
 			toast.error(
 				'Cannot delete this user because they are still assigned to jobs. Please deactivate instead (they will no longer appear in new job assignments).'

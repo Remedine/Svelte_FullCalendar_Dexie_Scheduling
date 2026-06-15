@@ -1,8 +1,10 @@
 <!-- src/lib/components/UserJobsModal.svelte -->
 <script lang="ts">
-	import { db } from '$lib/db';
+	import { getJobsForCrewMember } from '$lib/db';
 
 	interface Props {
+		// userId here is actually the value stored in job.assignedCrew (the crew member's name string)
+		// not the DB id. Passed from CrewManagement using the user's .name
 		userId: string;
 		userName: string;
 		onClose: () => void;
@@ -17,7 +19,9 @@
 	});
 
 	async function loadJobs() {
-		jobs = await db.jobs.where('assignedCrew').equals(userId).toArray();
+		// Use the safe helper (prefers the *assignedCrew multiEntry index; falls back gracefully on SchemaError
+		// for any browser whose local DB upgrade to v21 hasn't run yet). The helper already dedups.
+		jobs = await getJobsForCrewMember(userId);
 	}
 
 	function stopProp(e: Event) {
@@ -30,7 +34,7 @@
 		<h2 class="modal__title">Jobs for {userName}</h2>
 
 		<div class="jobs-list">
-			{#each jobs as job}
+			{#each jobs as job (job.id || job.pbId)}
 				<div class="job-item">
 					<strong>{job.title}</strong><br />
 					{new Date(job.start).toLocaleDateString()} – {new Date(job.end).toLocaleDateString()}

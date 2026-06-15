@@ -219,28 +219,47 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	invoices: EntityTable<Invoice, 'id'>;
 };
 
-// )=- Bumped to version 19 to add pbId index to the invoices object store.
-// This fixes the exact Dexie SchemaError the user just reported:
-//   "KeyPath pbId on object store invoices is not indexed"
-//   (triggered in pullInvoicesFromServer at the `db.invoices.where('pbId').equals(rec.id).first()` line
-//    during refreshFromServer on /jobs after the first successful invoice push to PocketBase).
-// Root cause: The Invoice interface + createInvoice/updateInvoice queue code + pull merge logic
-// (and get-by-pbId fallbacks) all assumed/used pbId on invoices (like we did for jobs/clients/users),
-// but when the invoices store was first declared the .stores() string omitted `, pbId`.
-// Dexie only allows .where() on declared indexes/primary keys. Adding the index in a new version(19)
-// lets Dexie upgrade the DB and makes the "find existing local by server pbId for last-write-wins + stale delete"
-// work after the first server invoice appears.
-// Previous v18 bump was for jobs pbId (same class of bug).
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md (Phase 1/2 data + sync)
-db.version(19).stores({
+// )=- Bumped to version 21 (was 20) to force schema upgrade on all clients for the *assignedCrew
+// multiEntry index. Some production browsers had a local Dexie DB created under an older version
+// declaration and were hitting "KeyPath assignedCrew on object store jobs is not indexed" (SchemaError)
+// on .where('assignedCrew') calls (CrewManagement openEdit/delete + UserJobsModal).
+// Declaring a higher version guarantees Dexie will run the upgrade transaction and add the index
+// the next time the new bundle loads.
+// The defensive getJobsForCrewMember helper below makes the app resilient even if a client's DB
+// somehow misses the index after upgrade.
+// Reference: previous live logs + Remedine/Svelte_FullCalendar_Dexie_Scheduling.
+db.version(21).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
-	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
 	users:
-		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified', // forcePinUpdate + pinHash/verified kept in schema for legacy row compat (PIN auth deleted)
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
 	syncQueue: '++id, type, collection, recordId, createdAt',
 	options: 'id',
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId'
 });
+
+/**
+ * Safe query for jobs assigned to a specific crew member (by the string name stored in assignedCrew arrays).
+ * Uses the multiEntry index when available (fast). Falls back to a full scan + filter if the index
+ * is missing (SchemaError) — this can happen transiently for users whose local DB was created before
+ * the v20/v21 declaration reached them, or if an upgrade transaction was interrupted.
+ * Always dedupes the result.
+ */
+export async function getJobsForCrewMember(crewName: string): Promise<Job[]> {
+	try {
+		const raw = await db.jobs.where('assignedCrew').equals(crewName).toArray();
+		return dedupJobs(raw);
+	} catch (err: any) {
+		const msg = String(err?.message || '');
+		if (err?.name === 'SchemaError' || /not indexed/i.test(msg) || /assignedCrew/i.test(msg)) {
+			console.warn('[db] assignedCrew index missing or query failed — falling back to full scan for', crewName);
+			const all = await db.jobs.toArray();
+			const filtered = all.filter((j: any) => (j.assignedCrew || []).includes(crewName));
+			return dedupJobs(filtered);
+		}
+		throw err;
+	}
+}
 
 // ==================== JOB FUNCTIONS ====================
 
@@ -1841,7 +1860,7 @@ export async function cleanupDuplicateUsers() {
 	}
 }
 
-export { db };
+export { db, getJobsForCrewMember };
 // )=- No need for extra "export type" re-export. The `export interface Invoice` declaration (above) already makes
 // `import { Invoice } from '$lib/db'` work. The previous export type line was causing duplicate export conflicts
 // in svelte-check even for a single name.
