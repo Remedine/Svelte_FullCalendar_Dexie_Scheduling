@@ -212,6 +212,47 @@
 		{/if}
 	</nav>
 
+	<!-- Mobile app chrome footer (beneath content).
+	     On mobile: shows "Capital City Windows" (small), dark mode toggle, and avatar (profile + logout).
+	     Replaces the top header branding/user controls for phones while keeping top-nav slim.
+	     Desktop: hidden via media query. -->
+	<footer class="mobile-app-footer">
+		<span class="mobile-app-footer__brand">Capital City Windows</span>
+
+		<div class="mobile-app-footer__controls">
+			<ThemeToggle />
+
+			{#if auth.currentUser}
+				<div class="mobile-app-footer__avatar-wrapper">
+					<div class="mobile-app-footer__avatar">
+						{#if auth.currentUser.photo}
+							<img
+								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+								alt="Profile"
+								class="mobile-app-footer__avatar-img"
+							/>
+						{:else}
+							<span class="mobile-app-footer__avatar-placeholder">
+								{(auth.currentUser.firstName || auth.currentUser.name || 'U')
+									.slice(0, 1)
+									.toUpperCase()}
+							</span>
+						{/if}
+					</div>
+					<div class="mobile-app-footer__user-menu">
+						<a href="/profile" class="mobile-app-footer__user-menu-item">Profile</a>
+						<button
+							onclick={handleLogout}
+							class="mobile-app-footer__user-menu-item mobile-app-footer__user-menu-item--logout"
+						>
+							Logout
+						</button>
+					</div>
+				</div>
+			{/if}
+		</div>
+	</footer>
+
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
 	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
 	     This makes the details modal (with invoice support) available from jobs page, clients related jobs, etc. -->
@@ -260,6 +301,11 @@
 		}
 		.top-nav__brand h1 {
 			font-size: var(--font-size-xl);
+		}
+
+		/* Move brand + user chrome to bottom footer on mobile (new mobile pattern) */
+		.top-nav__user {
+			display: none;
 		}
 	}
 
@@ -455,5 +501,124 @@
 	.bottom-nav__label {
 		font-size: var(--font-size-xs);
 		letter-spacing: 0.2px;
+	}
+
+	/* ============================================
+	   MOBILE APP CHROME FOOTER
+	   Shows "Capital City Windows" + ThemeToggle + avatar (profile/logout)
+	   beneath the main content on phones. Anchored as a persistent footer.
+	   Hidden on desktop. Complements (does not replace) the bottom tab nav.
+	   BEM: mobile-app-footer, etc.
+	   ============================================ */
+	.mobile-app-footer {
+		display: none; /* desktop hidden */
+	}
+
+	@media (max-width: 768px) {
+		.mobile-app-footer {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-2);
+			padding: var(--space-2) var(--space-3);
+			background: var(--color-surface);
+			border-top: 1px solid var(--color-border);
+			box-shadow: 0 -1px 4px rgb(0 0 0 / 0.04);
+			font-size: var(--font-size-xs);
+			color: var(--color-text-muted);
+			/* Push above the fixed bottom-nav tabs */
+			margin-bottom: 56px;
+		}
+
+		.mobile-app-footer__brand {
+			font-weight: var(--font-weight-semibold);
+			color: var(--color-text);
+			font-size: var(--font-size-sm);
+			white-space: nowrap;
+		}
+
+		.mobile-app-footer__controls {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+		}
+
+		/* Compact avatar in the footer (slightly smaller than top) */
+		.mobile-app-footer__avatar-wrapper {
+			position: relative;
+			cursor: pointer;
+		}
+
+		.mobile-app-footer__avatar {
+			width: 26px;
+			height: 26px;
+			border-radius: 50%;
+			overflow: hidden;
+			border: 1px solid var(--color-border);
+			background: var(--color-surface-alt);
+			flex-shrink: 0;
+		}
+
+		.mobile-app-footer__avatar-img,
+		.mobile-app-footer__avatar-placeholder {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 10px;
+			font-weight: 700;
+			color: var(--color-surface);
+			background: var(--color-text-muted);
+		}
+
+		.mobile-app-footer__user-menu {
+			position: absolute;
+			bottom: calc(100% + 4px);
+			right: 0;
+			background: var(--color-surface);
+			border: 1px solid var(--color-border);
+			border-radius: var(--radius-sm);
+			box-shadow: var(--shadow-md);
+			min-width: 120px;
+			z-index: var(--z-dropdown);
+			display: none;
+			flex-direction: column;
+		}
+
+		.mobile-app-footer__avatar-wrapper:hover .mobile-app-footer__user-menu,
+		.mobile-app-footer__avatar-wrapper:focus-within .mobile-app-footer__user-menu {
+			display: flex;
+		}
+
+		.mobile-app-footer__user-menu-item {
+			display: block;
+			padding: 6px 12px;
+			font-size: var(--font-size-sm);
+			color: var(--color-text);
+			text-decoration: none;
+			white-space: nowrap;
+		}
+
+		.mobile-app-footer__user-menu-item:hover {
+			background: var(--color-surface-alt);
+		}
+
+		.mobile-app-footer__user-menu-item--logout {
+			color: var(--color-danger);
+			border-top: 1px solid var(--color-border);
+			background: none;
+			width: 100%;
+			text-align: left;
+			cursor: pointer;
+		}
+
+		.mobile-app-footer__user-menu-item--logout:hover {
+			background: var(--color-danger-soft);
+		}
+
+		/* When footer is present we already padded main-content for bottom-nav;
+		   footer itself has margin-bottom to sit above the tabs. */
 	}
 </style>

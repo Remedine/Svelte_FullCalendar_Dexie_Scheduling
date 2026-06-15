@@ -40,16 +40,24 @@
 
 	@media (max-width: 900px) {
 		.schedule-page__content {
-			margin: var(--space-1);
-			padding: var(--space-2) var(--space-2) var(--space-4); /* keep a bit of bottom gap on smaller screens */
-			border-radius: var(--radius-md);
+			margin: 0;
+			padding: var(--space-1) var(--space-1) var(--space-2);
+			border-radius: 0;
 		}
 	}
 
-	/* Mobile relief for "smooshed day schedule" (timeGridDay inside Split view) */
+	/* Mobile: reclaim every bit of gutter. The anchored MonthPicker + scrolling day calendar
+	   need the space. We now use internal scroll in the day-wrapper for the time slots. */
 	@media (max-width: 768px) {
+		.schedule-page__content {
+			padding: 0;
+			margin: 0;
+		}
+
 		:global(.split-calendar__day-wrapper) {
-			min-height: 300px;
+			border-radius: 0;
+			border-left: none;
+			border-right: none;
 		}
 	}
 </style>

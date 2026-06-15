@@ -60,6 +60,28 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	let currentView = $state('timeGridWeek');
 	let crewOptions = $state<string[]>([]);
 
+	// Mobile detection for day-only view, compact MonthPicker, reclaimed space, anchored top month picker,
+	// and mobile footer behaviors in the parent layout.
+	let isMobile = $state(false);
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const mql = window.matchMedia('(max-width: 768px)');
+		isMobile = mql.matches;
+
+		const listener = (e: MediaQueryListEvent) => {
+			isMobile = e.matches;
+			// When crossing to mobile, force day view only (per spec)
+			if (isMobile && currentView !== 'timeGridDay' && dayApi) {
+				currentView = 'timeGridDay';
+				dayApi.changeView('timeGridDay');
+			}
+		};
+		mql.addEventListener('change', listener);
+
+		return () => mql.removeEventListener('change', listener);
+	});
+
 	// )=- Map of crew name to photo URL for rendering circular avatars on event cards.
 	let crewPhotoMap = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
@@ -177,6 +199,76 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		crew: [] as string[],
 		areas: [] as string[],
 		statuses: [] as string[]
+	});
+
+	// === Realtime push for cross-device appointment changes ===
+	// PocketBase realtime subscription so that when another phone/tablet (or desktop) updates a job,
+	// the change appears quickly here without requiring a manual pull or page reload.
+	// We put the incoming record into Dexie (same shape as pullJobsFromServer) and refresh the
+	// in-memory jobs snapshot + the FullCalendar view.
+	// Self-changes (from this device) are harmless (replay of what we already did optimistically).
+	// Cleanup on unmount. Only active while the calendar component is mounted.
+	$effect(() => {
+		if (!pb.authStore.isValid) return;
+
+		let unsub: (() => void) | null = null;
+
+		(async () => {
+			try {
+				unsub = await pb.collection('jobs').subscribe('*', async (e: any) => {
+					// e.action: 'create' | 'update' | 'delete'
+					const rec = e.record;
+					if (!rec) return;
+
+					// Mirror the serverJob shape used in pullJobsFromServer
+					const serverJob = {
+						id: rec.id,
+						clientId: rec.expand?.client?.id || rec.client,
+						title: rec.title,
+						start: new Date(rec.start),
+						end: new Date(rec.end),
+						assignedCrew: rec.assignedCrew || [],
+						status: rec.status,
+						billableItems: rec.billableItems || [],
+						subtotal: rec.subtotal || 0,
+						taxRate: rec.taxRate || 0.08,
+						taxAmount: rec.taxAmount || 0,
+						totalAmount: rec.totalAmount || 0,
+						areaOfTown: rec.areaOfTown,
+						notes: rec.notes,
+						cancelReason: rec.cancelReason,
+						cancelNotes: rec.cancelNotes,
+						cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+						cancelledBy: rec.cancelledBy,
+						createdAt: new Date(rec.created),
+						updatedAt: new Date(rec.updated)
+					};
+
+					await db.jobs.put(serverJob);
+
+					// Refresh our local snapshot (drives MonthPicker + provider) + the FC grid
+					// Use the same wide range we use on initial load.
+					const includeCancelled = filters.statuses.includes('cancelled');
+					const start = new Date();
+					start.setMonth(start.getMonth() - 2);
+					const end = new Date();
+					end.setMonth(end.getMonth() + 2);
+
+					const fresh = await getJobsForRange(start, end, includeCancelled);
+					jobs.splice(0, jobs.length, ...fresh);
+					dayApi?.refetchEvents();
+				});
+			} catch (err) {
+				// Realtime may fail silently if permissions or connection; calendar still works via pulls
+				console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
+			}
+		})();
+
+		return () => {
+			if (unsub) {
+				try { unsub(); } catch {}
+			}
+		};
 	});
 
 	const activeFilterCount = $derived(
@@ -320,6 +412,11 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	}
 
 	function changeView(newView: string) {
+		// On mobile we only support Day view (time slots under anchored MonthPicker).
+		// Week/Month are desktop only.
+		if (isMobile && newView !== 'timeGridDay') {
+			return;
+		}
 		currentView = newView;
 		if (dayApi) {
 			dayApi.changeView(newView);
@@ -428,7 +525,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 			api = new Calendar(container, {
 				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
-				initialView: currentView,
+				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
 				height: 'auto',
@@ -437,7 +534,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				slotMaxTime: '22:00:00',
 				expandRows: false,
 				editable: true,
-				dragScroll: false,
+				dragScroll: true,   /* enable auto-scroll of the time grid when dragging an event near top/bottom edges on mobile */
 				eventDragMinDistance: 10,
 				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
 				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
@@ -821,22 +918,24 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 		<!-- Main Calendar -->
 		<div class="split-calendar__main">
-			<div class="split-calendar__view-switcher">
+			<div class="split-calendar__view-switcher" class:split-calendar__view-switcher--mobile-hidden={isMobile}>
 				<button
 					class="split-calendar__view-btn"
 					class:split-calendar__view-btn--active={currentView === 'timeGridDay'}
 					onclick={() => changeView('timeGridDay')}>Day</button
 				>
-				<button
-					class="split-calendar__view-btn"
-					class:split-calendar__view-btn--active={currentView === 'timeGridWeek'}
-					onclick={() => changeView('timeGridWeek')}>Week</button
-				>
-				<button
-					class="split-calendar__view-btn"
-					class:split-calendar__view-btn--active={currentView === 'dayGridMonth'}
-					onclick={() => changeView('dayGridMonth')}>Month</button
-				>
+				{#if !isMobile}
+					<button
+						class="split-calendar__view-btn"
+						class:split-calendar__view-btn--active={currentView === 'timeGridWeek'}
+						onclick={() => changeView('timeGridWeek')}>Week</button
+					>
+					<button
+						class="split-calendar__view-btn"
+						class:split-calendar__view-btn--active={currentView === 'dayGridMonth'}
+						onclick={() => changeView('dayGridMonth')}>Month</button
+					>
+				{/if}
 			</div>
 
 			<div class="split-calendar__day-wrapper" class:refreshing={isSyncing}>
@@ -912,6 +1011,11 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		}
 	}
 
+	/* Completely hide the (now mostly empty) view switcher on mobile since we force Day only */
+	.split-calendar__view-switcher--mobile-hidden {
+		display: none;
+	}
+
 	.split-calendar__view-btn {
 		padding: var(--space-1) var(--space-3);
 		border: 1px solid var(--color-border);
@@ -946,11 +1050,38 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		margin-bottom: var(--space-4); /* extra gap below the calendar box itself so it doesn't hit page bottom */
 	}
 
-	/* Mobile: prevent smooshed day schedule. Let the time grid breathe. */
+	/* === Mobile day-focused layout (anchored top MonthPicker + scrolling time slots) === */
+	/* Reclaims large gutters/padding. MonthPicker ~half height + sticky top.
+	   Calendar (day view only) gets the remaining viewport for scrollable slots.
+	   Filters hidden on mobile to maximize calendar real-estate. */
 	@media (max-width: 768px) {
+		.split-calendar {
+			gap: var(--space-2);
+		}
+
+		.split-calendar__sidebar {
+			/* Only the compact MonthPicker is shown at top; filters moved out of way */
+			margin-bottom: 0;
+		}
+
+		/* Hide the big filters panel on mobile day view (user can still use on desktop) */
+		.split-calendar__filters {
+			display: none;
+		}
+
 		.split-calendar__day-wrapper {
-			min-height: 300px;
+			min-height: 0;
+			height: calc(100dvh - 220px); /* leave room for top nav + compact month picker + view switcher + bottom tabs */
+			max-height: calc(100dvh - 180px);
+			overflow-y: auto; /* internal scroll for the day's time slots */
+			-webkit-overflow-scrolling: touch;
+			margin-bottom: var(--space-2);
 			border-radius: var(--radius-md);
+		}
+
+		/* Make the FC container inside fill the scroll area */
+		.split-calendar__day {
+			height: 100%;
 		}
 	}
 
@@ -1281,6 +1412,90 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			/* During the long-press "pop" / active drag start, emphasize the lift */
 			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 			transform: scale(1.01);
+		}
+	}
+
+	/* Ghost / drag visual feedback.
+	   - The source event (left in place) fades to show it's being moved.
+	   - The mirror (the thing that follows the finger) is now semi-transparent (the "ghost")
+	     so the user can see through it to the underlying dates/numbers/dots — especially important
+	     when dragging over the compact MonthPicker on mobile to choose the exact drop day.
+	   - Lower mirror opacity + subtle outline + softer shadow = clear ghost without completely
+	     obscuring the target (month day numbers, dots, etc.).
+	   Reference: mobile-specific-tweaks
+	*/
+	:global(.fc-event.fc-event-dragging) {
+		opacity: 0.25 !important;
+		transition: opacity 0.1s ease;
+	}
+
+	:global(.fc-event-mirror) {
+		opacity: 0.65;
+		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+		outline: 1px dashed var(--color-border);
+		outline-offset: 1px;
+	}
+
+	/* === Compact + anchored MonthPicker on mobile ===
+	   ~half the normal height. Sticky to top so it is "always visible" above the scrolling day calendar.
+	   Reclaims vertical space and supports the "monthly at top, day slots scroll below" mobile pattern.
+	   BEM rules + tokens. */
+	@media (max-width: 768px) {
+		:global(.month-picker) {
+			padding: 4px 6px;
+			border-radius: var(--radius-sm);
+			/* Anchor to top of the mobile viewport / scroll container */
+			position: sticky;
+			top: 0;
+			z-index: 20;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+			background: var(--color-surface);
+		}
+
+		:global(.month-picker__header) {
+			margin-bottom: 2px;
+			padding: 0 2px;
+		}
+
+		:global(.month-picker__title) {
+			font-size: var(--font-size-xs);
+		}
+
+		:global(.month-picker__nav) {
+			width: 22px;
+			height: 22px;
+			font-size: var(--font-size-sm);
+		}
+
+		:global(.month-picker__today-btn) {
+			padding: 1px 6px;
+			font-size: 10px;
+		}
+
+		:global(.month-picker__weekdays),
+		:global(.month-picker__weekday) {
+			font-size: 9px;
+			padding: 0;
+		}
+
+		:global(.month-picker__day) {
+			min-height: 26px; /* ~half the desktop 42px target + tighter */
+			padding: 1px;
+			font-size: 11px;
+		}
+
+		:global(.month-picker__number) {
+			font-size: 11px;
+		}
+
+		:global(.month-picker__dots) {
+			gap: 1px;
+			margin-top: 1px;
+		}
+
+		:global(.month-picker__dot) {
+			width: 3.5px;
+			height: 3.5px;
 		}
 	}
 </style>
