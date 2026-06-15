@@ -1129,6 +1129,22 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	:global(.fc) {
 		border-radius: var(--radius-lg);
 		overflow: hidden;
+		/* Nice blue for the active/today day instead of default yellow. Uses project tokens so it adapts to dark/light. */
+		--fc-today-bg-color: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface));
+	}
+
+	/* Ensure the today/active day cells and headers pick up the nice blue highlight (FC sometimes needs explicit boost) */
+	:global(.fc .fc-day-today) {
+		background-color: var(--fc-today-bg-color) !important;
+	}
+	:global(.fc .fc-col-header-cell.fc-day-today) {
+		background-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface)) !important;
+	}
+
+	/* Make the day number stand out with the primary blue on the today cell (especially noticeable in month view) */
+	:global(.fc-day-today .fc-daygrid-day-number) {
+		color: var(--color-primary);
+		font-weight: 700;
 	}
 
 	:global(.dark .fc-timegrid-slot) {
