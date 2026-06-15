@@ -26,6 +26,24 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	let isExternalDrop = false;
 	let originalEventRect: DOMRect | null = null;
 
+	// Safe client coordinate extraction for both mouse (desktop drag) and touch (mobile long-press drag).
+	// FullCalendar passes the raw native event as info.jsEvent. On touchend / touch drag stop this is a TouchEvent.
+	// Without this, eventDragStop's hit-test against MonthPicker always fails on Android/iOS (coords undefined),
+	// so "drag appointment to monthly calendar" never registers, and internal drops can have timing issues.
+	// Reference: mobile-specific-tweaks
+	function getEventClientCoords(jsEvent: any): { x: number; y: number } {
+		if (!jsEvent) return { x: 0, y: 0 };
+		if (typeof jsEvent.clientX === 'number') {
+			return { x: jsEvent.clientX, y: jsEvent.clientY };
+		}
+		// TouchEvent (mobile Chrome/Safari etc). Prefer changedTouches (the one that ended the gesture).
+		const t = jsEvent.changedTouches?.[0] || jsEvent.touches?.[0] || jsEvent.targetTouches?.[0];
+		if (t && typeof t.clientX === 'number') {
+			return { x: t.clientX, y: t.clientY };
+		}
+		return { x: 0, y: 0 };
+	}
+
 	let dayEl = $state<HTMLDivElement | null>(null);
 	let selectedDate = $state(
 		// )=- Support ?date=YYYY-MM-DD from job details "Jump to calendar" (and direct links).
@@ -344,11 +362,11 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		});
 	}
 
-	async function handleExternalDrop(jobId: string, mouseX: number, mouseY: number) {
+	async function handleExternalDrop(jobId: string, clientX: number, clientY: number) {
 		const job = jobs.find((j: any) => j.id === jobId);
 		if (!job) return;
 
-		const dropTarget = document.elementFromPoint(mouseX, mouseY);
+		const dropTarget = document.elementFromPoint(clientX, clientY);
 		const monthPickerDay = dropTarget?.closest('.month-picker__day');
 		if (!monthPickerDay) return;
 
@@ -420,7 +438,15 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				expandRows: false,
 				editable: true,
 				dragScroll: false,
-				eventDragMinDistance: 8,
+				eventDragMinDistance: 10,
+				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
+				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
+				// eventClick still fires on short taps; long-press starts the drag mirror.
+				// Also improves reliability of eventDrop / eventDragStop firing correctly on touch.
+				// Reference: mobile-specific-tweaks
+				eventLongPressDelay: 280,
+				selectLongPressDelay: 280,
+				longPressDelay: 280,
 
 				dateClick: (info) => {
 					openJobModal({ start: info.date }, () => refreshAfterUpdate());
@@ -554,23 +580,24 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 						return;
 					}
 
-					const mouseX = info.jsEvent.clientX;
-					const mouseY = info.jsEvent.clientY;
+					// Use robust extractor so external drop (to MonthPicker) and cross-view move works on touch devices.
+					// Without this, mobile hold-to-drag to the monthly picker always "snaps back" because hit-test fails.
+					const { x: clientX, y: clientY } = getEventClientCoords(info.jsEvent);
 
-					let dropTarget = document.elementFromPoint(mouseX, mouseY);
+					let dropTarget = document.elementFromPoint(clientX, clientY);
 					let monthPickerDay = dropTarget?.closest('.month-picker__day');
 
 					if (!monthPickerDay) {
 						const rect = monthPickerEl.getBoundingClientRect();
 						const isOverContainer =
-							mouseX >= rect.left && mouseX <= rect.right &&
-							mouseY >= rect.top && mouseY <= rect.bottom;
+							clientX >= rect.left && clientX <= rect.right &&
+							clientY >= rect.top && clientY <= rect.bottom;
 
 						if (isOverContainer) {
 							const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
 							for (const el of dayElements) {
 								const r = el.getBoundingClientRect();
-								if (mouseX >= r.left && mouseX <= r.right && mouseY >= r.top && mouseY <= r.bottom) {
+								if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
 									monthPickerDay = el;
 									break;
 								}
@@ -580,7 +607,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 					if (monthPickerDay) {
 						isExternalDrop = true;
-						handleExternalDrop(draggedJobId, mouseX, mouseY);
+						handleExternalDrop(draggedJobId, clientX, clientY);
 					}
 
 					draggedJobId = null;
@@ -611,6 +638,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 						// queueMicrotask(() => dayApi?.refetchEvents());
 					} catch (e) {
 						info.revert();
+						toast.error('Could not move appointment');
 					}
 				},
 
@@ -621,6 +649,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 						applyOptimisticDatePatch(info.event.id!, info.event.start!, info.event.end!);
 					} catch (e) {
 						info.revert();
+						toast.error('Could not resize appointment');
 					}
 				},
 
@@ -1224,5 +1253,34 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		font-size: 8px;
 		border-width: 1px;
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+	}
+
+	/* Mobile / touch: larger drag handle + always-visible affordance.
+	   The 16px handle is too small for fingers; long-press anywhere on the event still works,
+	   but a bigger obvious target helps users discover "hold to drag".
+	   Use 24px hit area, higher contrast, and force visible (no hover-only) below 768px.
+	   Also slightly thicker shadow for lift visibility during active long-press drag.
+	   BEM via the existing global fc- classes.
+	   Reference: mobile-specific-tweaks
+	*/
+	@media (max-width: 768px) {
+		:global(.fc-event__drag-handle) {
+			width: 24px;
+			height: 24px;
+			opacity: 0.95;
+			/* Larger tap target; FC still initiates long-press from the whole event */
+			touch-action: none;
+		}
+
+		:global(.fc-event--draggable) {
+			/* Make drag affordance obvious without relying on :hover on touch */
+			box-shadow: 0 0 0 1.5px var(--color-primary);
+		}
+
+		:global(.fc-event--draggable:active) {
+			/* During the long-press "pop" / active drag start, emphasize the lift */
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+			transform: scale(1.01);
+		}
 	}
 </style>

@@ -367,14 +367,12 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 
 export async function updateJobDates(jobId: string, newStart: Date | null, newEnd: Date | null) {
 	if (!newStart) {
-		console.error('updateJobDates: newStart is null');
-		return;
+		throw new Error('updateJobDates: newStart is null');
 	}
 
 	const job = await db.jobs.get(jobId);
 	if (!job) {
-		console.error('updateJobDates: job not found', jobId);
-		return;
+		throw new Error(`updateJobDates: job not found ${jobId}`);
 	}
 
 	const realId = job.pbId || job.id || jobId;

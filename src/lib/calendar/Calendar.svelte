@@ -16,6 +16,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
 	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	let calendarEl = $state<HTMLDivElement | null>(null);
 	let calendarInstance = $state<Calendar | null>(null);
@@ -60,6 +61,11 @@
 			selectable: true,
 			height: '100%',
 			expandRows: true,
+			// Mobile hold-to-drag support (see SplitCalendar for details + rationale).
+			eventLongPressDelay: 280,
+			selectLongPressDelay: 280,
+			longPressDelay: 280,
+			eventDragMinDistance: 10,
 
 			headerToolbar: {
 				left: 'prev,next today',
@@ -77,6 +83,7 @@
 					setTimeout(() => calendarInstance?.refetchEvents(), 400);
 				} catch (e) {
 					info.revert();
+					toast.error('Could not move appointment');
 				}
 			},
 
@@ -86,6 +93,7 @@
 					setTimeout(() => calendarInstance?.refetchEvents(), 300);
 				} catch (e) {
 					info.revert();
+					toast.error('Could not resize appointment');
 				}
 			},
 
