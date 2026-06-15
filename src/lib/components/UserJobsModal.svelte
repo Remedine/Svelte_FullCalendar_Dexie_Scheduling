@@ -49,24 +49,8 @@
 </div>
 
 <style>
-	.modal-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-	.modal-content {
-		background: var(--color-surface);
-		border-radius: var(--radius-md);
-		width: 90%;
-		max-width: 500px;
-		padding: var(--space-6);
-		max-height: 90vh;
-		overflow-y: auto;
-	}
+	/* Base .modal-overlay and .modal-content now come from globals.css for cohesion.
+	   Only component-specific extensions here. */
 	.jobs-list {
 		margin: var(--space-4) 0;
 	}

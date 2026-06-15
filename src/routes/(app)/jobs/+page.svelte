@@ -394,7 +394,7 @@
 				{@const client = clients.find((c) => c.id === job.clientId || c.pbId === job.clientId)}
 				{@const area = areaOptions.find((a: any) => a.id === job.areaOfTown)}
 				<div
-					class="job-page__card"
+					class="job-page__card card card--interactive"
 					role="button"
 					tabindex="0"
 					style="border-left: 6px solid {getDisplayAreaColor(area?.color) || '#64748b'};"
@@ -477,7 +477,7 @@
 <style>
 	/* BEM strictly followed for Phase 5 rich jobs page */
 	.job-page {
-		padding: 1.5rem;
+		padding: var(--space-6) var(--space-4);
 		max-width: 1200px;
 		margin: 0 auto;
 	}
@@ -495,20 +495,20 @@
 	}
 	.job-page__subtitle {
 		color: var(--color-text-muted);
-		margin: 0.25rem 0 0;
+		margin: var(--space-1) 0 0;
 		font-size: var(--font-size-sm);
 	}
 
 	.job-page__filters {
 		display: flex;
-		gap: 0.75rem;
-		margin-bottom: 0.75rem;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
 		flex-wrap: wrap;
 		align-items: center;
 	}
 	.job-page__quick {
 		display: flex;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-page__quick button {
 		padding: var(--space-2) var(--space-3);
@@ -610,18 +610,8 @@
 		gap: var(--space-3);
 	}
 	.job-page__card {
-		background: var(--color-surface);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-lg);
+		/* composes global .card + .card--interactive for cohesion */
 		padding: var(--space-3) var(--space-4);
-		cursor: pointer;
-		transition:
-			box-shadow 0.1s,
-			transform 0.1s;
-	}
-	.job-page__card:hover {
-		box-shadow: var(--shadow-md);
-		transform: translateY(-1px);
 	}
 	.job-page__card-header {
 		display: flex;
@@ -636,7 +626,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-1);
-		padding: 0.1rem 0.4rem;
+		padding: 1px var(--space-1);
 		font-size: var(--font-size-xs);
 		border-radius: var(--radius-sm);
 		background: var(--color-success-soft);
@@ -651,7 +641,7 @@
 		font-size: var(--font-size-xs);
 		background: var(--color-danger);
 		color: white;
-		padding: 0 0.2rem;
+		padding: 0 var(--space-1);
 		border-radius: var(--radius-sm);
 		text-transform: uppercase;
 		font-weight: var(--font-weight-semibold);
@@ -663,13 +653,13 @@
 	}
 
 	.job-page__card-title {
-		margin: 0 0 0.3rem;
+		margin: 0 0 var(--space-1);
 		font-size: var(--font-size-base);
 		font-weight: var(--font-weight-semibold);
 	}
 	.job-page__meta {
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 	}
@@ -688,7 +678,7 @@
 	.job-page__crew {
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-page__crew-avatar {
 		width: 20px;
@@ -716,10 +706,10 @@
 	.job-page__crew-names {
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
-		margin-left: 0.25rem;
+		margin-left: var(--space-1);
 	}
 	.job-page__notes {
-		margin: 0.4rem 0 0;
+		margin: var(--space-1) 0 0;
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 	}
@@ -757,5 +747,25 @@
 	}
 	.job-page__error p {
 		margin: 0 0 var(--space-2);
+	}
+
+	/* Mobile responsive for token cohesion and tighter layout on small screens.
+	   Matches the pattern used on clients, options, crew pages. */
+	@media (max-width: 768px) {
+		.job-page {
+			padding: var(--space-3) var(--space-2);
+		}
+		.job-page__search {
+			min-width: 160px;
+		}
+		.job-page__card {
+			padding: var(--space-2) var(--space-3);
+		}
+		.job-page__card-title {
+			margin-bottom: var(--space-1);
+		}
+		.job-page__notes {
+			margin-top: var(--space-1);
+		}
 	}
 </style>

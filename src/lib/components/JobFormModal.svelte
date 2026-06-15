@@ -283,9 +283,9 @@
 
 <!-- Main Modal -->
 {#if show}
-	<div class="new-job-modal" role="presentation" onclick={closeModal}>
+	<div class="modal-overlay new-job-modal" role="presentation" onclick={closeModal}>
 		<div
-			class="new-job-modal__content"
+			class="modal-content new-job-modal__content"
 			role="dialog"
 			aria-modal="true"
 			tabindex="-1"
@@ -452,7 +452,7 @@
 			</div>
 
 			<!-- Sticky Footer -->
-			<div class="new-job-modal__footer">
+			<div class="new-job-modal__footer sticky-footer">
 				{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
 					<!-- )=- Prevent cancel for completed or already-cancelled jobs (mirrors the guard added to JobDetailsModal).
                Per user feedback and consistency with quick status guards elsewhere.
@@ -478,8 +478,8 @@
 
 <!-- Cancel Confirmation -->
 {#if showCancelConfirm}
-	<div class="cancel-confirm-modal" role="presentation" onclick={() => (showCancelConfirm = false)}>
-		<div class="cancel-confirm-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
+	<div class="modal-overlay cancel-confirm-modal" role="presentation" onclick={() => (showCancelConfirm = false)}>
+		<div class="modal-content cancel-confirm-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => {
 				if (e.key === 'Escape') {
 					e.stopPropagation();
@@ -538,27 +538,8 @@
 	/* JobFormModal now leans heavily on globals.css primitives (.input, .label, .button) + design tokens
 	   for cohesion. BEM kept for specific structure and overrides. All colors/spacing/radii via vars. */
 
-	.new-job-modal {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.7);
-		display: flex;
-		align-items: flex-end;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.new-job-modal__content {
-		background: var(--color-surface);
-		width: 100%;
-		max-width: 560px;
-		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-		box-shadow: var(--shadow-modal);
-		max-height: 95vh;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-	}
+	/* Base .new-job-modal shell now uses global .modal-overlay + .modal-content for cohesion.
+	   (global handles mobile bottom-sheet). Only prefixed BEM extensions here. */
 
 	.new-job-modal__title {
 		margin: 0 0 var(--space-6) 0;
@@ -637,18 +618,11 @@
 	}
 
 	.new-job-modal__footer {
-		position: sticky;
-		bottom: 0;
-		background: var(--color-surface);
-		padding: var(--space-4) var(--space-5);
-		border-top: 1px solid var(--color-border);
+		/* base from global .sticky-footer; specific layout kept */
 		display: flex;
 		gap: var(--space-3);
 		justify-content: space-between;
 		align-items: center;
-		z-index: 10;
-		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
-		margin-top: auto;
 	}
 
 	.new-job-modal__btn {
@@ -698,23 +672,7 @@
 		background: var(--color-surface);
 	}
 
-	.cancel-confirm-modal {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.7);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.cancel-confirm-modal__content {
-		background: var(--color-surface);
-		padding: var(--space-8);
-		border-radius: var(--radius-lg);
-		max-width: 420px;
-		width: 90%;
-	}
+	/* cancel-confirm uses global modal shell now; only its specific BEM kept. */
 
 	.cancel-confirm-modal__footer {
 		position: sticky;

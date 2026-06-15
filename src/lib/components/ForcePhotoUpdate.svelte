@@ -97,12 +97,12 @@
 </script>
 
 <div
-	class="force-photo-update__overlay"
+	class="modal-overlay force-photo-update__overlay"
 	role="presentation"
 	onclick={success ? finish : undefined}
 >
 	<div
-		class="force-photo-update__content"
+		class="modal-content force-photo-update__content"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
@@ -217,25 +217,25 @@
 </div>
 
 <style>
+	/* Base positioning/background for overlay and content now provided by global .modal-overlay + .modal-content.
+	   Only ForcePhoto specific overrides + the preview etc. */
 	.force-photo-update__overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.65);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-		padding: var(--space-4);
+		/* additional specificity if needed; global handles fixed/inset/align/z */
 	}
 
 	.force-photo-update__content {
-		background: var(--color-surface);
-		border-radius: var(--radius-lg);
-		width: 100%;
-		max-width: 420px;
-		padding: var(--space-6);
-		box-shadow: var(--shadow-md);
 		text-align: center;
+		/* global provides background, radius (overridable), padding, shadow, max-width, flex etc. */
+	}
+
+	/* Component-specific mobile overrides for actions and minor tweaks (global handles shell) */
+	@media (max-width: 768px) {
+		.force-photo-update__actions {
+			flex-direction: column;
+		}
+		.force-photo-update__btn {
+			width: 100%;
+		}
 	}
 
 	.force-photo-update__title {

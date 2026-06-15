@@ -334,7 +334,86 @@ textarea:focus {
 	box-shadow: var(--shadow-sm);
 }
 
-/* Modal shell (used as base; individual modals keep their __content BEM) */
+.card--interactive {
+	cursor: pointer;
+	transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.card--interactive:hover {
+	box-shadow: var(--shadow-md);
+	transform: translateY(-1px);
+}
+
+/* Modal shell (consolidated global primitive for cohesion)
+   Use class="modal-overlay" on the backdrop div and "modal-content" on the inner dialog.
+   - Desktop: centered
+   - Mobile (<=768px): bottom sheet (per Apple HIG / common mobile pattern)
+   Individual modals extend with their BEM (e.g. .modal__title, .new-job-modal__form) or component-specific __content.
+   Components should no longer duplicate the base overlay/content rules.
+*/
+.modal-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.6);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: var(--z-modal-backdrop);
+}
+
+@media (max-width: 768px) {
+	.modal-overlay {
+		align-items: flex-end;
+	}
+}
+
+.modal-content {
+	background: var(--color-surface);
+	width: 100%;
+	max-width: 560px;
+	border-radius: var(--radius-xl);
+	box-shadow: var(--shadow-modal);
+	max-height: 95vh;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+@media (max-width: 768px) {
+	.modal-content {
+		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+	}
+}
+
+/* Common modal BEM primitives (for cohesion across all modals)
+   Components extend these (e.g. .new-job-modal__title, .modal__title) */
+.modal__title {
+	font-size: var(--font-size-xl);
+	font-weight: var(--font-weight-semibold);
+	color: var(--color-text);
+	margin: 0 0 var(--space-4) 0;
+}
+
+.modal__actions {
+	display: flex;
+	gap: var(--space-3);
+	justify-content: flex-end;
+	margin-top: var(--space-4);
+}
+
+@media (max-width: 768px) {
+	.modal__actions {
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	.modal__actions .button,
+	.modal__actions .modal__btn {
+		width: 100%;
+		text-align: center;
+	}
+}
+
+/* Keep .modal-backdrop for any legacy / global usage (synced behavior) */
 .modal-backdrop {
 	position: fixed;
 	inset: 0;
@@ -343,18 +422,6 @@ textarea:focus {
 	align-items: flex-end;
 	justify-content: center;
 	z-index: var(--z-modal-backdrop);
-}
-
-.modal-content {
-	background: var(--color-surface);
-	width: 100%;
-	max-width: 560px;
-	border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-	box-shadow: var(--shadow-modal);
-	max-height: 95vh;
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
 }
 
 /* Status / badge primitives */
@@ -420,11 +487,21 @@ textarea:focus {
 	}
 }
 
-/* Mobile-first: slightly tighter defaults on very small screens */
+/* Mobile-first: tighter defaults on small screens for cohesion */
+@media (max-width: 480px) {
+	.modal-content {
+		max-height: 85vh; /* allow more room on phones */
+	}
+}
+
 @media (max-width: 380px) {
 	.button {
 		padding-left: var(--space-4);
 		padding-right: var(--space-4);
+	}
+	/* tighter cards on tiny screens */
+	.card {
+		border-radius: var(--radius-md);
 	}
 }
 

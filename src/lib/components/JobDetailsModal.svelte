@@ -251,8 +251,8 @@
 </script>
 
 {#if show}
-	<div class="job-details-modal" role="presentation" onclick={closeModal}>
-		<div class="job-details-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+	<div class="modal-overlay job-details-modal" role="presentation" onclick={closeModal}>
+		<div class="modal-content job-details-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
 			{#if loading}
 				<div class="job-details-modal__loading">Loading job details…</div>
 			{:else if !job}
@@ -499,7 +499,7 @@
 				{/if}
 
 				<!-- Footer Actions -->
-				<div class="job-details-modal__footer">
+				<div class="job-details-modal__footer sticky-footer">
 					<div class="job-details-modal__footer-left">
 						<button class="job-details-modal__btn job-details-modal__btn--edit" onclick={editJob}>
 							Edit full job
@@ -522,27 +522,7 @@
 	/* JobDetailsModal standardized to design tokens + BEM. Base classes (.button, etc.) used in markup where possible.
 	   Hardcoded colors and sizes replaced with vars and --space-* scale for full cohesion with the rest of the app. */
 
-	.job-details-modal {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: flex-end;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.job-details-modal__content {
-		background: var(--color-surface);
-		width: 100%;
-		max-width: 560px;
-		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-		box-shadow: var(--shadow-modal);
-		max-height: 92vh;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-	}
+	/* Base job-details-modal shell now from global .modal-overlay + .modal-content for cohesion. */
 
 	.job-details-modal__loading,
 	.job-details-modal__empty {
@@ -679,14 +659,10 @@
 	}
 
 	.job-details-modal__footer {
-		padding: var(--space-4);
-		border-top: 1px solid var(--color-border);
+		/* base from global .sticky-footer */
 		display: flex;
 		justify-content: space-between;
 		gap: var(--space-2);
-		background: var(--color-surface);
-		position: sticky;
-		bottom: 0;
 	}
 
 	.job-details-modal__footer-left {

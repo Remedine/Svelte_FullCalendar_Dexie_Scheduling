@@ -231,6 +231,13 @@
 		text-align: center;
 	}
 
+	/* Mobile: tighter card padding on small screens for cohesion with the rest of the app. */
+	@media (max-width: 380px) {
+		.login-card {
+			padding: var(--space-6) var(--space-4);
+		}
+	}
+
 	.login-card__title {
 		font-size: var(--font-size-3xl);
 		font-weight: var(--font-weight-bold);
@@ -257,7 +264,7 @@
 
 	.login-form__input {
 		width: 100%;
-		padding: 0.85rem 1rem;
+		padding: var(--space-3) var(--space-4);
 		border: 2px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
 		font-size: var(--font-size-lg);
@@ -273,7 +280,7 @@
 
 	.login-form__btn {
 		width: 100%;
-		padding: 1rem;
+		padding: var(--space-4);
 		background: var(--color-primary);
 		color: white;
 		border: none;

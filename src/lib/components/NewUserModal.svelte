@@ -201,23 +201,8 @@
 </div>
 
 <style>
-	/* Fully updated to design tokens + base primitives for cohesion (matches JobFormModal etc.) */
-	.modal-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-	.modal-content {
-		background: var(--color-surface);
-		border-radius: var(--radius-md);
-		width: 90%;
-		max-width: 420px;
-		padding: var(--space-6);
-	}
+	/* Base .modal-overlay and .modal-content now come from globals.css (consolidated for cohesion).
+	   Desktop center, mobile bottom-sheet handled globally. Only component BEM + specifics here. */
 	.modal__title {
 		margin: 0 0 var(--space-6) 0;
 		font-size: var(--font-size-xl);
@@ -282,5 +267,18 @@
 	.note {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
+	}
+
+	/* Component-specific mobile action stacking (global handles shell) */
+	@media (max-width: 768px) {
+		.modal__actions {
+			flex-direction: column;
+			gap: var(--space-2);
+			margin-top: var(--space-4);
+		}
+		.modal__btn {
+			width: 100%;
+			text-align: center;
+		}
 	}
 </style>

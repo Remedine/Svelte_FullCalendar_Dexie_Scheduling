@@ -330,7 +330,7 @@
 
 	<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
-			<li class="client-card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
+			<li class="client-card card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
 				<div class="client-card__main">
 					<div class="client-card__header">
 						<h3 class="client-card__name">{client.name}</h3>
@@ -581,12 +581,10 @@
 	}
 
 	.client-card {
+		/* base from global .card; list-specific */
 		display: flex;
 		justify-content: space-between;
-		background: var(--color-surface);
 		padding: var(--space-5);
-		border-radius: var(--radius-lg);
-		box-shadow: var(--shadow-sm);
 		transition: transform 0.2s;
 	}
 

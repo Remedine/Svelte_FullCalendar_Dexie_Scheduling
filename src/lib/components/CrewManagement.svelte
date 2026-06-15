@@ -623,23 +623,9 @@
 		color: white;
 	}
 
-	/* Modal styles for edit and email modals (tokenized for cohesion with NewUserModal and other modals) */
-	.modal-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-	.modal-content {
-		background: var(--color-surface);
-		border-radius: var(--radius-md);
-		width: 90%;
-		max-width: 420px;
-		padding: var(--space-6);
-	}
+	/* Modal shell base (.modal-overlay / .modal-content) now from globals.css for cohesion.
+	   Only the .modal__* BEM extensions and specifics remain here. */
+
 	.modal__title {
 		margin: 0 0 var(--space-6) 0;
 		font-size: var(--font-size-xl);

@@ -205,27 +205,8 @@
 </div>
 
 <style>
-	/* Reuses the common modal shell classes used elsewhere (NewUserModal, crew edit, etc.)
-	   for visual cohesion. BEM + design tokens. */
-	.modal-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-
-	.modal-content {
-		background: var(--color-surface);
-		border-radius: var(--radius-lg);
-		width: 90%;
-		max-width: 460px;
-		padding: var(--space-6);
-		box-shadow: var(--shadow-md);
-	}
-
+	/* Base .modal-overlay and .modal-content now come from globals.css (consolidated primitive).
+	   Global handles desktop center vs mobile bottom-sheet. Only Welcome BEM here. */
 	.modal__title {
 		margin: 0 0 var(--space-4) 0;
 		font-size: var(--font-size-xl);
@@ -320,5 +301,16 @@
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 		margin-bottom: var(--space-3);
+	}
+
+	/* Welcome-specific mobile tweaks for actions (global owns the overlay/content switch) */
+	@media (max-width: 768px) {
+		.modal__actions {
+			flex-direction: column;
+			gap: var(--space-2);
+		}
+		.modal__btn {
+			width: 100%;
+		}
 	}
 </style>

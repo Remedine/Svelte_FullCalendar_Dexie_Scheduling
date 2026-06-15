@@ -149,8 +149,8 @@
 </script>
 
 {#if show}
-	<div class="client-form-modal" role="presentation" onclick={closeForm}>
-		<div class="client-form-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+	<div class="modal-overlay client-form-modal" role="presentation" onclick={closeForm}>
+		<div class="modal-content client-form-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
 			<h2 class="client-form-modal__title">
 				{isEditing ? 'Edit Client' : 'New Client'}
 			</h2>
@@ -264,7 +264,7 @@
 			<!-- )=- Sticky footer bar (position: sticky + margin-top:auto inside flex column content).
 			     Matches JobFormModal__footer exactly for visual + behavior consistency.
 			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-			<div class="client-form-modal__footer">
+			<div class="client-form-modal__footer sticky-footer">
 				<button
 					type="button"
 					class="client-form-modal__btn client-form-modal__btn--cancel button button--ghost"
@@ -288,29 +288,8 @@
 	/* ClientForm standardized to tokens + base primitives for full cohesion (Phase 2 of overhaul).
 	   Follows same pattern as JobFormModal / JobDetailsModal. */
 
-	.client-form-modal {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.7);
-		display: flex;
-		align-items: flex-end;
-		justify-content: center;
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.client-form-modal__content {
-		background: var(--color-surface);
-		width: 100%;
-		max-width: 560px;
-		border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-		box-shadow: var(--shadow-modal);
-		max-height: 95vh;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		container-type: inline-size;
-		container-name: client-form;
-	}
+	/* Base client-form-modal shell now uses global .modal-overlay + .modal-content.
+	   Container query and other BEM kept for specifics. */
 
 	.client-form-modal__title {
 		margin: 0 0 var(--space-6) 0;
@@ -356,18 +335,11 @@
 	}
 
 	.client-form-modal__footer {
-		position: sticky;
-		bottom: 0;
-		background: var(--color-surface);
-		padding: var(--space-4) var(--space-5);
-		border-top: 1px solid var(--color-border);
+		/* base from .sticky-footer global */
 		display: flex;
 		gap: var(--space-3);
 		justify-content: flex-end;
 		align-items: center;
-		z-index: 10;
-		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
-		margin-top: auto;
 	}
 
 	.client-form-modal__footer .client-form-modal__btn {
