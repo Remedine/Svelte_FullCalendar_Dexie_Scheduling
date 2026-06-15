@@ -15,6 +15,8 @@
 
 	const currentPath = $derived(page.url.pathname);
 
+	let showAvatarMenu = $state(false);
+
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
 		await logout();
@@ -57,6 +59,24 @@
 				goto('/calendar', { replaceState: true });
 			}
 		}
+	});
+
+	// Close avatar menu on outside click (important for mobile tap support, since :hover doesn't work on touch)
+	$effect(() => {
+		if (!showAvatarMenu) return;
+
+		const handleOutsideClick = (event: MouseEvent) => {
+			const wrapper = document.querySelector('.bottom-nav__avatar-wrapper');
+			if (wrapper && !wrapper.contains(event.target as Node)) {
+				showAvatarMenu = false;
+			}
+		};
+
+		document.addEventListener('click', handleOutsideClick, { capture: true });
+
+		return () => {
+			document.removeEventListener('click', handleOutsideClick, { capture: true });
+		};
 	});
 </script>
 
@@ -211,7 +231,22 @@
 		     Theme toggle is now an item inside the avatar dropdown (not stacked below the avatar).
 		     No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
-			<div class="bottom-nav__avatar-wrapper">
+			<div 
+				class="bottom-nav__avatar-wrapper"
+				role="button"
+				tabindex="0"
+				aria-expanded={showAvatarMenu}
+				aria-haspopup="menu"
+				aria-label="User menu"
+				onclick={() => showAvatarMenu = !showAvatarMenu}
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						showAvatarMenu = !showAvatarMenu;
+						e.preventDefault();
+					}
+					if (e.key === 'Escape') showAvatarMenu = false;
+				}}
+			>
 				<div class="bottom-nav__avatar">
 					{#if auth.currentUser.photo}
 						<img
@@ -227,14 +262,14 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu">
-					<a href="/profile" class="bottom-nav__user-menu-item">Profile</a>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu}>
+					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
-					<div class="bottom-nav__user-menu-item bottom-nav__theme-item">
+					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
 						<ThemeToggle />
 					</div>
 					<button
-						onclick={handleLogout}
+						onclick={() => { showAvatarMenu = false; handleLogout(); }}
 						class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
 					>
 						Logout
@@ -527,7 +562,7 @@
 	@media (max-width: 768px) {
 		.bottom-nav {
 			align-items: center;
-			padding: 0 4px 0 0;
+			padding: 0 8px 0 0; /* extra right padding so the avatar on the far right has breathing room like the other tabs */
 			box-sizing: border-box;
 			overflow: hidden; /* safety net: ensure no child content can force the fixed bar (or page) wider than viewport */
 			max-width: 100vw;
@@ -537,7 +572,12 @@
 			position: relative;
 			cursor: pointer;
 			margin-left: auto; /* push avatar + its menu to the right of the tabs */
-			padding-right: 4px;
+			padding: 0 8px; /* give horizontal breathing room so avatar isn't crammed in the corner */
+			min-width: 48px; /* allocate same room as other interactive items in the bar */
+			min-height: 50px; /* match tab height for visual balance */
+			display: flex;
+			align-items: center;
+			justify-content: center;
 			flex-shrink: 0;
 		}
 
@@ -567,8 +607,9 @@
 
 		.bottom-nav__user-menu {
 			position: absolute;
-			bottom: calc(100% + 4px);
-			right: 0;
+			bottom: calc(100% + 6px);
+			right: 0; /* aligns menu right edge near avatar; menu content extends to the left (inward from bottom-right corner) */
+			left: auto;
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
@@ -579,6 +620,7 @@
 			flex-direction: column;
 		}
 
+		.bottom-nav__user-menu.open,
 		.bottom-nav__avatar-wrapper:hover .bottom-nav__user-menu,
 		.bottom-nav__avatar-wrapper:focus-within .bottom-nav__user-menu {
 			display: flex;
