@@ -953,6 +953,13 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		height: auto;
 	}
 
+	@media (max-width: 768px) {
+		.split-calendar-container {
+			height: 100%;
+			min-height: 0;
+		}
+	}
+
 	.split-calendar {
 		display: flex;
 		flex-direction: column;
@@ -1051,17 +1058,25 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	}
 
 	/* === Mobile day-focused layout (anchored top MonthPicker + scrolling time slots) === */
-	/* Reclaims large gutters/padding. MonthPicker ~half height + sticky top.
-	   Calendar (day view only) gets the remaining viewport for scrollable slots.
-	   Filters hidden on mobile to maximize calendar real-estate. */
+	/* Reclaims large gutters/padding. MonthPicker ~half height + sticky.
+	   The calendar (day view only) uses flex to take all *remaining* height after the MonthPicker.
+	   .split-calendar__day-wrapper gets overflow:auto so the time grid slots are scrollable (past 10am etc).
+	   No more brittle 100dvh calc — relies on flex chain from app-layout + main-content + schedule-page.
+	   Top nav is hidden on mobile; mobile footer flows below this block. */
 	@media (max-width: 768px) {
 		.split-calendar {
 			gap: var(--space-2);
+			flex: 1;
+			min-height: 0;
+			height: 100%;
+			display: flex;
+			flex-direction: column;
 		}
 
 		.split-calendar__sidebar {
 			/* Only the compact MonthPicker is shown at top; filters moved out of way */
 			margin-bottom: 0;
+			flex-shrink: 0;
 		}
 
 		/* Hide the big filters panel on mobile day view (user can still use on desktop) */
@@ -1069,17 +1084,25 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			display: none;
 		}
 
-		.split-calendar__day-wrapper {
+		.split-calendar__main {
+			flex: 1;
 			min-height: 0;
-			height: calc(100dvh - 220px); /* leave room for top nav + compact month picker + view switcher + bottom tabs */
-			max-height: calc(100dvh - 180px);
-			overflow-y: auto; /* internal scroll for the day's time slots */
-			-webkit-overflow-scrolling: touch;
-			margin-bottom: var(--space-2);
-			border-radius: var(--radius-md);
+			display: flex;
+			flex-direction: column;
 		}
 
-		/* Make the FC container inside fill the scroll area */
+		.split-calendar__day-wrapper {
+			flex: 1;
+			min-height: 0;
+			overflow-y: auto; /* internal scroll for the day's time slots */
+			-webkit-overflow-scrolling: touch;
+			margin-bottom: 0;
+			border-radius: var(--radius-md);
+			height: auto;
+			max-height: none;
+		}
+
+		/* Make the FC container inside fill the remaining height */
 		.split-calendar__day {
 			height: 100%;
 		}

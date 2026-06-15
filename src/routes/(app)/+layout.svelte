@@ -150,6 +150,47 @@
 		{:else}
 			{@render children()}
 		{/if}
+
+		<!-- Mobile app chrome footer (beneath content on mobile).
+		     On mobile: "Capital City Windows" + dark mode toggle + avatar (profile/logout).
+		     Placed in flow after page content so it sits below the calendar.
+		     Hidden on desktop. The fixed bottom tab bar stays below it. -->
+		<footer class="mobile-app-footer">
+			<span class="mobile-app-footer__brand">Capital City Windows</span>
+
+			<div class="mobile-app-footer__controls">
+				<ThemeToggle />
+
+				{#if auth.currentUser}
+					<div class="mobile-app-footer__avatar-wrapper">
+						<div class="mobile-app-footer__avatar">
+							{#if auth.currentUser.photo}
+								<img
+									src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+									alt="Profile"
+									class="mobile-app-footer__avatar-img"
+								/>
+							{:else}
+								<span class="mobile-app-footer__avatar-placeholder">
+									{(auth.currentUser.firstName || auth.currentUser.name || 'U')
+										.slice(0, 1)
+										.toUpperCase()}
+								</span>
+							{/if}
+						</div>
+						<div class="mobile-app-footer__user-menu">
+							<a href="/profile" class="mobile-app-footer__user-menu-item">Profile</a>
+							<button
+								onclick={handleLogout}
+								class="mobile-app-footer__user-menu-item mobile-app-footer__user-menu-item--logout"
+							>
+								Logout
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</footer>
 	</main>
 
 	<!-- Bottom tab bar (mobile-first solution for wide menu problem).
@@ -212,47 +253,6 @@
 		{/if}
 	</nav>
 
-	<!-- Mobile app chrome footer (beneath content).
-	     On mobile: shows "Capital City Windows" (small), dark mode toggle, and avatar (profile + logout).
-	     Replaces the top header branding/user controls for phones while keeping top-nav slim.
-	     Desktop: hidden via media query. -->
-	<footer class="mobile-app-footer">
-		<span class="mobile-app-footer__brand">Capital City Windows</span>
-
-		<div class="mobile-app-footer__controls">
-			<ThemeToggle />
-
-			{#if auth.currentUser}
-				<div class="mobile-app-footer__avatar-wrapper">
-					<div class="mobile-app-footer__avatar">
-						{#if auth.currentUser.photo}
-							<img
-								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
-								alt="Profile"
-								class="mobile-app-footer__avatar-img"
-							/>
-						{:else}
-							<span class="mobile-app-footer__avatar-placeholder">
-								{(auth.currentUser.firstName || auth.currentUser.name || 'U')
-									.slice(0, 1)
-									.toUpperCase()}
-							</span>
-						{/if}
-					</div>
-					<div class="mobile-app-footer__user-menu">
-						<a href="/profile" class="mobile-app-footer__user-menu-item">Profile</a>
-						<button
-							onclick={handleLogout}
-							class="mobile-app-footer__user-menu-item mobile-app-footer__user-menu-item--logout"
-						>
-							Logout
-						</button>
-					</div>
-				</div>
-			{/if}
-		</div>
-	</footer>
-
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
 	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
 	     This makes the details modal (with invoice support) available from jobs page, clients related jobs, etc. -->
@@ -294,17 +294,11 @@
 
 	@media (max-width: 768px) {
 		.top-nav__menu {
-			display: none; /* bottom-nav handles navigation on mobile */
+			display: none;
 		}
+		/* Completely hide the top navigation bar on mobile.
+		   Branding, theme toggle and avatar/profile/logout are now in the mobile-app-footer below the content. */
 		.top-nav {
-			padding: var(--space-2) var(--space-4);
-		}
-		.top-nav__brand h1 {
-			font-size: var(--font-size-xl);
-		}
-
-		/* Move brand + user chrome to bottom footer on mobile (new mobile pattern) */
-		.top-nav__user {
 			display: none;
 		}
 	}
@@ -461,8 +455,11 @@
 			display: flex;
 		}
 
-		/* Prevent fixed bottom nav from covering page content (especially calendar day views) */
+		/* Reserve space at bottom of main-content so the in-flow mobile-app-footer + fixed tabs don't get covered.
+		   The footer itself sits in normal flow right after the page content (e.g. the calendar). */
 		.main-content {
+			display: flex;
+			flex-direction: column;
 			padding-bottom: 62px;
 		}
 	}
@@ -526,8 +523,7 @@
 			box-shadow: 0 -1px 4px rgb(0 0 0 / 0.04);
 			font-size: var(--font-size-xs);
 			color: var(--color-text-muted);
-			/* Push above the fixed bottom-nav tabs */
-			margin-bottom: 56px;
+			flex-shrink: 0;
 		}
 
 		.mobile-app-footer__brand {

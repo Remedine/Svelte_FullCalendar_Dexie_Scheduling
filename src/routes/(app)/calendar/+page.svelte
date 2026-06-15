@@ -15,9 +15,9 @@
 	.schedule-page {
 		display: flex;
 		flex-direction: column;
-		height: auto; /* allow content (calendar) to determine full height */
+		height: auto;
 		min-height: 100dvh;
-		overflow: visible; /* enable main page scroll for tall calendar content */
+		overflow: visible;
 		background-color: var(--color-bg);
 	}
 
@@ -26,7 +26,7 @@
 		height: auto;
 		min-height: 0;
 		display: flex;
-		overflow: visible; /* let inner calendar push page scroll */
+		overflow: visible;
 		background: var(--color-bg);
 		padding: var(--space-3) var(--space-3) var(--space-4);
 		margin: 0;
@@ -46,10 +46,24 @@
 		}
 	}
 
-	/* Mobile: reclaim every bit of gutter. The anchored MonthPicker + scrolling day calendar
-	   need the space. We now use internal scroll in the day-wrapper for the time slots. */
+	/* Mobile: full height chain so the day calendar can take the remaining space after the compact
+	   anchored MonthPicker. The day-wrapper uses internal overflow auto for the time slots (so you
+	   can scroll past 10am etc). Top nav is hidden, footer is in flow below this block. */
 	@media (max-width: 768px) {
+		.schedule-page {
+			height: 100%;
+			min-height: 0;
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+		}
+
 		.schedule-page__content {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
+			height: 100%;
 			padding: 0;
 			margin: 0;
 		}
