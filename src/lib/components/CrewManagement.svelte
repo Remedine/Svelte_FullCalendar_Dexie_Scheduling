@@ -9,11 +9,15 @@
 		cleanupDuplicateUsers
 	} from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 	import NewUserModal from './NewUserModal.svelte';
 	import UserJobsModal from './UserJobsModal.svelte';
 	import { loginWithEmail, pullUsersFromServer } from '$lib/db/pb';
 
 	let allUsers = $state<User[]>([]);
+
+	const activeUsers = $derived(allUsers.filter((u) => u.active));
+	const deactivatedUsers = $derived(allUsers.filter((u) => !u.active));
 
 	let showNewModal = $state(false);
 	let showJobsModal = $state(false);
@@ -26,6 +30,8 @@
 	let editForcePhoto = $state(false);
 	let editEmail = $state('');
 	let editActive = $state(true);
+	let pendingDelete = $state(false);
+	let editUserHasJobs = $state(false);
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 
@@ -65,7 +71,7 @@
 		showJobsModal = true;
 	}
 
-	function openEdit(user: User) {
+	async function openEdit(user: User) {
 		selectedUser = user;
 		editFirstName = user.firstName || (user.name ? user.name.split(' ')[0] : '');
 		editLastName = user.lastName || (user.name ? user.name.split(' ').slice(1).join(' ') : '');
@@ -73,30 +79,46 @@
 		editForcePhoto = user.forcePhotoUpdate ?? false;
 		editEmail = user.email || '';
 		editActive = user.active;
+		pendingDelete = false;
+
+		// Check if this user (by name) is still assigned to any jobs.
+		// If so, hide the delete button (only allow deactivate).
+		// Note: 'assignedCrew' is now indexed (DB v20) so this query is efficient and doesn't throw DexieError.
+		const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim();
+		const assigned = await db.jobs.where('assignedCrew').equals(userName).toArray();
+		editUserHasJobs = assigned.length > 0;
+
 		showEditModal = true;
 	}
 
-
-
 	async function saveEdit() {
 		if (!selectedUser || (!editFirstName.trim() && !editLastName.trim()) || !isAdmin) return;
+
+		if (pendingDelete) {
+			// Actual delete (and any error checks) happens here on Save, giving the user time to Cancel the modal.
+			await deleteUser(selectedUser.id!);
+			showEditModal = false;
+			selectedUser = null;
+			pendingDelete = false;
+			return;
+		}
 
 		const adminCount = allUsers.filter((u) => u.role === 'admin' && u.active).length;
 
 		// Active status change checks (moved from immediate toggle)
 		if (editActive !== selectedUser.active) {
 			if (selectedUser.role === 'admin' && editActive && adminCount <= 1) {
-				alert('Cannot deactivate the last active admin.');
+				toast.error('Cannot deactivate the last active admin.');
 				return;
 			}
 			if (selectedUser.role === 'admin' && !editActive && adminCount === 0) {
-				alert('Must keep at least one active admin.');
+				toast.error('Must keep at least one active admin.');
 				return;
 			}
 		}
 
 		if (selectedUser.role === 'admin' && editRole !== 'admin' && adminCount <= 1) {
-			alert('Cannot remove the last active admin.');
+			toast.error('Cannot remove the last active admin.');
 			return;
 		}
 
@@ -115,10 +137,9 @@
 
 		showEditModal = false;
 		selectedUser = null;
+		pendingDelete = false;
 		await loadUsers();
 	}
-
-
 
 	async function toggleActive(user: User) {
 		if (!isAdmin) return;
@@ -126,12 +147,12 @@
 		const adminCount = allUsers.filter((u) => u.role === 'admin' && u.active).length;
 
 		if (user.role === 'admin' && !user.active && adminCount === 0) {
-			alert('Must keep at least one active admin.');
+			toast.error('Must keep at least one active admin.');
 			return;
 		}
 
 		if (user.role === 'admin' && user.active && adminCount <= 1) {
-			alert('Cannot deactivate the last active admin.');
+			toast.error('Cannot deactivate the last active admin.');
 			return;
 		}
 
@@ -147,20 +168,32 @@
 		if (!isAdmin) return;
 
 		const userToDelete = allUsers.find((u) => u.id === id);
+		if (!userToDelete) return;
+
+		// Prevent deletion if the user is still assigned to any jobs.
+		// Only allow deactivation in that case. This check now only runs on Save.
+		const userName =
+			userToDelete.name || `${userToDelete.firstName || ''} ${userToDelete.lastName || ''}`.trim();
+		const assignedJobs = await db.jobs.where('assignedCrew').equals(userName).toArray();
+		if (assignedJobs.length > 0) {
+			toast.error(
+				'Cannot delete this user because they are still assigned to jobs. Please deactivate instead (they will no longer appear in new job assignments).'
+			);
+			return;
+		}
+
 		if (userToDelete?.role === 'admin') {
 			const activeAdmins = allUsers.filter(
 				(u) => u.role === 'admin' && u.active && u.id !== id
 			).length;
 			if (activeAdmins === 0) {
-				alert('Cannot delete the last active admin.');
+				toast.error('Cannot delete the last active admin.');
 				return;
 			}
 		}
 
-		if (confirm('Delete this user permanently?')) {
-			await deleteUserFromDb(id);
-			await loadUsers();
-		}
+		await deleteUserFromDb(id);
+		await loadUsers();
 	}
 
 	$effect(() => {
@@ -175,15 +208,20 @@
 	<header class="user-management__header">
 		<h1 class="user-management__title">User Management</h1>
 		<div class="user-management__header-actions">
-			<button onclick={openNewUser} class="user-management__add-btn button button--primary">+ Add New User</button>
-			<button onclick={refreshRoster} class="user-management__add-btn button" title="Refresh roster from server">Refresh roster</button>
+			<button onclick={openNewUser} class="user-management__add-btn button button--primary"
+				>+ Add New User</button
+			>
+			<button
+				onclick={refreshRoster}
+				class="user-management__add-btn button"
+				title="Refresh roster from server">Refresh roster</button
+			>
 		</div>
 	</header>
 
 	<div class="user-management__scroll-container">
-		<div class="user-management__grid">
-			{#each allUsers as user (user.id)}
-				<div class="user-management__row">
+		{#snippet userRow(user: User)}
+			<div class="user-management__row">
 				<!-- Avatar -->
 				<div class="user-management__avatar-col">
 					<div class="user-management__avatar">
@@ -246,7 +284,24 @@
 					>
 				</div>
 			</div>
-		{/each}
+		{/snippet}
+
+		<div class="user-management__section">
+			<h3 class="user-management__section-title">Active Crew ({activeUsers.length})</h3>
+			<div class="user-management__grid">
+				{#each activeUsers as user (user.id)}
+					{@render userRow(user)}
+				{/each}
+			</div>
+		</div>
+
+		<div class="user-management__section user-management__section--deactivated">
+			<h3 class="user-management__section-title">Deactivated Crew ({deactivatedUsers.length})</h3>
+			<div class="user-management__grid">
+				{#each deactivatedUsers as user (user.id)}
+					{@render userRow(user)}
+				{/each}
+			</div>
 		</div>
 	</div>
 
@@ -262,7 +317,8 @@
 
 	{#if showJobsModal && selectedUser}
 		<UserJobsModal
-			userId={selectedUser.id!}
+			userId={selectedUser.name ||
+				`${selectedUser.firstName} ${selectedUser.lastName || ''}`.trim()}
 			userName={`${selectedUser.firstName} ${selectedUser.lastName || selectedUser.name || ''}`.trim()}
 			onClose={() => (showJobsModal = false)}
 		/>
@@ -286,6 +342,8 @@
 				onkeydown={(e) => {
 					if (e.key === 'Escape') {
 						e.stopPropagation();
+						pendingDelete = false;
+						editUserHasJobs = false;
 						showEditModal = false;
 						selectedUser = null;
 					}
@@ -316,7 +374,12 @@
 
 					<label class="modal__label label">
 						Email Address
-						<input type="email" bind:value={editEmail} class="modal__input input" placeholder="user@capitalcitywindows.com" />
+						<input
+							type="email"
+							bind:value={editEmail}
+							class="modal__input input"
+							placeholder="user@capitalcitywindows.com"
+						/>
 					</label>
 
 					<label class="modal__checkbox-label label">
@@ -325,32 +388,48 @@
 					</label>
 				</div>
 
+				{#if pendingDelete}
+					<div class="modal__delete-pending">
+						This user will be <strong>permanently deleted</strong> when you save changes. Click Cancel
+						to abort.
+					</div>
+				{/if}
+
 				<div class="modal__actions">
 					<div class="modal__actions-left">
-						<button onclick={() => editActive = !editActive} class="modal__btn modal__btn--toggle button">
+						<button
+							onclick={() => (editActive = !editActive)}
+							class="modal__btn modal__btn--toggle button"
+						>
 							{editActive ? 'Deactivate User' : 'Activate User'}
 						</button>
-						<button
-							onclick={() => deleteUser(selectedUser!.id!)}
-							class="modal__btn modal__btn--delete button">Delete User</button
-						>
+						{#if !editUserHasJobs}
+							<button
+								onclick={() => {
+									pendingDelete = true;
+								}}
+								class="modal__btn modal__btn--delete button">Delete User</button
+							>
+						{/if}
 					</div>
 					<div class="modal__actions-right">
 						<button
 							onclick={() => {
+								pendingDelete = false;
+								editUserHasJobs = false;
 								showEditModal = false;
 								selectedUser = null;
 							}}
 							class="modal__btn modal__btn--cancel button button--ghost">Cancel</button
 						>
-						<button onclick={saveEdit} class="modal__btn modal__btn--save button button--primary">Save Changes</button>
+						<button onclick={saveEdit} class="modal__btn modal__btn--save button button--primary"
+							>Save Changes</button
+						>
 					</div>
 				</div>
 			</div>
 		</div>
 	{/if}
-
-
 </div>
 
 <style>
@@ -393,6 +472,31 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-3);
+	}
+
+	/* Section headers for Active / Deactivated split (BEM).
+	   Deactivated section uses muted styling and lives below the active list.
+	   Toggling active (in edit modal Save) + loadUsers() causes the $derived lists
+	   to re-partition, moving the row between sections automatically. */
+	.user-management__section {
+		margin-bottom: var(--space-8);
+	}
+	.user-management__section:last-child {
+		margin-bottom: 0;
+	}
+	.user-management__section-title {
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		margin: 0 0 var(--space-3) 0;
+		color: var(--color-text);
+		border-bottom: 1px solid var(--color-border);
+		padding-bottom: var(--space-2);
+	}
+	.user-management__section--deactivated .user-management__section-title {
+		color: var(--color-text-muted);
+	}
+	.user-management__section--deactivated .user-management__grid {
+		opacity: 0.9;
 	}
 
 	.user-management__row {
@@ -596,6 +700,15 @@
 	.modal__btn--delete {
 		background: var(--color-danger-soft);
 		color: var(--color-danger-emphasis);
+	}
+
+	.modal__delete-pending {
+		margin-top: var(--space-4);
+		padding: var(--space-3);
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
 	}
 
 	/* ============================================
