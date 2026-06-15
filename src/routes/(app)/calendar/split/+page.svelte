@@ -35,12 +35,20 @@
 	*/
 	@media (max-width: 768px) {
 		.split-page {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
 			padding: var(--space-2);
 		}
 
 		.split-page__content {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
 			padding: var(--space-2);
-			/* let the inner calendar be tall; background/rounded still frame the whole thing */
+			/* background/rounded frame the calendar area; the flex gives the calendar the remaining space after layout chrome */
 		}
 	}
 </style>

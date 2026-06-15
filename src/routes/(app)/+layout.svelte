@@ -268,6 +268,14 @@
 		background-color: var(--color-bg);
 	}
 
+	/* On mobile, allow the content (calendar etc) to be taller than the viewport so the page can scroll to show the full calendar. */
+	@media (max-width: 768px) {
+		.app-layout {
+			height: auto;
+			min-height: 100dvh;
+		}
+	}
+
 	/* Top Navigation — now token-driven + mobile slimmed */
 	.top-nav {
 		display: flex;

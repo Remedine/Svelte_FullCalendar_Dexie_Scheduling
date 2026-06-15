@@ -528,7 +528,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				height: 'auto',  // always auto so on mobile the timegrid renders all slots (6am-10pm) for full day visibility + page-level scrolling; internal scroll not needed
+				height: isMobile ? '100%' : 'auto',
 				allDaySlot: true,
 				slotMinTime: '06:00:00',
 				slotMaxTime: '22:00:00',
@@ -955,8 +955,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	@media (max-width: 768px) {
 		.split-calendar-container {
-			/* auto height so tall calendar content flows naturally for page-level scroll */
-			height: auto;
+			height: 100%;
 			min-height: 0;
 		}
 	}
@@ -1058,54 +1057,53 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		margin-bottom: var(--space-4); /* extra gap below the calendar box itself so it doesn't hit page bottom */
 	}
 
-	/* === Mobile: full calendar height + page-level scrolling ===
-	   On mobile we show only the compact MonthPicker (in sidebar) + the full day timegrid.
-	   To avoid "not enough height" / can't scroll far (e.g. past 7am), we let the day content
-	   determine its natural tall height (all slots from slotMinTime to slotMaxTime are rendered).
-	   The whole page (main-content in layout) then scrolls at page level to reveal later hours.
-	   The .month-picker is sticky so it stays visible while scrolling the tall day content.
-	   This relies on the parent chain (app-layout 100dvh flex, main-content flex1 on mobile with
-	   in-flow mobile-app-footer after children, split-page/page content, split-calendar-container)
-	   allowing tall content instead of clipping with 100% + internal overflow.
-	   Reclaims space; no brittle calc(100dvh - x). Matches user request for page-level scroll.
+	/* === Mobile day-focused layout (anchored top MonthPicker + scrolling time slots) === */
+	/* The split-page and __content in the page get flex:1 from the main-content remaining space (after layout chrome/footer).
+	   Here, the sidebar (MonthPicker compact) is flex-shrink:0, the main and day-wrapper flex:1 to take the remaining height.
+	   The day-wrapper has overflow auto for the time grid slots (FC height 100% makes the calendar fill it, body scrolls if more slots than height).
+	   This gives the calendar the full available height on the page for many hours visible + scroll.
+	   The .month-picker is sticky (see below) to stay visible above the scrolling slots.
+	   Reclaims gutters; relies on the full stack flex chain (layout main-content, page, this component).
 	   BEM + tokens. */
 	@media (max-width: 768px) {
 		.split-calendar {
 			gap: var(--space-2);
-			/* do not force height 100% here or below -- let content be tall for full day */
+			flex: 1;
+			min-height: 0;
 			display: flex;
 			flex-direction: column;
 		}
 
 		.split-calendar__sidebar {
-			/* Only the compact MonthPicker is shown at top; filters hidden on mobile */
+			/* Only the compact MonthPicker is shown at top; filters moved out of way */
 			margin-bottom: 0;
 			flex-shrink: 0;
 		}
 
-		/* Hide the big filters panel on mobile day view */
+		/* Hide the big filters panel on mobile day view (user can still use on desktop) */
 		.split-calendar__filters {
 			display: none;
 		}
 
 		.split-calendar__main {
-			/* let main grow with the tall day content */
+			flex: 1;
+			min-height: 0;
 			display: flex;
 			flex-direction: column;
 		}
 
 		.split-calendar__day-wrapper {
-			/* natural/auto height so all time slots are in DOM and visible by scrolling the page */
-			overflow: visible;
-			height: auto;
+			flex: 1;
+			min-height: 0;
+			overflow-y: auto; /* internal scroll for the day's time slots */
+			-webkit-overflow-scrolling: touch;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
-			/* no flex:1 or height:100% or internal scroll -- page level scroll now */
 		}
 
-		/* FC mount point also auto so the timegrid can be full height */
+		/* Make the FC container inside fill the remaining height */
 		.split-calendar__day {
-			height: auto;
+			height: 100%;
 		}
 	}
 
