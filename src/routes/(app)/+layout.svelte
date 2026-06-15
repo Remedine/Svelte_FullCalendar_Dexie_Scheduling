@@ -207,38 +207,38 @@
 			</a>
 		{/if}
 
-		<!-- Mobile-only: avatar (with profile/logout menu) + theme toggle stacked under it, integrated into bottom nav bar.
-		     Toggle placed directly under the avatar. No separate footer or brand text. -->
+		<!-- Mobile-only: avatar with dropdown menu integrated into bottom nav.
+		     Theme toggle is now an item inside the avatar dropdown (not stacked below the avatar).
+		     No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
-			<div class="bottom-nav__user">
-				<div class="bottom-nav__avatar-wrapper">
-					<div class="bottom-nav__avatar">
-						{#if auth.currentUser.photo}
-							<img
-								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
-								alt="Profile"
-								class="bottom-nav__avatar-img"
-							/>
-						{:else}
-							<span class="bottom-nav__avatar-placeholder">
-								{(auth.currentUser.firstName || auth.currentUser.name || 'U')
-									.slice(0, 1)
-									.toUpperCase()}
-							</span>
-						{/if}
-					</div>
-					<div class="bottom-nav__user-menu">
-						<a href="/profile" class="bottom-nav__user-menu-item">Profile</a>
-						<button
-							onclick={handleLogout}
-							class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
-						>
-							Logout
-						</button>
-					</div>
+			<div class="bottom-nav__avatar-wrapper">
+				<div class="bottom-nav__avatar">
+					{#if auth.currentUser.photo}
+						<img
+							src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+							alt="Profile"
+							class="bottom-nav__avatar-img"
+						/>
+					{:else}
+						<span class="bottom-nav__avatar-placeholder">
+							{(auth.currentUser.firstName || auth.currentUser.name || 'U')
+								.slice(0, 1)
+								.toUpperCase()}
+						</span>
+					{/if}
 				</div>
-				<div class="bottom-nav__theme-toggle">
-					<ThemeToggle />
+				<div class="bottom-nav__user-menu">
+					<a href="/profile" class="bottom-nav__user-menu-item">Profile</a>
+					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
+					<div class="bottom-nav__user-menu-item bottom-nav__theme-item">
+						<ThemeToggle />
+					</div>
+					<button
+						onclick={handleLogout}
+						class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
+					>
+						Logout
+					</button>
 				</div>
 			</div>
 		{/if}
@@ -521,9 +521,9 @@
 		letter-spacing: 0.2px;
 	}
 
-	/* Mobile user section integrated into bottom nav (avatar + toggle under it).
-	   Avatar menu appears above on tap/hover. Toggle sized compact and placed directly below avatar.
-	   No separate footer or "Capital City Windows" brand (removed for cleaner feel). */
+	/* Mobile: avatar integrated into right side of bottom nav.
+	   Dropdown menu now contains Profile + Theme toggle (as item) + Logout.
+	   No stacking of toggle under avatar. Avatar wrapper pushed to far right. */
 	@media (max-width: 768px) {
 		.bottom-nav {
 			align-items: center;
@@ -533,19 +533,12 @@
 			max-width: 100vw;
 		}
 
-		.bottom-nav__user {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			justify-content: center;
-			margin-left: 4px;
-			flex-shrink: 0;
-			width: 34px;
-		}
-
 		.bottom-nav__avatar-wrapper {
 			position: relative;
 			cursor: pointer;
+			margin-left: auto; /* push avatar + its menu to the right of the tabs */
+			padding-right: 4px;
+			flex-shrink: 0;
 		}
 
 		.bottom-nav__avatar {
@@ -580,7 +573,7 @@
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
 			box-shadow: var(--shadow-md);
-			min-width: 110px;
+			min-width: 140px;
 			z-index: var(--z-dropdown);
 			display: none;
 			flex-direction: column;
@@ -592,7 +585,8 @@
 		}
 
 		.bottom-nav__user-menu-item {
-			display: block;
+			display: flex;
+			align-items: center;
 			padding: 6px 10px;
 			font-size: var(--font-size-sm);
 			color: var(--color-text);
@@ -603,6 +597,7 @@
 			width: 100%;
 			text-align: left;
 			cursor: pointer;
+			gap: 8px;
 		}
 
 		.bottom-nav__user-menu-item:hover {
@@ -618,30 +613,34 @@
 			background: var(--color-danger-soft);
 		}
 
-		.bottom-nav__theme-toggle {
-			margin-top: 1px;
-		}
-
-		/* Compact the ThemeToggle when inside bottom nav on mobile */
-		.bottom-nav .theme-toggle__btn {
-			width: 18px;
-			height: 18px;
-			background: transparent;
-			border: none;
+		/* Theme toggle as a menu item inside the avatar dropdown.
+		   Make the toggle button blend as a full-width menu row with icon only (or minimal). */
+		.bottom-nav__theme-item {
 			padding: 0;
 		}
 
-		.bottom-nav .theme-toggle__btn svg {
-			width: 14px;
-			height: 14px;
+		.bottom-nav__theme-item .theme-toggle__btn {
+			width: 100%;
+			height: 28px;
+			padding: 0 10px;
+			border: none;
+			background: transparent;
+			justify-content: flex-start;
+			border-radius: 0;
+			gap: 8px;
 		}
 
-		.bottom-nav .theme-toggle__btn:hover {
+		.bottom-nav__theme-item .theme-toggle__btn:hover {
 			background: var(--color-surface-alt);
-			border: 1px solid var(--color-border);
+			border: none;
 		}
 
-		/* Size the main nav tabs compactly on mobile so 5-6 items (tabs + user section) fit without widening the viewport or causing horizontal overflow.
+		.bottom-nav__theme-item .theme-toggle__btn svg {
+			width: 16px;
+			height: 16px;
+		}
+
+		/* Size the main nav tabs compactly on mobile so tabs + avatar fit without widening the viewport or causing horizontal overflow.
 		   Icons and labels reduced; tabs allowed to shrink properly. */
 		.bottom-nav__tab {
 			flex: 1;
