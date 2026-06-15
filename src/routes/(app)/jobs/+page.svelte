@@ -572,12 +572,12 @@
 	/* Search is the primary filter - on its own line */
 	.job-page__search {
 		width: 100%;
-		padding: var(--space-2) var(--space-3);
+		padding: var(--space-3) var(--space-4); /* match global .input sizing from other pages/modals */
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
 		background: var(--color-surface);
 		color: var(--color-text);
-		font-size: var(--font-size-sm);
+		font-size: var(--font-size-base);
 	}
 
 	/* Quick row: All + toggles + Reset + More Filters trigger.
@@ -709,10 +709,10 @@
 		gap: var(--space-1);
 	}
 	.job-page__date-range input {
-		padding: var(--space-1);
+		padding: var(--space-2) var(--space-3); /* match global .input sizing */
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-sm);
-		font-size: var(--font-size-xs);
+		font-size: var(--font-size-sm);
 		background: var(--color-surface);
 		color: var(--color-text);
 		min-width: 140px;
@@ -725,10 +725,10 @@
 	}
 	.job-page__amount input {
 		width: 90px;
-		padding: var(--space-1);
+		padding: var(--space-2) var(--space-3); /* match global .input sizing from other pages/modals */
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-sm);
-		font-size: var(--font-size-xs);
+		font-size: var(--font-size-sm);
 		background: var(--color-surface);
 		color: var(--color-text);
 	}
@@ -736,6 +736,7 @@
 	/* Reuse area chips (unchanged behavior) */
 	.area-chip {
 		padding: var(--space-1) var(--space-2);
+		margin-right: var(--space-1); /* a bit of breathing room between area tokens */
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-full);
 		font-size: var(--font-size-xs);
@@ -929,7 +930,8 @@
 			flex: 1;
 		}
 		.job-page__search {
-			/* search stays prominent/full on mobile */
+			padding: var(--space-2) var(--space-3); /* slightly tighter on mobile but still consistent */
+			font-size: var(--font-size-sm);
 		}
 		.job-page__quick-row {
 			gap: var(--space-1);
@@ -949,6 +951,11 @@
 		.job-page__financial-inline {
 			flex-direction: column;
 			align-items: flex-start;
+		}
+		.job-page__date-range input,
+		.job-page__amount input {
+			padding: var(--space-1) var(--space-2);
+			font-size: 12px;
 		}
 		.job-page__card {
 			padding: var(--space-2) var(--space-3);
