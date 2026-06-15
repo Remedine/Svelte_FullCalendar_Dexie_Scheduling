@@ -21,7 +21,7 @@
 	import BillableItemRow from './BillableItemRow.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
-	import { db, type Client, cleanupDuplicateUsers } from '$lib/db';
+	import { db, type Client, cleanupDuplicateUsers, getUserPhotoSrc } from '$lib/db';
 
 	let show = $state(false);
 	let isEditing = $state(false);
@@ -43,6 +43,7 @@
 	});
 
 	let crewOptions = $state<string[]>([]);
+	let crewPhotoMap = $state<Record<string, string>>({});
 	let afterSaveCallback: (() => void) | null = null;
 
 	const areaOptions = $derived(
@@ -123,17 +124,23 @@
 		};
 	});
 
-	// Load crew members
+	// Load crew members (with photos for avatars)
 	$effect(() => {
 		cleanupDuplicateUsers().then(() => {
 			db.users.toArray().then((users: any[]) => {
+				const active = users.filter((u) => u.active);
 				crewOptions = Array.from(
 					new Set(
-						users
-							.filter((u) => u.active)
-							.map((u) => u.name)
+						active.map((u) => u.name)
 					)
 				).sort();
+				// Build photo map (name -> src) so we can render avatars without names
+				crewPhotoMap = {};
+				active.forEach((u: any) => {
+					if (u.name) {
+						crewPhotoMap[u.name] = getUserPhotoSrc(u.photo, u) || '';
+					}
+				});
 			});
 		});
 	});
@@ -387,7 +394,7 @@
 					</div>
 				</div>
 
-				<!-- Crew -->
+				<!-- Crew / Assigned Staff: avatars only (no names), border highlight for selected -->
 				<fieldset class="new-job-modal__field">
 					<legend class="new-job-modal__label label">Crew / Assigned Staff</legend>
 					<div class="new-job-modal__crew-grid">
@@ -402,8 +409,19 @@
 											? [...currentJob.assignedCrew, crew]
 											: currentJob.assignedCrew.filter((c: string) => c !== crew);
 									}}
+									aria-label={crew}
 								/>
-								{crew}
+								<div
+									class="new-job-modal__crew-avatar"
+									class:selected={currentJob.assignedCrew.includes(crew)}
+									title={crew}
+								>
+									{#if crewPhotoMap[crew]}
+										<img src={crewPhotoMap[crew]} alt={crew} />
+									{:else}
+										<span class="initial">{crew?.charAt(0)?.toUpperCase() || '?'}</span>
+									{/if}
+								</div>
 							</label>
 						{/each}
 					</div>
@@ -585,8 +603,42 @@
 	.new-job-modal__crew-option {
 		display: flex;
 		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
+		justify-content: center;
+	}
+
+	.new-job-modal__crew-option input[type="checkbox"] {
+		position: absolute;
+		opacity: 0;
+		pointer-events: none;
+		width: 0;
+		height: 0;
+	}
+
+	.new-job-modal__crew-avatar {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		overflow: hidden;
+		border: 2px solid transparent;
+		background: var(--color-surface-alt);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--color-text-muted);
+		cursor: pointer;
+	}
+	.new-job-modal__crew-avatar.selected {
+		border-color: var(--color-primary);
+	}
+	.new-job-modal__crew-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.new-job-modal__crew-avatar .initial {
+		text-transform: uppercase;
 	}
 
 	.billable-items {
@@ -700,6 +752,14 @@
 		background: none;
 		border: none;
 		cursor: pointer;
+	}
+
+	/* Calendar picker icon color for dark mode (the native indicator is dark by default) */
+	.new-job-modal__input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+		filter: invert(0.2);
+	}
+	.dark .new-job-modal__input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+		filter: invert(1); /* white/light for dark mode */
 	}
 
 	/* Mobile tweaks for job form modal title (per request): reduce height by minimizing margin/padding,

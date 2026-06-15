@@ -8,7 +8,8 @@
 			title: '',
 			price: 0,
 			quantity: 1,
-			total: 0
+			total: 0,
+			unit: 'qty' as 'hour' | 'qty'
 		}),
 		onRemove = () => {},
 		autofocusPrice = false
@@ -17,6 +18,24 @@
 	const templates = $derived(optionsStore.data?.defaultBillableItems || []);
 
 	let showSuggestions = $state(false);
+
+	let unit = $state<'hour' | 'qty'>(item.unit || 'qty');
+
+	$effect(() => {
+		item.unit = unit;
+	});
+
+	// Inherit default unit (hour/qty) from the matching defaultBillableItem in options when title is selected
+	$effect(() => {
+		if (item.title && optionsStore.data?.defaultBillableItems?.length) {
+			const match = (optionsStore.data.defaultBillableItems as any[]).find(
+				(t: any) => t.title === item.title
+			);
+			if (match?.unit && (match.unit === 'hour' || match.unit === 'qty')) {
+				unit = match.unit;
+			}
+		}
+	});
 
 	const filteredTemplates = $derived.by(() => {
 		if (!item.title) return templates;
@@ -44,6 +63,10 @@
 		item.title = template.title;
 		item.price = template.price || 0;
 		item.quantity = template.quantity || 1;
+		if (template.unit === 'hour' || template.unit === 'qty') {
+			unit = template.unit;
+			item.unit = unit;
+		}
 		showSuggestions = false;
 	}
 
@@ -118,7 +141,21 @@
 			</div>
 
 			<div class="billable-item-row__quantity">
-				<span class="billable-item-row__qty-label">qty</span>
+				<!-- Toggle for hour/qty, defaults inherited from options for the selected billable -->
+				<div class="billable-item-row__unit-toggle">
+					<button
+						type="button"
+						class:active={unit === 'hour'}
+						onclick={() => (unit = 'hour')}
+						aria-label="Hours"
+					>hr</button>
+					<button
+						type="button"
+						class:active={unit === 'qty'}
+						onclick={() => (unit = 'qty')}
+						aria-label="Quantity"
+					>qty</button>
+				</div>
 				<input
 					type="number"
 					bind:value={item.quantity}
@@ -256,6 +293,7 @@
 		padding: var(--space-2) var(--space-3);
 		cursor: pointer;
 		font-size: var(--font-size-sm);
+		color: var(--color-text); /* light text in dark mode */
 	}
 
 	.billable-item-row__suggestion:hover {
@@ -295,5 +333,28 @@
 	.billable-item-row__suggestion:hover,
 	.billable-item-row__suggestion:focus {
 		background: var(--color-surface-alt);
+	}
+
+	/* Unit toggle for hour/qty next to quantity input */
+	.billable-item-row__unit-toggle {
+		display: flex;
+		font-size: 9px;
+		line-height: 1;
+		border: 1px solid var(--color-border);
+		border-radius: 3px;
+		overflow: hidden;
+		margin-right: 4px;
+	}
+	.billable-item-row__unit-toggle button {
+		padding: 1px 4px;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		color: var(--color-text-muted);
+		font-weight: 600;
+	}
+	.billable-item-row__unit-toggle button.active {
+		background: var(--color-primary);
+		color: white;
 	}
 </style>

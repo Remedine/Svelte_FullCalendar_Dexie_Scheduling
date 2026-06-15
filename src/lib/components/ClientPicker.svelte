@@ -42,10 +42,14 @@
 		}
 	});
 
-	// Auto open when typing
+	// Auto open when typing (but not when searchTerm exactly matches a selected client after programmatic selection)
 	$effect(() => {
-		if (searchTerm.trim() && !isOpen) {
-			isOpen = true;
+		const term = searchTerm.trim();
+		if (term && !isOpen) {
+			const selName = selectedClient?.name?.toLowerCase().trim();
+			if (!selName || term.toLowerCase() !== selName) {
+				isOpen = true;
+			}
 		}
 	});
 
@@ -240,8 +244,6 @@
 </script>
 
 <div class="client-picker">
-	<label for={id} class="sr-only">Client</label>
-
 	<div class="client-picker__input-wrapper">
 		<input
 			bind:this={inputEl}
