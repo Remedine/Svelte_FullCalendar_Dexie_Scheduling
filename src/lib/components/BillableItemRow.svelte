@@ -102,8 +102,8 @@
 </script>
 
 <div class="billable-item-row">
-	<div class="billable-item-row__grid">
-		<!-- Column 1, Row 1: Description -->
+	<!-- Line 1: Billable Item title + X remove (same layout as before) -->
+	<div class="billable-item-row__title-line">
 		<div class="billable-item-row__title">
 			<input
 				type="text"
@@ -131,7 +131,6 @@
 			{/if}
 		</div>
 
-		<!-- Column 2, Row 1: Delete Button -->
 		<button
 			type="button"
 			class="billable-item-row__remove"
@@ -140,47 +139,48 @@
 		>
 			✕
 		</button>
+	</div>
 
-		<!-- Column 1, Row 2: Price + Qty -->
-		<div class="billable-item-row__price-qty">
-			<div class="billable-item-row__price">
-				<span class="billable-item-row__currency">{unit === 'hour' ? '$' : '#'}</span>
-				<input
-					type="number"
-					bind:value={item.price}
-					placeholder="0.00"
-					class="billable-item-row__input billable-item-row__input--price input"
-					bind:this={priceInputEl}
-					step="0.01"
-				/>
-			</div>
-
-			<div class="billable-item-row__quantity">
-				<!-- Toggle for hour/qty, defaults inherited from options for the selected billable -->
-				<div class="billable-item-row__unit-toggle">
-					<button
-						type="button"
-						class:active={unit === 'hour'}
-						onclick={() => (unit = 'hour')}
-						aria-label="Hours"
-					>hr</button>
-					<button
-						type="button"
-						class:active={unit === 'qty'}
-						onclick={() => (unit = 'qty')}
-						aria-label="Quantity"
-					>qty</button>
-				</div>
-				<input
-					type="number"
-					bind:value={item.quantity}
-					min="1"
-					class="billable-item-row__input billable-item-row__input--qty input"
-				/>
-			</div>
+	<!-- Line 2: amount input | Per Qty/Per Hour toggle | symbol | price input | total (styled similar to options page) -->
+	<div class="billable-item-row__details-line">
+		<div class="billable-item-row__amount">
+			<input
+				type="number"
+				bind:value={item.quantity}
+				min="1"
+				class="billable-item-row__input billable-item-row__input--qty input"
+			/>
 		</div>
 
-		<!-- Column 2, Row 2: Total -->
+		<div class="billable-item-row__type-toggle">
+			<button
+				type="button"
+				class:active={unit === 'qty'}
+				onclick={() => (unit = 'qty')}
+			>
+				Per Qty
+			</button>
+			<button
+				type="button"
+				class:active={unit === 'hour'}
+				onclick={() => (unit = 'hour')}
+			>
+				Per Hour
+			</button>
+		</div>
+
+		<div class="billable-item-row__price">
+			<span class="billable-item-row__currency">{unit === 'hour' ? '$' : '#'}</span>
+			<input
+				type="number"
+				bind:value={item.price}
+				placeholder="0.00"
+				class="billable-item-row__input billable-item-row__input--price input"
+				bind:this={priceInputEl}
+				step="0.01"
+			/>
+		</div>
+
 		<div class="billable-item-row__total">
 			<strong>${(item.total || 0).toFixed(2)}</strong>
 		</div>
@@ -206,59 +206,93 @@
 		box-shadow: var(--shadow-sm);
 	}
 
-	.billable-item-row__grid {
-		display: grid;
-		grid-template-columns: 70% 30%;
-		grid-template-rows: auto auto;
-		gap: var(--space-3) var(--space-5);
-		align-items: start;
+	/* Title line: full width input + X on right (like options title full, controls) */
+	.billable-item-row__title-line {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-bottom: var(--space-2);
 	}
 
 	.billable-item-row__title {
 		position: relative;
-		grid-column: 1;
-		grid-row: 1;
+		flex: 1;
 		min-width: 0;
 	}
 
 	.billable-item-row__remove {
-		grid-column: 2;
-		grid-row: 1;
-		justify-self: end;
-		align-self: start;
 		background: none;
 		border: none;
 		color: var(--color-danger);
 		font-size: var(--font-size-2xl);
 		cursor: pointer;
-		width: 44px;
-		height: 44px;
+		width: 32px;
+		height: 32px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		border-radius: var(--radius-md);
+		flex-shrink: 0;
 	}
 
 	.billable-item-row__remove:hover {
 		background: var(--color-danger-soft);
 	}
 
-	.billable-item-row__price-qty {
-		grid-column: 1;
-		grid-row: 2;
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: var(--space-3);
+	/* Details line: amount | toggle | symbol | price | total  (flex, similar to options type + price row) */
+	.billable-item-row__details-line {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.billable-item-row__amount {
+		flex-shrink: 0;
+	}
+
+	.billable-item-row__amount input {
+		width: 60px;
+		text-align: right;
+	}
+
+	/* Per Qty / Per Hour toggle styled similar to options .billable-item__type-toggle */
+	.billable-item-row__type-toggle {
+		display: flex;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+
+	.billable-item-row__type-toggle button {
+		padding: var(--space-1) var(--space-2);
+		font-size: var(--font-size-xs);
+		background: var(--color-surface);
+		border: none;
+		cursor: pointer;
+		color: var(--color-text);
+		white-space: nowrap;
+	}
+
+	.billable-item-row__type-toggle button.active {
+		background: var(--color-primary);
+		color: white;
+	}
+
+	.billable-item-row__price {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		flex-shrink: 0;
 	}
 
 	.billable-item-row__total {
-		grid-column: 2;
-		grid-row: 2;
-		text-align: right;
+		margin-left: auto;
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
 		font-size: var(--font-size-xl);
-		align-self: end;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.billable-item-row__input {
@@ -273,21 +307,7 @@
 		text-align: right;
 	}
 
-	.billable-item-row__currency,
-	.billable-item-row__qty-label {
-		position: absolute;
-		left: var(--space-3);
-		top: 50%;
-		transform: translateY(-50%);
-		color: var(--color-text-muted);
-		font-weight: var(--font-weight-medium);
-		pointer-events: none;
-	}
-
-	.billable-item-row__price,
-	.billable-item-row__quantity {
-		position: relative;
-	}
+	/* (currency now inline in .billable-item-row__price; no absolute positioning needed) */
 
 	.billable-item-row__suggestions {
 		position: absolute;
@@ -350,26 +370,5 @@
 		background: var(--color-surface-alt);
 	}
 
-	/* Unit toggle for hour/qty next to quantity input */
-	.billable-item-row__unit-toggle {
-		display: flex;
-		font-size: 9px;
-		line-height: 1;
-		border: 1px solid var(--color-border);
-		border-radius: 3px;
-		overflow: hidden;
-		margin-right: 4px;
-	}
-	.billable-item-row__unit-toggle button {
-		padding: 1px 4px;
-		background: transparent;
-		border: none;
-		cursor: pointer;
-		color: var(--color-text-muted);
-		font-weight: 600;
-	}
-	.billable-item-row__unit-toggle button.active {
-		background: var(--color-primary);
-		color: white;
-	}
+	/* (unit/type toggle styles now under .billable-item-row__type-toggle above, matching options) */
 </style>
