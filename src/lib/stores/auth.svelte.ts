@@ -33,25 +33,93 @@ export function setCurrentUser(user: any | null) {
 	}
 }
 
-// Auto-restore session
+// Auto-restore session (robust to Dexie dedup/cleanup and hybrid PB/local records).
+// On hard refresh of protected pages (e.g. /calendar) the previous logic could fail to
+// find the exact savedId after pullUsersFromServer / cleanupDuplicateUsers deleted a
+// duplicate record, causing loading=false + !authenticated → unwanted redirect to login.
 if (browser) {
-	const savedId = localStorage.getItem('currentUserId');
+	(async () => {
+		let user: any = null;
+		const savedId = localStorage.getItem('currentUserId');
 
-	if (savedId) {
-		// Dynamic import to break circular dependency with $lib/db
-		import('$lib/db').then(({ db }) => {
-			db.users.get(savedId).then((user) => {
-				if (user && user.active) {
-					auth.currentUser = user;
-					auth.isAuthenticated = true;
+		try {
+			const { db } = await import('$lib/db');
+
+			if (savedId) {
+				user = await db.users.get(savedId);
+			}
+
+			if (!user) {
+				// Fallback: use PocketBase session (cookie/auth token is the real source of "logged in")
+				// as the truth on refresh. Lookup by pbId or email so we survive id changes from dedup.
+				try {
+					const { pb } = await import('$lib/db/pb');
+					if (pb.authStore.isValid) {
+						const m = pb.authStore.model;
+						if (m?.id) {
+							user =
+								(await db.users.where('pbId').equals(m.id).first()) ||
+								(await db.users.get(m.id));
+						}
+						if (!user && m?.email) {
+							user = await db.users.where('email').equalsIgnoreCase(m.email).first();
+						}
+						// As last resort, synthesize a minimal user from PB so guard doesn't redirect.
+						// The next pull on calendar load will enrich the Dexie record.
+						if (!user && m) {
+							user = {
+								id: m.id,
+								pbId: m.id,
+								email: m.email || '',
+								name: m.name || '',
+								firstName: m.firstName || '',
+								lastName: m.lastName || '',
+								role: m.role || 'crew',
+								active: m.active ?? true,
+								verified: !!m.verified,
+								forcePhotoUpdate: !!m.forcePhotoUpdate,
+								photo: m.photo || undefined,
+								createdAt: new Date(m.created || Date.now()),
+								updatedAt: new Date(m.updated || Date.now())
+							};
+							// Persist it so future restores and UI have a Dexie record
+							await db.users.put(user);
+						}
+					}
+				} catch (pbErr) {
+					// PB not available yet or error — fall through
+					console.warn('[auth] PB fallback during restore failed', pbErr);
 				}
-				auth.loading = false;
-			});
-		});
-	} else {
-		auth.loading = false;
-		auth.isAuthenticated = false;
-	}
+			}
+
+			if (user && user.active !== false) {
+				auth.currentUser = user;
+				auth.isAuthenticated = true;
+				// Ensure localStorage points at the surviving Dexie id (important after dedups)
+				if (user.id) {
+					localStorage.setItem('currentUserId', String(user.id));
+				}
+			} else {
+				auth.currentUser = null;
+				auth.isAuthenticated = false;
+				// Only clear the id if we truly have no PB session either
+				try {
+					const { pb } = await import('$lib/db/pb');
+					if (!pb.authStore.isValid) {
+						localStorage.removeItem('currentUserId');
+					}
+				} catch {
+					localStorage.removeItem('currentUserId');
+				}
+			}
+		} catch (e) {
+			console.warn('[auth] restore failed', e);
+			auth.currentUser = null;
+			auth.isAuthenticated = false;
+		} finally {
+			auth.loading = false;
+		}
+	})();
 } else {
 	auth.loading = false;
 	auth.isAuthenticated = false;
