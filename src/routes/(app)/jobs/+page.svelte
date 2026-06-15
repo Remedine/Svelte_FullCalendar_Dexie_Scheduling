@@ -659,6 +659,7 @@
 	}
 	.job-page__meta {
 		display: flex;
+		flex-wrap: wrap;
 		gap: var(--space-3);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
@@ -754,9 +755,12 @@
 	@media (max-width: 768px) {
 		.job-page {
 			padding: var(--space-3) var(--space-2);
+			width: 100%;
+			box-sizing: border-box;
+			flex: 1; /* help fill main-content flex column so bottom nav padding is respected and nav stays anchored at screen bottom */
 		}
 		.job-page__search {
-			min-width: 160px;
+			min-width: 140px; /* tighter for very small screens to avoid forcing horizontal overflow */
 		}
 		.job-page__card {
 			padding: var(--space-2) var(--space-3);
@@ -766,6 +770,9 @@
 		}
 		.job-page__notes {
 			margin-top: var(--space-1);
+		}
+		.job-page__meta {
+			gap: var(--space-2);
 		}
 	}
 </style>
