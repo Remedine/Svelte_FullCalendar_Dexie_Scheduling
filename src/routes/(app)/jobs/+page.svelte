@@ -30,15 +30,19 @@
 	const PAGE_SIZE = 25;
 
 	// Filter state (rich surface as specified)
-	let activeQuick = $state<'all' | 'upcoming' | 'past' | 'this-month'>('all');
+	// Primary quick controls (reorganized per request)
+	let quickUpcomingPast = $state<'upcoming' | 'past' | null>(null);
+	let quickTimeWindow = $state<'this-month' | 'this-week' | null>(null);
+	let showCancelled = $state(false); // true = show/include cancelled (replaces old checkbox)
 	let searchTerm = $state('');
 	let dateFrom = $state('');
 	let dateTo = $state('');
-	let includeCancelled = $state(false);
 	let selectedAreas = $state<string[]>([]);
 	let minAmount = $state<number | null>(null);
 	let maxAmount = $state<number | null>(null);
-	let hasInvoiceFilter = $state<'all' | 'has' | 'none'>('all');
+	let invoiceToggle = $state<'has' | 'none' | null>(null); // has invoice / no invoice toggle (replaces old facet buttons)
+	// More Filters collapsible state (default closed, persisted)
+	let moreFiltersOpen = $state(false);
 
 	// )=- invoiceMap kept for has-invoice facets (boolean). Added invoiceStatus for richer cards/facets.
 	// Now includes status + isOverdue so we can render overdue visuals (red badge/pill) on cards per Phase 7.
@@ -140,10 +144,21 @@
 		}
 	});
 
+	// Persist "More Filters" open state (default closed everywhere, remember last user preference)
+	$effect(() => {
+		const saved = localStorage.getItem('jobsMoreFiltersOpen');
+		moreFiltersOpen = saved !== null ? saved === 'true' : false;
+	});
+	$effect(() => {
+		localStorage.setItem('jobsMoreFiltersOpen', String(moreFiltersOpen));
+	});
+
 	// )=- Rich derived filtered + paginated list.
-	// Search is deliberately broad (title, notes, crew, client name/address, billable titles).
-	// Facets: areas (multi), amount range, has-invoice, includeCancelled.
-	// Pagination applied after filtering (per Phase 5 decision).
+	// Search is the primary (kept prominent on own line).
+	// Quick row: All + Upcoming/Past toggle + ThisMonth/ThisWeek toggle + Show/Hide Cancel toggle + Reset.
+	// More Filters (collapsible): Areas (tokens), Date range, Financial (amounts + invoice toggle).
+	// All quick presets combine with manual filters in More Filters.
+	// Pagination applied after filtering.
 	// )=- Legacy/imperfect data: code uses extensive || guards and optional chaining so old imported jobs
 	// (with importSource, missing billables/area/crew, partial fields) don't break display, search or filters.
 	// 'imperfection allowed' is a core requirement (see spec Phase 10 and Phase 7 'Test with imperfect legacy-shaped data').
@@ -176,15 +191,23 @@
 			});
 		}
 
-		// Quick presets
+		// Quick presets (reorganized toggles - combine with manual date range in More Filters)
 		const now = new Date();
 		const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-		if (activeQuick === 'upcoming') {
+		if (quickUpcomingPast === 'upcoming') {
 			result = result.filter((j) => new Date(j.start) >= now);
-		} else if (activeQuick === 'past') {
+		} else if (quickUpcomingPast === 'past') {
 			result = result.filter((j) => new Date(j.start) < now);
-		} else if (activeQuick === 'this-month') {
+		}
+
+		if (quickTimeWindow === 'this-month') {
 			result = result.filter((j) => new Date(j.start) >= startOfMonth);
+		} else if (quickTimeWindow === 'this-week') {
+			// This Week = current week starting Sunday (common convention; easy to adjust)
+			const startOfWeek = new Date(now);
+			startOfWeek.setDate(now.getDate() - now.getDay());
+			startOfWeek.setHours(0, 0, 0, 0);
+			result = result.filter((j) => new Date(j.start) >= startOfWeek);
 		}
 
 		// Date range
@@ -197,8 +220,8 @@
 			result = result.filter((j) => new Date(j.start) <= to);
 		}
 
-		// Cancelled facet
-		if (!includeCancelled) {
+		// Cancelled (now a Show/Hide toggle - combines with other filters)
+		if (!showCancelled) {
 			result = result.filter((j) => j.status !== 'cancelled');
 		}
 
@@ -215,11 +238,16 @@
 		if (maxAmount != null)
 			result = result.filter((j) => (j.totalAmount || 0) <= (maxAmount as number));
 
-		// Has invoice facet (uses the map we built)
-		if (hasInvoiceFilter !== 'all') {
+		// Invoice presence (now a Has/No toggle like other quick toggles, combines with presets)
+		if (invoiceToggle === 'has') {
 			result = result.filter((j) => {
 				const has = j.id ? invoiceMap[j.id] : false;
-				return hasInvoiceFilter === 'has' ? has : !has;
+				return has;
+			});
+		} else if (invoiceToggle === 'none') {
+			result = result.filter((j) => {
+				const has = j.id ? invoiceMap[j.id] : false;
+				return !has;
 			});
 		}
 
@@ -233,8 +261,23 @@
 
 	const totalPages = $derived(Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE)));
 
-	function setQuick(q: typeof activeQuick) {
-		activeQuick = q;
+	// Quick toggle helpers (cycle between states or clear via "All")
+	function toggleUpcomingPast() {
+		if (quickUpcomingPast === null) quickUpcomingPast = 'upcoming';
+		else if (quickUpcomingPast === 'upcoming') quickUpcomingPast = 'past';
+		else quickUpcomingPast = null;
+		page = 1;
+	}
+
+	function toggleTimeWindow() {
+		if (quickTimeWindow === null) quickTimeWindow = 'this-month';
+		else if (quickTimeWindow === 'this-month') quickTimeWindow = 'this-week';
+		else quickTimeWindow = null;
+		page = 1;
+	}
+
+	function toggleShowCancelled() {
+		showCancelled = !showCancelled;
 		page = 1;
 	}
 
@@ -249,14 +292,16 @@
 
 	function resetFilters() {
 		searchTerm = '';
-		activeQuick = 'all';
+		quickUpcomingPast = null;
+		quickTimeWindow = null;
+		showCancelled = false;
 		dateFrom = '';
 		dateTo = '';
-		includeCancelled = false;
 		selectedAreas = [];
 		minAmount = null;
 		maxAmount = null;
-		hasInvoiceFilter = 'all';
+		invoiceToggle = null;
+		moreFiltersOpen = false; // optional: close on full reset
 		page = 1;
 	}
 
@@ -294,20 +339,11 @@
 		</button>
 	</header>
 
-	<!-- Rich filters (Phase 5) -->
+	<!-- Primary filters: search (primary) on its own line, then quick row with new toggles + reset.
+	     Per clarification: search own line; quicks (All + 3 toggles) + reset can wrap to second line on small screens.
+	     Toggles are pill-style, highlight when selected, show text for the *next* option.
+	     "All" clears the three toggles. Reset does full reset of everything. -->
 	<div class="job-page__filters">
-		<!-- Quick presets -->
-		<div class="job-page__quick">
-			<button class:active={activeQuick === 'all'} onclick={() => setQuick('all')}>All</button>
-			<button class:active={activeQuick === 'upcoming'} onclick={() => setQuick('upcoming')}
-				>Upcoming</button
-			>
-			<button class:active={activeQuick === 'past'} onclick={() => setQuick('past')}>Past</button>
-			<button class:active={activeQuick === 'this-month'} onclick={() => setQuick('this-month')}
-				>This Month</button
-			>
-		</div>
-
 		<input
 			type="text"
 			class="job-page__search"
@@ -315,64 +351,113 @@
 			bind:value={searchTerm}
 		/>
 
-		<div class="job-page__date-range">
-			<input type="date" bind:value={dateFrom} title="From date" />
-			<input type="date" bind:value={dateTo} title="To date" />
-		</div>
-
-		<label class="job-page__toggle">
-			<input type="checkbox" bind:checked={includeCancelled} /> Include cancelled
-		</label>
-
-		<button class="job-page__btn" onclick={resetFilters}>Reset</button>
-	</div>
-
-	<!-- Facets -->
-	<div class="job-page__facets">
-		<!-- Areas (use label + color from options, filter by id) -->
-		<div class="job-page__facet">
-			{#each areaOptions as area (area.id)}
-				<button
-					class="area-chip"
-					class:active={selectedAreas.includes(area.id)}
-					onclick={() => toggleArea(area.id)}
-					style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
-				>
-					{area.label}
-				</button>
-			{/each}
-		</div>
-
-		<!-- Amount range -->
-		<div class="job-page__facet job-page__amount">
-			<input type="number" placeholder="Min $" bind:value={minAmount} oninput={() => (page = 1)} />
-			<input type="number" placeholder="Max $" bind:value={maxAmount} oninput={() => (page = 1)} />
-		</div>
-
-		<!-- Invoice presence -->
-		<div class="job-page__facet">
+		<div class="job-page__quick-row">
+			<!-- All clears the quick toggles only (not full reset) -->
 			<button
-				class:active={hasInvoiceFilter === 'all'}
+				class="job-page__quick-pill"
+				class:active={quickUpcomingPast === null && quickTimeWindow === null && !showCancelled}
 				onclick={() => {
-					hasInvoiceFilter = 'all';
+					quickUpcomingPast = null;
+					quickTimeWindow = null;
+					showCancelled = false;
 					page = 1;
-				}}>All</button
-			>
+				}}
+			>All</button>
+
+			<!-- Upcoming/Past toggle: highlights when active, text shows next option -->
 			<button
-				class:active={hasInvoiceFilter === 'has'}
-				onclick={() => {
-					hasInvoiceFilter = 'has';
-					page = 1;
-				}}>Has Invoice</button
+				class="job-page__quick-pill"
+				class:active={quickUpcomingPast !== null}
+				onclick={toggleUpcomingPast}
 			>
+				{quickUpcomingPast === 'upcoming' ? 'Past' : 'Upcoming'}
+			</button>
+
+			<!-- This Month/This Week toggle -->
 			<button
-				class:active={hasInvoiceFilter === 'none'}
-				onclick={() => {
-					hasInvoiceFilter = 'none';
-					page = 1;
-				}}>No Invoice</button
+				class="job-page__quick-pill"
+				class:active={quickTimeWindow !== null}
+				onclick={toggleTimeWindow}
 			>
+				{quickTimeWindow === 'this-month' ? 'This Week' : 'This Month'}
+			</button>
+
+			<!-- Show/Hide Cancel toggle (replaces checkbox). Red outline when showing cancelled (per invoice modal cancel button style). -->
+			<button
+				class="job-page__quick-pill job-page__quick-pill--cancel"
+				class:active={showCancelled}
+				onclick={toggleShowCancelled}
+			>
+				{showCancelled ? 'Hide cancelled' : 'Show cancelled'}
+			</button>
+
+			<button class="job-page__btn" onclick={resetFilters}>Reset</button>
+
+			<!-- "More Filters" trigger - can sit next to reset or wrap to own line on small screens -->
+			<button
+				class="job-page__more-filters-trigger"
+				class:open={moreFiltersOpen}
+				onclick={() => (moreFiltersOpen = !moreFiltersOpen)}
+				aria-expanded={moreFiltersOpen}
+			>
+				More Filters {moreFiltersOpen ? '▾' : '▸'}
+			</button>
 		</div>
+
+		<!-- More Filters collapsible (default closed, remembers state).
+		     Three labeled groups on their own lines when open.
+		     Area tokens, Date filters, Financial (min/max + invoice toggle). -->
+		{#if moreFiltersOpen}
+			<div class="job-page__more-filters">
+				<!-- Area filters (tokens/chips - behavior unchanged) -->
+				<div class="job-page__filter-group">
+					<div class="job-page__filter-group-label">Areas</div>
+					<div class="job-page__facet">
+						{#each areaOptions as area (area.id)}
+							<button
+								class="area-chip"
+								class:active={selectedAreas.includes(area.id)}
+								onclick={() => toggleArea(area.id)}
+								style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
+							>
+								{area.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Date filters -->
+				<div class="job-page__filter-group">
+					<div class="job-page__filter-group-label">Date range</div>
+					<div class="job-page__date-range">
+						<input type="date" bind:value={dateFrom} title="From date" oninput={() => (page = 1)} />
+						<input type="date" bind:value={dateTo} title="To date" oninput={() => (page = 1)} />
+					</div>
+				</div>
+
+				<!-- Financial filters: amounts + Has/No invoice as toggle (like other quick toggles) -->
+				<div class="job-page__filter-group">
+					<div class="job-page__filter-group-label">Financial</div>
+					<div class="job-page__amount">
+						<input type="number" placeholder="Min $" bind:value={minAmount} oninput={() => (page = 1)} />
+						<input type="number" placeholder="Max $" bind:value={maxAmount} oninput={() => (page = 1)} />
+					</div>
+					<!-- Invoice toggle (Has / No) - styled as pill like the primary quick toggles -->
+					<button
+						class="job-page__quick-pill job-page__quick-pill--invoice"
+						class:active={invoiceToggle !== null}
+						onclick={() => {
+							if (invoiceToggle === null) invoiceToggle = 'has';
+							else if (invoiceToggle === 'has') invoiceToggle = 'none';
+							else invoiceToggle = null;
+							page = 1;
+						}}
+					>
+						{invoiceToggle === 'has' ? 'No invoice' : 'Has invoice'}
+					</button>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	{#if loading}
@@ -501,39 +586,101 @@
 
 	.job-page__filters {
 		display: flex;
-		gap: var(--space-3);
+		flex-direction: column;
+		gap: var(--space-2);
 		margin-bottom: var(--space-3);
-		flex-wrap: wrap;
-		align-items: center;
-	}
-	.job-page__quick {
-		display: flex;
-		gap: var(--space-1);
-	}
-	.job-page__quick button {
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--color-border-strong);
-		background: var(--color-surface);
-		border-radius: var(--radius-sm);
-		font-size: var(--font-size-xs);
-		cursor: pointer;
-		color: var(--color-text);
-	}
-	.job-page__quick button.active {
-		background: var(--color-primary);
-		color: white;
-		border-color: var(--color-primary);
 	}
 
+	/* Search is the primary filter - on its own line */
 	.job-page__search {
-		flex: 1;
-		min-width: 220px;
+		width: 100%;
 		padding: var(--space-2) var(--space-3);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
 		background: var(--color-surface);
 		color: var(--color-text);
+		font-size: var(--font-size-sm);
 	}
+
+	/* Quick row: All + toggles + Reset + More Filters trigger.
+	   Pills for the controls (use global primitives + local tweaks for mobile touch).
+	   Can wrap on small screens. */
+	.job-page__quick-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
+	/* Pill style quick controls (All + the three toggles). Use global button tokens where possible. */
+	.job-page__quick-pill {
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		border-radius: var(--radius-full); /* pill */
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		color: var(--color-text);
+		min-height: 36px; /* good touch target */
+		white-space: nowrap;
+	}
+	.job-page__quick-pill.active {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
+	}
+
+	/* Special red outline for the cancel (Show/Hide) toggle - inspired by cancel buttons in modals (e.g. invoice/job forms).
+	   Only when active (showing cancelled). */
+	.job-page__quick-pill--cancel.active {
+		border-color: var(--color-danger);
+		color: var(--color-danger-emphasis);
+		background: var(--color-danger-soft);
+	}
+
+	/* The More Filters trigger (text + indicator). Placed at end of quick row (or wraps). */
+	.job-page__more-filters-trigger {
+		padding: var(--space-1) var(--space-2);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		background: none;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		min-height: 36px;
+	}
+	.job-page__more-filters-trigger.open {
+		color: var(--color-primary);
+		border-color: var(--color-primary);
+	}
+
+	/* The expanded More Filters content: three labeled groups, each on own line. */
+	.job-page__more-filters {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		padding-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
+	}
+
+	.job-page__filter-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.job-page__filter-group-label {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	/* Reuse/adapt existing date and amount for the groups */
 	.job-page__date-range {
 		display: flex;
 		gap: var(--space-1);
@@ -545,42 +692,25 @@
 		font-size: var(--font-size-xs);
 		background: var(--color-surface);
 		color: var(--color-text);
-	}
-	.job-page__toggle {
-		font-size: var(--font-size-xs);
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		color: var(--color-text-muted);
+		min-width: 140px;
 	}
 
-	.job-page__btn {
-		padding: var(--space-2) var(--space-4);
-		border-radius: var(--radius-sm);
-		font-weight: var(--font-weight-medium);
-		cursor: pointer;
+	.job-page__amount {
+		display: flex;
+		gap: var(--space-1);
+		align-items: center;
+	}
+	.job-page__amount input {
+		width: 90px;
+		padding: var(--space-1);
 		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
 		background: var(--color-surface);
-		font-size: var(--font-size-sm);
 		color: var(--color-text);
 	}
-	.job-page__btn--primary {
-		background: var(--color-primary);
-		color: white;
-		border-color: var(--color-primary);
-	}
 
-	.job-page__facets {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		margin-bottom: var(--space-4);
-	}
-	.job-page__facet {
-		display: flex;
-		gap: var(--space-1);
-		align-items: center;
-	}
+	/* Reuse area chips (unchanged behavior) */
 	.area-chip {
 		padding: var(--space-1) var(--space-2);
 		border: 1px solid var(--color-border-strong);
@@ -595,14 +725,30 @@
 		color: white;
 		border-color: var(--color-primary);
 	}
-	.job-page__amount input {
-		width: 80px;
-		padding: var(--space-1);
-		border: 1px solid var(--color-border-strong);
+
+	/* Invoice toggle inside financial group - pill like the primary quick toggles */
+	.job-page__quick-pill--invoice.active {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
+	}
+
+	/* Legacy support for global .job-page__btn (Reset, Sync etc) */
+	.job-page__btn {
+		padding: var(--space-2) var(--space-4);
 		border-radius: var(--radius-sm);
-		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+		border: 1px solid var(--color-border-strong);
 		background: var(--color-surface);
+		font-size: var(--font-size-sm);
 		color: var(--color-text);
+		min-height: 36px; /* touch */
+	}
+	.job-page__btn--primary {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
 	}
 
 	.job-page__list {
@@ -750,17 +896,27 @@
 		margin: 0 0 var(--space-2);
 	}
 
-	/* Mobile responsive for token cohesion and tighter layout on small screens.
-	   Matches the pattern used on clients, options, crew pages. */
+	/* Mobile: search on own line (primary). Quick row (pills + reset + more-filters trigger) wraps as needed.
+	   Touch targets respected (min 36-44px). More Filters content stacks cleanly. */
 	@media (max-width: 768px) {
 		.job-page {
 			padding: var(--space-3) var(--space-2);
 			width: 100%;
 			box-sizing: border-box;
-			flex: 1; /* help fill main-content flex column so bottom nav padding is respected and nav stays anchored at screen bottom */
+			flex: 1;
 		}
 		.job-page__search {
-			min-width: 140px; /* tighter for very small screens to avoid forcing horizontal overflow */
+			/* search stays prominent/full on mobile */
+		}
+		.job-page__quick-row {
+			gap: var(--space-1);
+		}
+		.job-page__quick-pill,
+		.job-page__btn,
+		.job-page__more-filters-trigger {
+			font-size: 11px;
+			padding: 4px 8px;
+			min-height: 36px;
 		}
 		.job-page__card {
 			padding: var(--space-2) var(--space-3);
@@ -773,6 +929,12 @@
 		}
 		.job-page__meta {
 			gap: var(--space-2);
+		}
+		.job-page__more-filters {
+			gap: var(--space-2);
+		}
+		.job-page__filter-group-label {
+			font-size: 10px;
 		}
 	}
 </style>
