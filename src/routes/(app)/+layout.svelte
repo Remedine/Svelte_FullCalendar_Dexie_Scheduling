@@ -61,12 +61,8 @@
 </script>
 
 <div class="app-layout">
-	<!-- Top Navigation Bar -->
+	<!-- Top Navigation Bar (desktop only; brand removed per request for cleaner feel) -->
 	<header class="top-nav">
-		<div class="top-nav__brand">
-			<h1>Capital City Windows</h1>
-		</div>
-
 		<nav class="top-nav__menu">
 			<a
 				href="/calendar"
@@ -150,47 +146,6 @@
 		{:else}
 			{@render children()}
 		{/if}
-
-		<!-- Mobile app chrome footer (beneath content on mobile).
-		     On mobile: "Capital City Windows" + dark mode toggle + avatar (profile/logout).
-		     Placed in flow after page content so it sits below the calendar.
-		     Hidden on desktop. The fixed bottom tab bar stays below it. -->
-		<footer class="mobile-app-footer">
-			<span class="mobile-app-footer__brand">Capital City Windows</span>
-
-			<div class="mobile-app-footer__controls">
-				<ThemeToggle />
-
-				{#if auth.currentUser}
-					<div class="mobile-app-footer__avatar-wrapper">
-						<div class="mobile-app-footer__avatar">
-							{#if auth.currentUser.photo}
-								<img
-									src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
-									alt="Profile"
-									class="mobile-app-footer__avatar-img"
-								/>
-							{:else}
-								<span class="mobile-app-footer__avatar-placeholder">
-									{(auth.currentUser.firstName || auth.currentUser.name || 'U')
-										.slice(0, 1)
-										.toUpperCase()}
-								</span>
-							{/if}
-						</div>
-						<div class="mobile-app-footer__user-menu">
-							<a href="/profile" class="mobile-app-footer__user-menu-item">Profile</a>
-							<button
-								onclick={handleLogout}
-								class="mobile-app-footer__user-menu-item mobile-app-footer__user-menu-item--logout"
-							>
-								Logout
-							</button>
-						</div>
-					</div>
-				{/if}
-			</div>
-		</footer>
 	</main>
 
 	<!-- Bottom tab bar (mobile-first solution for wide menu problem).
@@ -251,6 +206,42 @@
 				<span class="bottom-nav__label">Options</span>
 			</a>
 		{/if}
+
+		<!-- Mobile-only: avatar (with profile/logout menu) + theme toggle stacked under it, integrated into bottom nav bar.
+		     Toggle placed directly under the avatar. No separate footer or brand text. -->
+		{#if auth.currentUser}
+			<div class="bottom-nav__user">
+				<div class="bottom-nav__avatar-wrapper">
+					<div class="bottom-nav__avatar">
+						{#if auth.currentUser.photo}
+							<img
+								src={getUserPhotoSrc(auth.currentUser.photo, auth.currentUser)}
+								alt="Profile"
+								class="bottom-nav__avatar-img"
+							/>
+						{:else}
+							<span class="bottom-nav__avatar-placeholder">
+								{(auth.currentUser.firstName || auth.currentUser.name || 'U')
+									.slice(0, 1)
+									.toUpperCase()}
+							</span>
+						{/if}
+					</div>
+					<div class="bottom-nav__user-menu">
+						<a href="/profile" class="bottom-nav__user-menu-item">Profile</a>
+						<button
+							onclick={handleLogout}
+							class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
+						>
+							Logout
+						</button>
+					</div>
+				</div>
+				<div class="bottom-nav__theme-toggle">
+					<ThemeToggle />
+				</div>
+			</div>
+		{/if}
 	</nav>
 
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
@@ -287,12 +278,7 @@
 		box-shadow: var(--shadow-sm);
 	}
 
-	.top-nav__brand h1 {
-		margin: 0;
-		font-size: var(--font-size-2xl);
-		font-weight: var(--font-weight-bold);
-		color: var(--color-text);
-	}
+	/* Brand removed on all sizes per request to reduce clunkiness. Top bar is now just menu + user controls on desktop. */
 
 	/* Wide horizontal menu: hidden on mobile (bottom tab bar takes over per plan) */
 	.top-nav__menu {
@@ -305,7 +291,7 @@
 			display: none;
 		}
 		/* Completely hide the top navigation bar on mobile.
-		   Branding, theme toggle and avatar/profile/logout are now in the mobile-app-footer below the content. */
+		   Avatar (profile/logout) + theme toggle are now integrated into the bottom tab bar (toggle placed under avatar). */
 		.top-nav {
 			display: none;
 		}
@@ -463,8 +449,8 @@
 			display: flex;
 		}
 
-		/* Reserve space at bottom of main-content so the in-flow mobile-app-footer + fixed tabs don't get covered.
-		   The footer itself sits in normal flow right after the page content (e.g. the calendar). */
+		/* Reserve space at bottom of main-content for the fixed bottom tab bar (now also contains user avatar + toggle on mobile).
+		   Content should not be hidden behind the fixed nav. */
 		.main-content {
 			display: flex;
 			flex-direction: column;
@@ -472,6 +458,11 @@
 			/* allow tall page content (e.g. full mobile calendar with all time slots) so scrolling is at page level */
 			height: auto;
 			min-height: 100dvh;
+		}
+
+		/* Ensure the bottom-nav user section (avatar+toggle) doesn't push tabs too much; they share remaining space */
+		.bottom-nav__tab {
+			flex: 1;
 		}
 	}
 
@@ -511,54 +502,33 @@
 		letter-spacing: 0.2px;
 	}
 
-	/* ============================================
-	   MOBILE APP CHROME FOOTER
-	   Shows "Capital City Windows" + ThemeToggle + avatar (profile/logout)
-	   beneath the main content on phones. Anchored as a persistent footer.
-	   Hidden on desktop. Complements (does not replace) the bottom tab nav.
-	   BEM: mobile-app-footer, etc.
-	   ============================================ */
-	.mobile-app-footer {
-		display: none; /* desktop hidden */
-	}
-
+	/* Mobile user section integrated into bottom nav (avatar + toggle under it).
+	   Avatar menu appears above on tap/hover. Toggle sized compact and placed directly below avatar.
+	   No separate footer or "Capital City Windows" brand (removed for cleaner feel). */
 	@media (max-width: 768px) {
-		.mobile-app-footer {
-			display: flex;
+		.bottom-nav {
 			align-items: center;
-			justify-content: space-between;
-			gap: var(--space-2);
-			padding: var(--space-2) var(--space-3);
-			background: var(--color-surface);
-			border-top: 1px solid var(--color-border);
-			box-shadow: 0 -1px 4px rgb(0 0 0 / 0.04);
-			font-size: var(--font-size-xs);
-			color: var(--color-text-muted);
+			padding: 0 4px 0 0;
+		}
+
+		.bottom-nav__user {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			margin-left: 4px;
 			flex-shrink: 0;
+			width: 34px;
 		}
 
-		.mobile-app-footer__brand {
-			font-weight: var(--font-weight-semibold);
-			color: var(--color-text);
-			font-size: var(--font-size-sm);
-			white-space: nowrap;
-		}
-
-		.mobile-app-footer__controls {
-			display: flex;
-			align-items: center;
-			gap: var(--space-2);
-		}
-
-		/* Compact avatar in the footer (slightly smaller than top) */
-		.mobile-app-footer__avatar-wrapper {
+		.bottom-nav__avatar-wrapper {
 			position: relative;
 			cursor: pointer;
 		}
 
-		.mobile-app-footer__avatar {
-			width: 26px;
-			height: 26px;
+		.bottom-nav__avatar {
+			width: 28px;
+			height: 28px;
 			border-radius: 50%;
 			overflow: hidden;
 			border: 1px solid var(--color-border);
@@ -566,21 +536,21 @@
 			flex-shrink: 0;
 		}
 
-		.mobile-app-footer__avatar-img,
-		.mobile-app-footer__avatar-placeholder {
+		.bottom-nav__avatar-img,
+		.bottom-nav__avatar-placeholder {
 			width: 100%;
 			height: 100%;
 			object-fit: cover;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			font-size: 10px;
+			font-size: 11px;
 			font-weight: 700;
 			color: var(--color-surface);
 			background: var(--color-text-muted);
 		}
 
-		.mobile-app-footer__user-menu {
+		.bottom-nav__user-menu {
 			position: absolute;
 			bottom: calc(100% + 4px);
 			right: 0;
@@ -588,44 +558,65 @@
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
 			box-shadow: var(--shadow-md);
-			min-width: 120px;
+			min-width: 110px;
 			z-index: var(--z-dropdown);
 			display: none;
 			flex-direction: column;
 		}
 
-		.mobile-app-footer__avatar-wrapper:hover .mobile-app-footer__user-menu,
-		.mobile-app-footer__avatar-wrapper:focus-within .mobile-app-footer__user-menu {
+		.bottom-nav__avatar-wrapper:hover .bottom-nav__user-menu,
+		.bottom-nav__avatar-wrapper:focus-within .bottom-nav__user-menu {
 			display: flex;
 		}
 
-		.mobile-app-footer__user-menu-item {
+		.bottom-nav__user-menu-item {
 			display: block;
-			padding: 6px 12px;
+			padding: 6px 10px;
 			font-size: var(--font-size-sm);
 			color: var(--color-text);
 			text-decoration: none;
 			white-space: nowrap;
-		}
-
-		.mobile-app-footer__user-menu-item:hover {
-			background: var(--color-surface-alt);
-		}
-
-		.mobile-app-footer__user-menu-item--logout {
-			color: var(--color-danger);
-			border-top: 1px solid var(--color-border);
 			background: none;
+			border: none;
 			width: 100%;
 			text-align: left;
 			cursor: pointer;
 		}
 
-		.mobile-app-footer__user-menu-item--logout:hover {
+		.bottom-nav__user-menu-item:hover {
+			background: var(--color-surface-alt);
+		}
+
+		.bottom-nav__user-menu-item--logout {
+			color: var(--color-danger);
+			border-top: 1px solid var(--color-border);
+		}
+
+		.bottom-nav__user-menu-item--logout:hover {
 			background: var(--color-danger-soft);
 		}
 
-		/* When footer is present we already padded main-content for bottom-nav;
-		   footer itself has margin-bottom to sit above the tabs. */
+		.bottom-nav__theme-toggle {
+			margin-top: 1px;
+		}
+
+		/* Compact the ThemeToggle when inside bottom nav on mobile */
+		.bottom-nav .theme-toggle__btn {
+			width: 18px;
+			height: 18px;
+			background: transparent;
+			border: none;
+			padding: 0;
+		}
+
+		.bottom-nav .theme-toggle__btn svg {
+			width: 14px;
+			height: 14px;
+		}
+
+		.bottom-nav .theme-toggle__btn:hover {
+			background: var(--color-surface-alt);
+			border: 1px solid var(--color-border);
+		}
 	}
 </style>
