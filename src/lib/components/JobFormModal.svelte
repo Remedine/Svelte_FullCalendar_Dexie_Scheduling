@@ -701,4 +701,14 @@
 		border: none;
 		cursor: pointer;
 	}
+
+	/* Mobile tweaks for job form modal title (per request): reduce height by minimizing margin/padding,
+	   slightly smaller font. Keeps a few pixels for visual breathing room. Desktop unchanged. */
+	@media (max-width: 768px) {
+		.new-job-modal__title {
+			margin: 0 0 2px 0;
+			padding: 2px var(--space-2) 0;
+			font-size: var(--font-size-lg);
+		}
+	}
 </style>
