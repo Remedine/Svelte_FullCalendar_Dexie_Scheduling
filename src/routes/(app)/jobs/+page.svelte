@@ -30,9 +30,9 @@
 	const PAGE_SIZE = 25;
 
 	// Filter state (rich surface as specified)
-	// Primary quick controls (reorganized per request)
-	let quickUpcomingPast = $state<'upcoming' | 'past' | null>(null);
-	let quickTimeWindow = $state<'this-month' | 'this-week' | null>(null);
+	// Primary quick segmented controls
+	let quickTimeFilter = $state<'all' | 'upcoming' | 'past'>('all');
+	let quickDateWindow = $state<'all' | 'this-month' | 'this-week'>('all');
 	let showCancelled = $state(false); // true = show/include cancelled (replaces old checkbox)
 	let searchTerm = $state('');
 	let dateFrom = $state('');
@@ -40,7 +40,7 @@
 	let selectedAreas = $state<string[]>([]);
 	let minAmount = $state<number | null>(null);
 	let maxAmount = $state<number | null>(null);
-	let invoiceToggle = $state<'has' | 'none' | null>(null); // has invoice / no invoice toggle (replaces old facet buttons)
+	let invoiceFilter = $state<'all' | 'has' | 'none'>('all'); // now a segmented control inside Financial group
 	// More Filters collapsible state (default closed, persisted)
 	let moreFiltersOpen = $state(false);
 
@@ -191,18 +191,18 @@
 			});
 		}
 
-		// Quick presets (reorganized toggles - combine with manual date range in More Filters)
+		// Quick presets (segmented controls - combine with manual date range in More Filters)
 		const now = new Date();
 		const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-		if (quickUpcomingPast === 'upcoming') {
+		if (quickTimeFilter === 'upcoming') {
 			result = result.filter((j) => new Date(j.start) >= now);
-		} else if (quickUpcomingPast === 'past') {
+		} else if (quickTimeFilter === 'past') {
 			result = result.filter((j) => new Date(j.start) < now);
 		}
 
-		if (quickTimeWindow === 'this-month') {
+		if (quickDateWindow === 'this-month') {
 			result = result.filter((j) => new Date(j.start) >= startOfMonth);
-		} else if (quickTimeWindow === 'this-week') {
+		} else if (quickDateWindow === 'this-week') {
 			// This Week = current week starting Sunday (common convention; easy to adjust)
 			const startOfWeek = new Date(now);
 			startOfWeek.setDate(now.getDate() - now.getDay());
@@ -220,7 +220,7 @@
 			result = result.filter((j) => new Date(j.start) <= to);
 		}
 
-		// Cancelled (now a Show/Hide toggle - combines with other filters)
+		// Cancelled (Show/Hide toggle - combines with other filters)
 		if (!showCancelled) {
 			result = result.filter((j) => j.status !== 'cancelled');
 		}
@@ -238,13 +238,13 @@
 		if (maxAmount != null)
 			result = result.filter((j) => (j.totalAmount || 0) <= (maxAmount as number));
 
-		// Invoice presence (now a Has/No toggle like other quick toggles, combines with presets)
-		if (invoiceToggle === 'has') {
+		// Invoice presence (segmented control inside Financial group, combines with presets)
+		if (invoiceFilter === 'has') {
 			result = result.filter((j) => {
 				const has = j.id ? invoiceMap[j.id] : false;
 				return has;
 			});
-		} else if (invoiceToggle === 'none') {
+		} else if (invoiceFilter === 'none') {
 			result = result.filter((j) => {
 				const has = j.id ? invoiceMap[j.id] : false;
 				return !has;
@@ -261,18 +261,19 @@
 
 	const totalPages = $derived(Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE)));
 
-	// Quick toggle helpers (cycle between states or clear via "All")
-	function toggleUpcomingPast() {
-		if (quickUpcomingPast === null) quickUpcomingPast = 'upcoming';
-		else if (quickUpcomingPast === 'upcoming') quickUpcomingPast = 'past';
-		else quickUpcomingPast = null;
+	// Quick segmented control setters (mutually exclusive within each segment)
+	function setTimeFilter(value: typeof quickTimeFilter) {
+		quickTimeFilter = value;
 		page = 1;
 	}
 
-	function toggleTimeWindow() {
-		if (quickTimeWindow === null) quickTimeWindow = 'this-month';
-		else if (quickTimeWindow === 'this-month') quickTimeWindow = 'this-week';
-		else quickTimeWindow = null;
+	function setDateWindow(value: typeof quickDateWindow) {
+		quickDateWindow = value;
+		page = 1;
+	}
+
+	function setInvoiceFilter(value: typeof invoiceFilter) {
+		invoiceFilter = value;
 		page = 1;
 	}
 
@@ -292,16 +293,16 @@
 
 	function resetFilters() {
 		searchTerm = '';
-		quickUpcomingPast = null;
-		quickTimeWindow = null;
+		quickTimeFilter = 'all';
+		quickDateWindow = 'all';
 		showCancelled = false;
 		dateFrom = '';
 		dateTo = '';
 		selectedAreas = [];
 		minAmount = null;
 		maxAmount = null;
-		invoiceToggle = null;
-		moreFiltersOpen = false; // optional: close on full reset
+		invoiceFilter = 'all';
+		moreFiltersOpen = false; // close on full reset for cleanliness
 		page = 1;
 	}
 
@@ -352,37 +353,20 @@
 		/>
 
 		<div class="job-page__quick-row">
-			<!-- All clears the quick toggles only (not full reset) -->
-			<button
-				class="job-page__quick-pill"
-				class:active={quickUpcomingPast === null && quickTimeWindow === null && !showCancelled}
-				onclick={() => {
-					quickUpcomingPast = null;
-					quickTimeWindow = null;
-					showCancelled = false;
-					page = 1;
-				}}
-			>All</button>
+			<!-- Segmented controls -->
+			<div class="job-page__segmented">
+				<button class:active={quickTimeFilter === 'all'} onclick={() => setTimeFilter('all')}>All</button>
+				<button class:active={quickTimeFilter === 'upcoming'} onclick={() => setTimeFilter('upcoming')}>Upcoming</button>
+				<button class:active={quickTimeFilter === 'past'} onclick={() => setTimeFilter('past')}>Past</button>
+			</div>
 
-			<!-- Upcoming/Past toggle: highlights when active, text shows next option -->
-			<button
-				class="job-page__quick-pill"
-				class:active={quickUpcomingPast !== null}
-				onclick={toggleUpcomingPast}
-			>
-				{quickUpcomingPast === 'upcoming' ? 'Past' : 'Upcoming'}
-			</button>
+			<div class="job-page__segmented">
+				<button class:active={quickDateWindow === 'all'} onclick={() => setDateWindow('all')}>All</button>
+				<button class:active={quickDateWindow === 'this-month'} onclick={() => setDateWindow('this-month')}>This Month</button>
+				<button class:active={quickDateWindow === 'this-week'} onclick={() => setDateWindow('this-week')}>This Week</button>
+			</div>
 
-			<!-- This Month/This Week toggle -->
-			<button
-				class="job-page__quick-pill"
-				class:active={quickTimeWindow !== null}
-				onclick={toggleTimeWindow}
-			>
-				{quickTimeWindow === 'this-month' ? 'This Week' : 'This Month'}
-			</button>
-
-			<!-- Show/Hide Cancel toggle (replaces checkbox). Red outline when showing cancelled (per invoice modal cancel button style). -->
+			<!-- Show/Hide Cancel toggle (replaces checkbox). Red outline when showing cancelled. -->
 			<button
 				class="job-page__quick-pill job-page__quick-pill--cancel"
 				class:active={showCancelled}
@@ -405,12 +389,11 @@
 		</div>
 
 		<!-- More Filters collapsible (default closed, remembers state).
-		     Three labeled groups on their own lines when open.
-		     Area tokens, Date filters, Financial (min/max + invoice toggle). -->
+		     Labels on same line as the filters. Invoice segment on same line as Min/Max. -->
 		{#if moreFiltersOpen}
 			<div class="job-page__more-filters">
-				<!-- Area filters (tokens/chips - behavior unchanged) -->
-				<div class="job-page__filter-group">
+				<!-- Area filters (tokens/chips - behavior unchanged). Label + chips on same line. -->
+				<div class="job-page__filter-group job-page__filter-group--inline">
 					<div class="job-page__filter-group-label">Areas</div>
 					<div class="job-page__facet">
 						{#each areaOptions as area (area.id)}
@@ -426,8 +409,8 @@
 					</div>
 				</div>
 
-				<!-- Date filters -->
-				<div class="job-page__filter-group">
+				<!-- Date filters. Label + inputs on same line. -->
+				<div class="job-page__filter-group job-page__filter-group--inline">
 					<div class="job-page__filter-group-label">Date range</div>
 					<div class="job-page__date-range">
 						<input type="date" bind:value={dateFrom} title="From date" oninput={() => (page = 1)} />
@@ -435,26 +418,21 @@
 					</div>
 				</div>
 
-				<!-- Financial filters: amounts + Has/No invoice as toggle (like other quick toggles) -->
-				<div class="job-page__filter-group">
+				<!-- Financial: label + (Min/Max + invoice segmented) on same line. -->
+				<div class="job-page__filter-group job-page__filter-group--inline">
 					<div class="job-page__filter-group-label">Financial</div>
-					<div class="job-page__amount">
-						<input type="number" placeholder="Min $" bind:value={minAmount} oninput={() => (page = 1)} />
-						<input type="number" placeholder="Max $" bind:value={maxAmount} oninput={() => (page = 1)} />
+					<div class="job-page__financial-inline">
+						<div class="job-page__amount">
+							<input type="number" placeholder="Min $" bind:value={minAmount} oninput={() => (page = 1)} />
+							<input type="number" placeholder="Max $" bind:value={maxAmount} oninput={() => (page = 1)} />
+						</div>
+						<!-- Invoice segmented control (All, Has, Not Invoiced) -->
+						<div class="job-page__segmented job-page__segmented--invoice">
+							<button class:active={invoiceFilter === 'all'} onclick={() => setInvoiceFilter('all')}>All</button>
+							<button class:active={invoiceFilter === 'has'} onclick={() => setInvoiceFilter('has')}>Invoice</button>
+							<button class:active={invoiceFilter === 'none'} onclick={() => setInvoiceFilter('none')}>Not Invoiced</button>
+						</div>
 					</div>
-					<!-- Invoice toggle (Has / No) - styled as pill like the primary quick toggles -->
-					<button
-						class="job-page__quick-pill job-page__quick-pill--invoice"
-						class:active={invoiceToggle !== null}
-						onclick={() => {
-							if (invoiceToggle === null) invoiceToggle = 'has';
-							else if (invoiceToggle === 'has') invoiceToggle = 'none';
-							else invoiceToggle = null;
-							page = 1;
-						}}
-					>
-						{invoiceToggle === 'has' ? 'No invoice' : 'Has invoice'}
-					</button>
 				</div>
 			</div>
 		{/if}
@@ -657,7 +635,7 @@
 		border-color: var(--color-primary);
 	}
 
-	/* The expanded More Filters content: three labeled groups, each on own line. */
+	/* The expanded More Filters content. */
 	.job-page__more-filters {
 		display: flex;
 		flex-direction: column;
@@ -666,10 +644,12 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	.job-page__filter-group {
+	/* Labels on same line as the filters (inline groups). */
+	.job-page__filter-group--inline {
 		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
 	}
 
 	.job-page__filter-group-label {
@@ -678,6 +658,49 @@
 		color: var(--color-text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+		flex-shrink: 0;
+	}
+
+	/* Financial inline: Min/Max + invoice segmented on same line. */
+	.job-page__financial-inline {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	/* Segmented controls (pill groups for All/Option1/Option2 style).
+	   Used for the quick row segments and the invoice one inside Financial. */
+	.job-page__segmented {
+		display: inline-flex;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-full);
+		overflow: hidden;
+		background: var(--color-surface);
+	}
+	.job-page__segmented button {
+		padding: var(--space-1) var(--space-2);
+		border: none;
+		background: transparent;
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		color: var(--color-text);
+		min-height: 32px;
+		white-space: nowrap;
+		border-right: 1px solid var(--color-border-strong);
+	}
+	.job-page__segmented button:last-child {
+		border-right: none;
+	}
+	.job-page__segmented button.active {
+		background: var(--color-primary);
+		color: white;
+	}
+	/* Slightly tighter for the one inside financial row */
+	.job-page__segmented--invoice button {
+		padding: 2px 8px;
+		min-height: 28px;
+		font-size: 11px;
 	}
 
 	/* Reuse/adapt existing date and amount for the groups */
@@ -911,12 +934,21 @@
 		.job-page__quick-row {
 			gap: var(--space-1);
 		}
+		.job-page__segmented button,
 		.job-page__quick-pill,
 		.job-page__btn,
 		.job-page__more-filters-trigger {
 			font-size: 11px;
 			padding: 4px 8px;
 			min-height: 36px;
+		}
+		.job-page__filter-group--inline {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+		.job-page__financial-inline {
+			flex-direction: column;
+			align-items: flex-start;
 		}
 		.job-page__card {
 			padding: var(--space-2) var(--space-3);
