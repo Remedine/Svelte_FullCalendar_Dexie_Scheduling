@@ -376,66 +376,56 @@
 					Edit {selectedUser.firstName || ''}
 					{selectedUser.lastName || selectedUser.name || ''}
 				</h2>
-				<div class="modal__form">
-					<label class="modal__label label">
-						First Name
-						<input type="text" bind:value={editFirstName} class="modal__input input" />
-					</label>
 
-					<label class="modal__label label">
-						Last Name
-						<input type="text" bind:value={editLastName} class="modal__input input" />
-					</label>
+				<!-- Scrollable body so actions stay anchored at bottom regardless of form height -->
+				<div class="modal__body">
+					<div class="modal__form">
+						<label class="modal__label label">
+							First Name
+							<input type="text" bind:value={editFirstName} class="modal__input input" />
+						</label>
 
-					<label class="modal__label label">
-						Role
-						<select bind:value={editRole} class="modal__select input">
-							<option value="crew">Crew</option>
-							<option value="admin">Admin</option>
-						</select>
-					</label>
+						<label class="modal__label label">
+							Last Name
+							<input type="text" bind:value={editLastName} class="modal__input input" />
+						</label>
 
-					<label class="modal__label label">
-						Email Address
-						<input
-							type="email"
-							bind:value={editEmail}
-							class="modal__input input"
-							placeholder="user@capitalcitywindows.com"
-						/>
-					</label>
+						<label class="modal__label label">
+							Role
+							<select bind:value={editRole} class="modal__select input">
+								<option value="crew">Crew</option>
+								<option value="admin">Admin</option>
+							</select>
+						</label>
 
-					<label class="modal__checkbox-label label">
-						<input type="checkbox" bind:checked={editForcePhoto} />
-						Force new photo upload
-					</label>
+						<label class="modal__label label">
+							Email Address
+							<input
+								type="email"
+								bind:value={editEmail}
+								class="modal__input input"
+								placeholder="user@capitalcitywindows.com"
+							/>
+						</label>
+
+						<label class="modal__checkbox-label label">
+							<input type="checkbox" bind:checked={editForcePhoto} />
+							Force new photo upload
+						</label>
+					</div>
+
+					{#if pendingDelete}
+						<div class="modal__delete-pending">
+							This user will be <strong>permanently deleted</strong> when you save changes. Click Cancel
+							to abort.
+						</div>
+					{/if}
 				</div>
 
-				{#if pendingDelete}
-					<div class="modal__delete-pending">
-						This user will be <strong>permanently deleted</strong> when you save changes. Click Cancel
-						to abort.
-					</div>
-				{/if}
-
+				<!-- Anchored actions: primary right-aligned first, then de-emphasized text actions below.
+				     All right aligned. Deactivate/Delete as plain text (yellow/red) to de-emphasize. -->
 				<div class="modal__actions">
-					<div class="modal__actions-left">
-						<button
-							onclick={() => (editActive = !editActive)}
-							class="modal__btn modal__btn--toggle button"
-						>
-							{editActive ? 'Deactivate User' : 'Activate User'}
-						</button>
-						{#if !editUserHasJobs}
-							<button
-								onclick={() => {
-									pendingDelete = true;
-								}}
-								class="modal__btn modal__btn--delete button">Delete User</button
-							>
-						{/if}
-					</div>
-					<div class="modal__actions-right">
+					<div class="modal__primary-actions">
 						<button
 							onclick={() => {
 								pendingDelete = false;
@@ -448,6 +438,23 @@
 						<button onclick={saveEdit} class="modal__btn modal__btn--save button button--primary"
 							>Save Changes</button
 						>
+					</div>
+
+					<div class="modal__secondary-actions">
+						<button
+							onclick={() => (editActive = !editActive)}
+							class="modal__text-action modal__text-action--warning"
+						>
+							{editActive ? 'Deactivate User' : 'Activate User'}
+						</button>
+						{#if !editUserHasJobs}
+							<button
+								onclick={() => {
+									pendingDelete = true;
+								}}
+								class="modal__text-action modal__text-action--danger">Delete User</button
+							>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -648,45 +655,73 @@
 	   Only the .modal__* BEM extensions and specifics remain here. */
 
 	.modal__title {
-		margin: 0 0 var(--space-6) 0;
+		margin: 0 0 var(--space-4) 0;
 		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
+		padding: 0 var(--space-4); /* consistent padding since global modal shell has none */
 	}
+
+	/* Scrollable body for anchored actions */
+	.modal__body {
+		flex: 1 1 auto;
+		overflow-y: auto;
+		min-height: 0;
+		padding: 0 var(--space-4);
+	}
+
 	.modal__form {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-4);
 	}
+
 	.modal__label {
 		font-weight: var(--font-weight-semibold);
 		margin-bottom: var(--space-1);
 		display: block;
 	}
+
 	.modal__input,
 	.modal__select {
 		/* base .input */
 		padding: var(--space-3);
 	}
+
 	.modal__checkbox-label {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 		font-size: var(--font-size-sm);
 	}
+
+	/* Anchored actions at bottom of modal (right aligned).
+	   Primary (Cancel/Save) first, then de-emphasized text actions below. */
 	.modal__actions {
+		flex-shrink: 0;
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: var(--space-6);
-		gap: var(--space-4);
-		flex-wrap: wrap;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-2);
+		margin-top: var(--space-4);
+		padding: 0 var(--space-4) var(--space-4);
+		background: var(--color-surface); /* ensure visible over scroll */
+		border-top: 1px solid var(--color-border);
 	}
-	.modal__actions-left,
-	.modal__actions-right {
+
+	.modal__primary-actions {
 		display: flex;
 		gap: var(--space-2);
+		justify-content: flex-end;
 	}
+
+	.modal__secondary-actions {
+		display: flex;
+		gap: var(--space-2);
+		justify-content: flex-end;
+		margin-top: var(--space-2);
+	}
+
 	.modal__btn {
 		padding: var(--space-3) var(--space-6);
 		border: none;
@@ -694,21 +729,61 @@
 		font-weight: var(--font-weight-semibold);
 		cursor: pointer;
 	}
+
 	.modal__btn--cancel {
 		background: var(--color-surface-alt);
 		color: var(--color-text-muted);
 	}
+
 	.modal__btn--save {
 		background: var(--color-primary);
 		color: white;
 	}
-	.modal__btn--toggle {
-		background: var(--color-warning-soft);
+
+	/* De-emphasized text actions (no button chrome) */
+	.modal__text-action {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		text-decoration: underline;
+		opacity: 0.9;
+	}
+
+	.modal__text-action--warning {
 		color: var(--color-warning);
 	}
-	.modal__btn--delete {
-		background: var(--color-danger-soft);
-		color: var(--color-danger-emphasis);
+
+	.modal__text-action--danger {
+		color: var(--color-danger);
+	}
+
+	.modal__text-action:hover {
+		opacity: 1;
+	}
+
+	/* Edit modal specific: override to anchor actions (body scrolls) */
+	.modal-content {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden !important;
+		max-height: 90vh;
+	}
+
+	/* Mobile tweaks for anchored edit actions */
+	@media (max-width: 768px) {
+		.modal__body {
+			padding: 0 var(--space-3);
+		}
+		.modal__actions {
+			padding: 0 var(--space-3) var(--space-3);
+		}
+		.modal__primary-actions,
+		.modal__secondary-actions {
+			width: 100%;
+			justify-content: flex-end;
+		}
 	}
 
 	.modal__delete-pending {

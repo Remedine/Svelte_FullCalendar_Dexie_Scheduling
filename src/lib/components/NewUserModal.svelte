@@ -204,7 +204,8 @@
 	/* Base .modal-overlay and .modal-content now come from globals.css (consolidated for cohesion).
 	   Desktop center, mobile bottom-sheet handled globally. Only component BEM + specifics here. */
 	.modal__title {
-		margin: 0 0 var(--space-6) 0;
+		margin: 0 0 var(--space-4) 0;
+		padding: 0 var(--space-4);
 		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
@@ -213,6 +214,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-4);
+		padding: 0 var(--space-4); /* add padding since global modal-content has none */
 	}
 	.modal__label {
 		font-weight: var(--font-weight-semibold);
@@ -269,8 +271,22 @@
 		color: var(--color-text-muted);
 	}
 
-	/* Component-specific mobile action stacking (global handles shell) */
+	/* Give the modal content breathing room (global .modal-content has no internal padding) */
+	.modal__success {
+		padding: 0 var(--space-4);
+	}
+
+	/* Component-specific mobile action stacking + padding (global handles shell) */
 	@media (max-width: 768px) {
+		.modal__form {
+			padding: 0 var(--space-3);
+		}
+		.modal__title {
+			padding: 0 var(--space-3);
+		}
+		.modal__success {
+			padding: 0 var(--space-3);
+		}
 		.modal__actions {
 			flex-direction: column;
 			gap: var(--space-2);
