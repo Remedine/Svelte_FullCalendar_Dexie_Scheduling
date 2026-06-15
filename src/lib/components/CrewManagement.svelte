@@ -109,15 +109,24 @@
 
 		const adminCount = allUsers.filter((u) => u.role === 'admin' && u.active).length;
 
-		// Active status change checks (moved from immediate toggle)
+		// Active status change checks (moved from immediate toggle).
+		// Compute what the resulting active-admin count would be *after* this change.
+		// Only block if we are *deactivating* an admin and it would leave zero active admins.
+		// Reactivating must always be allowed (even if it is the "first" active admin).
 		if (editActive !== selectedUser.active) {
-			if (selectedUser.role === 'admin' && editActive && adminCount <= 1) {
-				toast.error('Cannot deactivate the last active admin.');
-				return;
-			}
-			if (selectedUser.role === 'admin' && !editActive && adminCount === 0) {
-				toast.error('Must keep at least one active admin.');
-				return;
+			if (selectedUser.role === 'admin') {
+				let resultingActiveAdmins = adminCount;
+				if (selectedUser.active) {
+					// currently counted as active; we are turning it off
+					resultingActiveAdmins = adminCount - 1;
+				} else {
+					// currently not counted; we are turning it on
+					resultingActiveAdmins = adminCount + 1;
+				}
+				if (!editActive && resultingActiveAdmins <= 0) {
+					toast.error('Cannot deactivate the last active admin.');
+					return;
+				}
 			}
 		}
 
@@ -150,14 +159,23 @@
 
 		const adminCount = allUsers.filter((u) => u.role === 'admin' && u.active).length;
 
-		if (user.role === 'admin' && !user.active && adminCount === 0) {
-			toast.error('Must keep at least one active admin.');
-			return;
-		}
-
-		if (user.role === 'admin' && user.active && adminCount <= 1) {
-			toast.error('Cannot deactivate the last active admin.');
-			return;
+		// Compute resulting active admin count after the flip.
+		// Only ever block *deactivation* of the last active admin.
+		// Reactivation must be allowed.
+		if (user.role === 'admin') {
+			const intendedActive = !user.active;
+			let resultingActiveAdmins = adminCount;
+			if (user.active) {
+				// currently active → flip will deactivate
+				resultingActiveAdmins = adminCount - 1;
+			} else {
+				// currently inactive → flip will activate
+				resultingActiveAdmins = adminCount + 1;
+			}
+			if (!intendedActive && resultingActiveAdmins <= 0) {
+				toast.error('Cannot deactivate the last active admin.');
+				return;
+			}
 		}
 
 		// )=- Use updateUser for PB sync.
