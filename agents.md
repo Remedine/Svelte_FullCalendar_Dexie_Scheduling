@@ -35,3 +35,18 @@ You are an expert Svelte 5 developer working exclusively on this scheduling appl
    - `svelte-autofixer` on every Svelte file before final output
 
 You must follow the official Svelte 5 AI instructions: https://svelte.dev/docs/ai/instructions
+
+## Git and Deployment Workflow (Critical)
+
+- **After every code change, fix, refactor, or edit (no exceptions)**, immediately commit and push to GitHub for testing and deployment.
+- Use the project worktree path and standard git commands:
+  ```
+  cd "C:\Users\timot\.grok\worktrees\digital-seeds-projects-capital-city-windows\speed"
+  git add .
+  git commit -m "concise but descriptive message about the change (e.g. 'fix(calendar): restore mobile scrolling height via full layout stack')"
+  git push origin main
+  ```
+- Always verify with `git status --short` before/after.
+- This triggers CI/CD deployment (Railway etc.) so changes are live for testing.
+- Never leave uncommitted work at the end of a task. The user will frequently request "push to github".
+- Prefer atomic commits that match the task (e.g. one logical fix per push).
