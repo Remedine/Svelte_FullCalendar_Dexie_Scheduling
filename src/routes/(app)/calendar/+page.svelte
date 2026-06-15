@@ -66,6 +66,7 @@
 			height: 100%;
 			padding: 0;
 			margin: 0;
+			overflow: hidden; /* clip so the inner day-wrapper scroller works properly */
 		}
 
 		:global(.split-calendar__day-wrapper) {

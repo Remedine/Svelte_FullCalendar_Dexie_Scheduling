@@ -528,7 +528,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				height: 'auto',
+				height: isMobile ? '100%' : 'auto',
 				allDaySlot: true,
 				slotMinTime: '06:00:00',
 				slotMaxTime: '22:00:00',
@@ -1089,6 +1089,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			min-height: 0;
 			display: flex;
 			flex-direction: column;
+			height: 100%;
 		}
 
 		.split-calendar__day-wrapper {
@@ -1098,7 +1099,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			-webkit-overflow-scrolling: touch;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
-			height: auto;
+			height: 100%;
 			max-height: none;
 		}
 
@@ -1502,23 +1503,25 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		}
 
 		:global(.month-picker__day) {
-			min-height: 26px; /* ~half the desktop 42px target + tighter */
-			padding: 1px;
-			font-size: 11px;
+			min-height: 18px; /* significantly tighter vertical space below the day number while keeping usable tap target */
+			padding: 0 1px;
+			font-size: 10px;
+			line-height: 1;
 		}
 
 		:global(.month-picker__number) {
-			font-size: 11px;
+			font-size: 10px;
+			line-height: 1;
 		}
 
 		:global(.month-picker__dots) {
 			gap: 1px;
-			margin-top: 1px;
+			margin-top: 0;
 		}
 
 		:global(.month-picker__dot) {
-			width: 3.5px;
-			height: 3.5px;
+			width: 2.5px;
+			height: 2.5px;
 		}
 	}
 </style>
