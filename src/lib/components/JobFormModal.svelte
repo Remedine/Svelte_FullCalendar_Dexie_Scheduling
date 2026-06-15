@@ -91,8 +91,14 @@
 						end: endDate,
 						assignedCrew: job.assignedCrew || [],
 						billableItems: job.billableItems?.length
-							? job.billableItems
-							: [{ title: '', price: 0, quantity: 1, total: 0 }]
+							? job.billableItems.map((b: any) => {
+								// Normalize legacy shape from options (uses 'hours' key for Per Hour) to form shape (quantity + unit)
+								if (b.hours !== undefined) {
+									return { ...b, quantity: b.hours, unit: 'hour' };
+								}
+								return { ...b, unit: b.unit || 'qty' };
+							})
+							: [{ title: '', price: 0, quantity: 1, total: 0, unit: 'qty' }]
 					};
 
 					isEditing = true;
@@ -112,7 +118,7 @@
 						notes: '',
 						cancelReason: '',
 						cancelNotes: '',
-						billableItems: [{ title: '', price: 0, quantity: 1, total: 0 }]
+						billableItems: [{ title: '', price: 0, quantity: 1, total: 0, unit: 'qty' }]
 					};
 
 					isEditing = false;
@@ -196,7 +202,7 @@
 	function addBillableItem() {
 		currentJob.billableItems = [
 			...currentJob.billableItems,
-			{ title: '', price: 0, quantity: 1, total: 0 }
+			{ title: '', price: 0, quantity: 1, total: 0, unit: 'qty' }
 		];
 	}
 

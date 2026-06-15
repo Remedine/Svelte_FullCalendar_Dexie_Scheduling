@@ -25,14 +25,25 @@
 		item.unit = unit;
 	});
 
-	// Inherit default unit (hour/qty) from the matching defaultBillableItem in options when title is selected
+	// Inherit unit (hour/qty) from the matching defaultBillableItem in options when title is selected or set.
+	// Options store 'hours' key for Per Hour, 'quantity' for Per Qty (no .unit field yet).
 	$effect(() => {
 		if (item.title && optionsStore.data?.defaultBillableItems?.length) {
 			const match = (optionsStore.data.defaultBillableItems as any[]).find(
 				(t: any) => t.title === item.title
 			);
-			if (match?.unit && (match.unit === 'hour' || match.unit === 'qty')) {
-				unit = match.unit;
+			if (match) {
+				if (match.hours !== undefined) {
+					unit = 'hour';
+					if (item.quantity === undefined || item.quantity === 1) { // normalize if needed
+						item.quantity = match.hours;
+					}
+				} else if (match.quantity !== undefined) {
+					unit = 'qty';
+					if (item.quantity === undefined || item.quantity === 1) {
+						item.quantity = match.quantity;
+					}
+				}
 			}
 		}
 	});
@@ -62,11 +73,15 @@
 	function selectTemplate(template: any) {
 		item.title = template.title;
 		item.price = template.price || 0;
-		item.quantity = template.quantity || 1;
-		if (template.unit === 'hour' || template.unit === 'qty') {
-			unit = template.unit;
-			item.unit = unit;
+		// Normalize from options shape: hours for Per Hour, quantity for Per Qty
+		if (template.hours !== undefined) {
+			unit = 'hour';
+			item.quantity = template.hours;
+		} else {
+			unit = 'qty';
+			item.quantity = template.quantity ?? 1;
 		}
+		item.unit = unit;
 		showSuggestions = false;
 	}
 
@@ -129,7 +144,7 @@
 		<!-- Column 1, Row 2: Price + Qty -->
 		<div class="billable-item-row__price-qty">
 			<div class="billable-item-row__price">
-				<span class="billable-item-row__currency">$</span>
+				<span class="billable-item-row__currency">{unit === 'hour' ? '$' : '#'}</span>
 				<input
 					type="number"
 					bind:value={item.price}
