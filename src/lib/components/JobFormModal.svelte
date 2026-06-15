@@ -429,7 +429,6 @@
 							<BillableItemRow
 								bind:item={currentJob.billableItems[index]}
 								onRemove={() => removeBillableItem(index)}
-								autofocusPrice={index === currentJob.billableItems.length - 1}
 							/>
 						{/each}
 
@@ -451,18 +450,12 @@
 				</div>
 			</div>
 
-			<!-- Sticky Footer -->
+			<!-- Sticky Footer / Anchored actions.
+			     Per request: Close + Save Changes on one line, right aligned.
+			     Cancel Job on next line, right aligned, text-only red (de-emphasized).
+			     Primary actions always visible at bottom of modal view. -->
 			<div class="new-job-modal__footer sticky-footer">
-				{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
-					<!-- )=- Prevent cancel for completed or already-cancelled jobs (mirrors the guard added to JobDetailsModal).
-               Per user feedback and consistency with quick status guards elsewhere.
-               )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (cancel flow) + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-					<button class="cancel-job-text" onclick={() => (showCancelConfirm = true)}>
-						Cancel Job
-					</button>
-				{/if}
-
-				<div class="actions-right">
+				<div class="footer-primary">
 					<button class="new-job-modal__btn button button--ghost" onclick={closeModal}>
 						{isEditing ? 'Close' : 'Cancel'}
 					</button>
@@ -471,6 +464,14 @@
 						{isEditing ? 'Save Changes' : 'Create Job'}
 					</button>
 				</div>
+
+				{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
+					<!-- )=- Prevent cancel for completed or already-cancelled jobs.
+               )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (cancel flow) + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
+					<button class="cancel-job-text" onclick={() => (showCancelConfirm = true)}>
+						Cancel Job
+					</button>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -620,9 +621,15 @@
 	.new-job-modal__footer {
 		/* base from global .sticky-footer; specific layout kept */
 		display: flex;
-		gap: var(--space-3);
-		justify-content: space-between;
-		align-items: center;
+		flex-direction: column;
+		align-items: flex-end; /* all content right aligned */
+		gap: var(--space-2);
+	}
+
+	.footer-primary {
+		display: flex;
+		gap: var(--space-2);
+		/* Close and Save Changes on one line, right aligned */
 	}
 
 	.new-job-modal__btn {
