@@ -528,7 +528,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				height: isMobile ? '100%' : 'auto',
+				height: 'auto',  // always auto so on mobile the timegrid renders all slots (6am-10pm) for full day visibility + page-level scrolling; internal scroll not needed
 				allDaySlot: true,
 				slotMinTime: '06:00:00',
 				slotMaxTime: '22:00:00',
@@ -955,7 +955,8 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 
 	@media (max-width: 768px) {
 		.split-calendar-container {
-			height: 100%;
+			/* auto height so tall calendar content flows naturally for page-level scroll */
+			height: auto;
 			min-height: 0;
 		}
 	}
@@ -1057,55 +1058,54 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		margin-bottom: var(--space-4); /* extra gap below the calendar box itself so it doesn't hit page bottom */
 	}
 
-	/* === Mobile day-focused layout (anchored top MonthPicker + scrolling time slots) === */
-	/* Reclaims large gutters/padding. MonthPicker ~half height + sticky.
-	   The calendar (day view only) uses flex to take all *remaining* height after the MonthPicker.
-	   .split-calendar__day-wrapper gets overflow:auto so the time grid slots are scrollable (past 10am etc).
-	   No more brittle 100dvh calc — relies on flex chain from app-layout + main-content + schedule-page.
-	   Top nav is hidden on mobile; mobile footer flows below this block. */
+	/* === Mobile: full calendar height + page-level scrolling ===
+	   On mobile we show only the compact MonthPicker (in sidebar) + the full day timegrid.
+	   To avoid "not enough height" / can't scroll far (e.g. past 7am), we let the day content
+	   determine its natural tall height (all slots from slotMinTime to slotMaxTime are rendered).
+	   The whole page (main-content in layout) then scrolls at page level to reveal later hours.
+	   The .month-picker is sticky so it stays visible while scrolling the tall day content.
+	   This relies on the parent chain (app-layout 100dvh flex, main-content flex1 on mobile with
+	   in-flow mobile-app-footer after children, split-page/page content, split-calendar-container)
+	   allowing tall content instead of clipping with 100% + internal overflow.
+	   Reclaims space; no brittle calc(100dvh - x). Matches user request for page-level scroll.
+	   BEM + tokens. */
 	@media (max-width: 768px) {
 		.split-calendar {
 			gap: var(--space-2);
-			flex: 1;
-			min-height: 0;
-			height: 100%;
+			/* do not force height 100% here or below -- let content be tall for full day */
 			display: flex;
 			flex-direction: column;
 		}
 
 		.split-calendar__sidebar {
-			/* Only the compact MonthPicker is shown at top; filters moved out of way */
+			/* Only the compact MonthPicker is shown at top; filters hidden on mobile */
 			margin-bottom: 0;
 			flex-shrink: 0;
 		}
 
-		/* Hide the big filters panel on mobile day view (user can still use on desktop) */
+		/* Hide the big filters panel on mobile day view */
 		.split-calendar__filters {
 			display: none;
 		}
 
 		.split-calendar__main {
-			flex: 1;
-			min-height: 0;
+			/* let main grow with the tall day content */
 			display: flex;
 			flex-direction: column;
-			height: 100%;
 		}
 
 		.split-calendar__day-wrapper {
-			flex: 1;
-			min-height: 0;
-			overflow-y: auto; /* internal scroll for the day's time slots */
-			-webkit-overflow-scrolling: touch;
+			/* natural/auto height so all time slots are in DOM and visible by scrolling the page */
+			overflow: visible;
+			height: auto;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
-			height: 100%;
-			max-height: none;
+			/* no flex:1 or height:100% or internal scroll -- page level scroll now */
 		}
 
-		/* Make the FC container inside fill the remaining height */
+		/* FC mount point also auto so the timegrid can be full height */
 		.split-calendar__day {
-			height: 100%;
+			height: auto;
 		}
 	}
 

@@ -26,34 +26,21 @@
 		padding: var(--space-4);
 	}
 
-	/* === Mobile: propagate full remaining height down the flex chain ===
-	   Layout: .main-content (flex col + pb for footer/tabs) > children (this .split-page)
-	   Without explicit flex:1 + min-height:0 + height:100% on the page wrappers, the
-	   mobile 100% rules inside SplitCalendar (for .split-calendar, .main, .day-wrapper)
-	   collapse to auto/min-content. Result: day time-grid gets very small height,
-	   only showing ~first hour of slots (e.g. up to 7am) with no usable scroll.
-	   The internal overflow:auto on day-wrapper then can't provide full day scroll.
-	   Reclaims space for the anchored compact MonthPicker + scrolling day slots.
-	   BEM + tokens. Matches the flex contract described in SplitCalendar mobile CSS.
+	/* Mobile: normal flow + padding. The calendar component now uses auto heights so the
+	   full day timegrid (all slots) is rendered in the DOM. Scrolling happens at page level
+	   (main-content / viewport) to see later hours. The sticky MonthPicker (via global styles)
+	   stays visible while scrolling the tall day content. No more 100% clipping the calendar short.
+	   Looks at full stack: layout (main-content flex + in-flow footer + fixed tabs + 100dvh root),
+	   this page, SplitCalendar + MonthPicker components.
 	*/
 	@media (max-width: 768px) {
 		.split-page {
-			flex: 1;
-			min-height: 0;
-			display: flex;
-			flex-direction: column;
-			height: 100%;
-			padding: var(--space-2); /* tighter to give calendar more room */
+			padding: var(--space-2);
 		}
 
 		.split-page__content {
-			flex: 1;
-			min-height: 0;
-			display: flex;
-			flex-direction: column;
-			height: 100%;
 			padding: var(--space-2);
-			/* background/border-radius still apply to the calendar box */
+			/* let the inner calendar be tall; background/rounded still frame the whole thing */
 		}
 	}
 </style>

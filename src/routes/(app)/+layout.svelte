@@ -461,6 +461,9 @@
 			display: flex;
 			flex-direction: column;
 			padding-bottom: 62px;
+			/* allow tall page content (e.g. full mobile calendar with all time slots) so scrolling is at page level */
+			height: auto;
+			min-height: 100dvh;
 		}
 	}
 
