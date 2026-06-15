@@ -1860,7 +1860,7 @@ export async function cleanupDuplicateUsers() {
 	}
 }
 
-export { db, getJobsForCrewMember };
+export { db };
 // )=- No need for extra "export type" re-export. The `export interface Invoice` declaration (above) already makes
 // `import { Invoice } from '$lib/db'` work. The previous export type line was causing duplicate export conflicts
 // in svelte-check even for a single name.
