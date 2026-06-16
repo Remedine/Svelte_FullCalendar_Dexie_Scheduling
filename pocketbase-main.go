@@ -15,6 +15,14 @@ import (
 func main() {
 	app := pocketbase.New()
 
+	// Railway (and similar proxies) often assign different e.RealIP() to the long-lived
+	// SSE GET and the follow-up subscribe POST, causing "Invalid realtime client" 400s.
+	// PocketBase skips the IP check when pbRealtimeClientIP is unset (apis/realtime.go note2).
+	app.OnRealtimeConnectRequest().BindFunc(func(e *core.RealtimeConnectRequestEvent) error {
+		e.Client.Unset(apis.RealtimeClientIPKey)
+		return e.Next()
+	})
+
 	internalSecret := os.Getenv("INTERNAL_SECRET")
 	pbPublicURL := os.Getenv("PB_PUBLIC_URL")
 	if pbPublicURL == "" {
