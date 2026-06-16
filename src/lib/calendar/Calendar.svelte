@@ -61,6 +61,7 @@
 			selectable: true,
 			height: '100%',
 			expandRows: true,
+			nowIndicator: true,
 			// Mobile hold-to-drag support (see SplitCalendar for details + rationale).
 			eventLongPressDelay: 280,
 			selectLongPressDelay: 280,

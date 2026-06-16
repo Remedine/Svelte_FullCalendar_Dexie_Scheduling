@@ -525,6 +525,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				allDaySlot: true,
 				slotMinTime: '06:00:00',
 				slotMaxTime: '22:00:00',
+				nowIndicator: true,
 				expandRows: false,
 				editable: true,
 				dragScroll: true,   /* enable auto-scroll of the time grid when dragging an event near top/bottom edges on mobile */
@@ -1124,6 +1125,7 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		overflow: hidden;
 		/* Nice blue for the active/today day instead of default yellow. Uses project tokens so it adapts to dark/light. */
 		--fc-today-bg-color: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface));
+		--fc-now-indicator-color: var(--color-warning);
 	}
 
 	/* Ensure the today/active day cells and headers pick up the nice blue highlight (FC sometimes needs explicit boost) */
