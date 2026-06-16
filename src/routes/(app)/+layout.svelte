@@ -111,7 +111,8 @@
 			const gap = 6;
 
 			// Place directly above the avatar area
-			let top = rect.top - approxMenuHeight - gap;
+			// Shift up an extra ~70px as requested (translate the whole menu higher)
+			let top = rect.top - approxMenuHeight - gap - 70;
 			top = Math.max(8, top);
 
 			// "Top left of the parent": align menu's right edge near the wrapper's left
