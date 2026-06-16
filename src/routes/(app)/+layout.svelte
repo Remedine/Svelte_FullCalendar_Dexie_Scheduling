@@ -116,12 +116,19 @@
 			let top = rect.top - approxMenuHeight - gapAbove;
 			top = Math.max(8, top); // never off the top of the screen
 
-			// "Top left" visible placement: menu's right edge near the avatar's right but
-			// clamped so the entire menu (incl. border + shadow) has breathing room from the viewport right edge.
-			// This extends the menu body leftward (inward) from the right side of the bar.
-			let desiredRight = Math.min(rect.right, vw - 8);
+			// "Top left" placement: position the menu entirely to the left of the avatar
+			// (menu right edge near the left side of the wrapper/avatar). This prevents
+			// the logout (and other items) from sitting "underneath" the avatar visually
+			// or in hit-testing, and leaves the avatar tappable to dismiss the menu.
+			// The menu still gets clamped so it's fully on-screen with margins.
+			let desiredRight = rect.left - 4; // small gap so menu is left of the avatar
 			let left = desiredRight - menuWidth;
 			if (left < 8) left = 8;
+			// If the menu would overflow the right edge of the viewport, shift it left.
+			const menuRight = left + menuWidth;
+			if (menuRight > vw - 8) {
+				left = vw - 8 - menuWidth;
+			}
 
 			menuEl.style.position = 'fixed';
 			menuEl.style.top = `${top}px`;
@@ -282,7 +289,8 @@
 
 		<!-- Mobile-only: avatar with dropdown menu integrated into bottom nav.
 		     Clicking avatar toggles the menu (Profile + dark mode toggle + Logout).
-		     Menu opens top-left of avatar (via right calc + visible overflow) so it is always on-screen on mobile.
+		     Menu opens top-left of the avatar (JS fixed + clamped) and is fully on-screen.
+		     Clicks inside the menu are stopped from bubbling to the wrapper toggle.
 		     Theme toggle is inside the dropdown. No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
 			<div 
@@ -317,7 +325,7 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl}>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl} onclick={(e) => e.stopPropagation()}>
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
 					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
