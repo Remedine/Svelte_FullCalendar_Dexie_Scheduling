@@ -62,6 +62,10 @@
 	async function refreshRoster() {
 		if (!isAdmin) return;
 		hasAutoLoadedRoster = false;
+		if (!navigator.onLine) {
+			alert('Go online to refresh the roster from PocketBase.');
+			return;
+		}
 		await pullUsersFromServer(true);
 		await loadUsers();
 	}

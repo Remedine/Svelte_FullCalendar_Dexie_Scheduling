@@ -2,6 +2,15 @@
 import PocketBase from 'pocketbase';
 import { db, processSyncQueue, type User } from '$lib/db';
 import { setCurrentUser } from '$lib/stores/auth.svelte';
+import {
+	buildUserFromPbRecord,
+	canRunStaleUserDelete,
+	cleanupDuplicateUsers,
+	deleteDuplicateUserRows,
+	findLocalUserForPbRecord,
+	mergeAuthUserIntoLocal,
+	type PbUserRecord
+} from '$lib/db/userSync';
 
 // PocketBase client singleton
 import { PUBLIC_POCKETBASE_URL } from '$env/static/public';
@@ -24,126 +33,41 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
-// Email Login
-export async function loginWithEmail(email: string, password: string) {
+// Email Login — returns merged Dexie user (PB is source of truth for auth fields).
+export async function loginWithEmail(
+	email: string,
+	password: string
+): Promise<{ authData: { record: PbUserRecord; token: string }; localUser: User }> {
 	try {
 		const normalizedEmail = (email || '').trim().toLowerCase();
 		const authData = await pb.collection('users').authWithPassword(normalizedEmail, password);
-
-		const pbUser = authData.record;
+		const pbUser = authData.record as PbUserRecord;
 
 		// Enforce the app-level "active" flag at login time.
-		// PocketBase authWithPassword itself succeeds for inactive records (no server-side block by default),
-		// but we treat active=false as a hard app-level deactivation (soft-delete / disable access).
-		// This prevents the previous bug where an inactive user could log in successfully but would be
-		// immediately logged out on any refresh (because restore checks active !== false, while the
-		// initial login path did not).
-		// We clear the PB token so the SDK doesn't consider the session valid.
 		if (pbUser.active === false) {
 			pb.authStore.clear();
 			throw new Error('Your account has been deactivated. Please contact an administrator.');
 		}
 
-		// )=- Find existing local Dexie record (for hybrid admin-created users that have local UUID + pbId).
-		// Prefer by email (unique), then firstName/name guess, then by pbId.
-		// This prevents duplicate records in Dexie when a locally-created crew (with local UUID id) later does email login.
-		// For pure PB users (no prior local), we'll create with PB id as key.
-		let existing = await db.users.where('email').equalsIgnoreCase(normalizedEmail).first();
+		let existing = await findLocalUserForPbRecord({ ...pbUser, email: normalizedEmail });
 		if (!existing) {
 			const guess = normalizedEmail.split('@')[0];
 			existing =
 				(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
 				(await db.users.where('name').equalsIgnoreCase(guess).first());
 		}
-		if (!existing && pbUser.id) {
-			existing = await db.users.where('pbId').equals(pbUser.id).first();
-		}
 
-		let localUser: User;
-		if (existing) {
-			// Merge into existing local record (preserve local 'id' UUID for hybrid users, update pbId, sync fields from PB).
-			// )=- pinHash/forcePinUpdate/verified kept only for backward compat with old Dexie data (PIN login removed).
-			localUser = {
-				...existing,
-				id: existing.id, // keep local key
-				pbId: pbUser.id,
-				firstName:
-					pbUser.firstName ||
-					existing.firstName ||
-					(pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
-				lastName:
-					pbUser.lastName ||
-					existing.lastName ||
-					(pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
-				name:
-					pbUser.name ||
-					`${pbUser.firstName || existing.firstName || ''} ${pbUser.lastName || existing.lastName || ''}`.trim() ||
-					email.split('@')[0] ||
-					'Admin',
-				email: pbUser.email || existing.email || '',  // ensure email from PB is captured on login merge
-				pinHash: existing.pinHash || pbUser.pinHash || '',
-				role: pbUser.role || existing.role || 'admin',
-				// )=- Prefer local data: URL photo (from camera upload in /profile) over PB file reference for offline <img src> support.
-				// Only fall back to PB's photo value if no local data URL.
-				photo:
-					existing.photo && existing.photo.startsWith('data:')
-						? existing.photo
-						: pbUser.photo || existing.photo,
-				active: pbUser.active ?? existing.active ?? true,
-				forcePinUpdate: pbUser.forcePinUpdate ?? existing.forcePinUpdate ?? false,
-				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? existing.forcePhotoUpdate ?? false,
-				// Preserve local "verified: false" marker from admin creation (hybrid local-UUID record).
-				// This keeps the WelcomeModal (temp password → real password) + chained ForcePhoto gate working
-				// even though we create the PB record with verified:true (required for authWithPassword to succeed).
-				// The local flag is flipped to true only by the WelcomeModal success path (Dexie updateUser).
-				verified: existing.verified === false ? false : !!pbUser.verified,
-				createdAt: new Date(pbUser.created || pbUser.createdAt || existing.createdAt),
-				updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt)
-			};
-		} else {
-			// Pure PB user: use PB id as Dexie key (original pattern)
-			localUser = {
-				id: pbUser.id,
-				firstName:
-					pbUser.firstName ||
-					(pbUser.name ? pbUser.name.split(' ')[0] : email.split('@')[0] || 'Admin'),
-				lastName: pbUser.lastName || (pbUser.name ? pbUser.name.split(' ').slice(1).join(' ') : ''),
-				name:
-					pbUser.name ||
-					`${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() ||
-					email.split('@')[0] ||
-					'Admin',
-				email: pbUser.email || '',  // capture email from PB auth record for pure PB users (no prior local Dexie)
-				pinHash: pbUser.pinHash || '',
-				role: pbUser.role || 'admin',
-				photo: pbUser.photo ? pbUser.photo : undefined,
-				active: pbUser.active ?? true,
-				forcePinUpdate: pbUser.forcePinUpdate ?? false,
-				forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
-				verified: !!pbUser.verified,
-				createdAt: new Date(pbUser.created || pbUser.createdAt),
-				updatedAt: new Date(pbUser.updated || pbUser.updatedAt)
-			};
-		}
-
+		const localUser = mergeAuthUserIntoLocal(pbUser, normalizedEmail, existing);
 		await db.users.put(localUser);
+		await deleteDuplicateUserRows(localUser.id!, {
+			pbId: localUser.pbId,
+			email: localUser.email
+		});
+		await cleanupDuplicateUsers();
+
 		setCurrentUser(localUser);
-		console.log(
-			'✅ PB user synced to Dexie (merged if hybrid local record existed):',
-			localUser.name
-		);
+		console.log('✅ PB user synced to Dexie:', localUser.name, 'pbId:', localUser.pbId);
 
-		// )=- Cleanup any duplicate records with the same email but different Dexie key (the old loginWithEmail always-put-pb-id logic + prior admin creation could leave a local-UUID record and a PB-id record).
-		// This cleans historical dups like the two Joe Poe in Dexie. UI loads also dedup now.
-		const dups = await db.users.where('email').equalsIgnoreCase(normalizedEmail).toArray();
-		for (const d of dups) {
-			if (d.id !== localUser.id) {
-				await db.users.delete(d.id!);
-				console.log('🧹 Cleaned duplicate user record with same email', d.id);
-			}
-		}
-
-		// Pull latest data from server first
 		await pullJobsFromServer();
 		await pullClientsFromServer();
 		await pullInvoicesFromServer();
@@ -151,13 +75,15 @@ export async function loginWithEmail(email: string, password: string) {
 			await pullUsersFromServer();
 		}
 
-		// Then push any pending local changes
 		if (navigator.onLine) {
 			await processSyncQueue();
 		}
 
+		// Re-read after pull/queue so caller gets fresh pbId + verified.
+		const fresh = (await db.users.get(localUser.id!)) || localUser;
+		setCurrentUser(fresh);
 		console.log('✅ Login complete + sync queue processed');
-		return authData;
+		return { authData, localUser: fresh };
 	} catch (err) {
 		console.error('Email login failed:', err);
 		throw err;
@@ -311,15 +237,17 @@ export async function pullClientsFromServer() {
 			page++;
 		}
 
-		// Step 2: Find and delete clients that exist in Dexie but not in PB
-		const localClients = await db.clients.toArray();
-
-		for (const localClient of localClients) {
-			if (localClient.pbId && !pbClientIds.has(localClient.pbId)) {
-				await db.clients.delete(localClient.id!);
-				totalDeleted++;
-				console.log(`🗑️ Deleted client from Dexie (no longer in PB): ${localClient.name}`);
+		if (pbClientIds.size > 0) {
+			const localClients = await db.clients.toArray();
+			for (const localClient of localClients) {
+				if (localClient.pbId && !pbClientIds.has(localClient.pbId)) {
+					await db.clients.delete(localClient.id!);
+					totalDeleted++;
+					console.log(`🗑️ Deleted client from Dexie (no longer in PB): ${localClient.name}`);
+				}
 			}
+		} else {
+			console.warn('[pullClients] Skipping stale delete — empty PocketBase client roster');
 		}
 
 		console.log(`✅ Pulled and merged ${totalPulled} clients. Deleted ${totalDeleted} from Dexie.`);
@@ -432,48 +360,18 @@ export async function pullUsersFromServer(force = false) {
 
 	// Always ensure the currently authenticated admin is in Dexie with up-to-date server data.
 	try {
-		const existingSelf =
-			(await db.users.where('pbId').equals(currentAuth.id).first()) ||
-			(currentAuth.id ? await db.users.get(currentAuth.id) : null);
-
-		const nameForSplit = currentAuth.name || '';
-		const computedFirst = currentAuth.firstName || (nameForSplit ? nameForSplit.split(' ')[0] : '');
-		const computedLast =
-			currentAuth.lastName || (nameForSplit ? nameForSplit.split(' ').slice(1).join(' ') : '');
-
-		const selfUser = {
-			id: existingSelf?.id || currentAuth.id,
-			pbId: currentAuth.id,
-			firstName: computedFirst,
-			lastName: computedLast,
-			name:
-				currentAuth.name ||
-				`${computedFirst} ${computedLast}`.trim() ||
-				(currentAuth.email ? currentAuth.email.split('@')[0] : 'Admin'),
-			pinHash: currentAuth.id ? currentAuth.pinHash || existingSelf?.pinHash || '' : '',
-			email: currentAuth.email || '',
-			role: currentAuth.role || 'admin',
-			photo:
-				existingSelf?.photo && existingSelf.photo.startsWith('data:')
-					? existingSelf.photo
-					: currentAuth.photo || existingSelf?.photo,
-			active: currentAuth.active ?? true,
-			forcePinUpdate: existingSelf?.forcePinUpdate ?? currentAuth.forcePinUpdate ?? false,
-			forcePhotoUpdate: currentAuth.forcePhotoUpdate ?? false,
-			// For self (current admin) preserve local false marker if present (defensive).
-			verified: existingSelf?.verified === false ? false : !!currentAuth.verified,
-			createdAt: new Date(
-				currentAuth.created || currentAuth.createdAt || existingSelf?.createdAt || Date.now()
-			),
-			updatedAt: new Date(
-				currentAuth.updated || currentAuth.updatedAt || existingSelf?.updatedAt || Date.now()
-			)
-		};
+		const existingSelf = await findLocalUserForPbRecord(currentAuth as PbUserRecord);
+		const selfUser = buildUserFromPbRecord(currentAuth as PbUserRecord, existingSelf, {
+			isCurrentAuth: true,
+			authEmail: currentAuth.email
+		});
 
 		await db.users.put(selfUser);
 	} catch (e) {
 		console.warn('[pullUsers] Could not upsert current admin self into Dexie', e);
 	}
+
+	let serverTotalItems = 0;
 
 	try {
 		const PAGE_SIZE = 100;
@@ -489,50 +387,17 @@ export async function pullUsersFromServer(force = false) {
 			});
 
 			totalPages = result.totalPages;
+			serverTotalItems = result.totalItems;
 
 			for (const rec of result.items) {
 				pbUserIds.add(rec.id);
 
-				const existingLocal = await db.users.where('pbId').equals(rec.id).first();
+				const existingLocal = await findLocalUserForPbRecord(rec as PbUserRecord);
+				const serverUser = buildUserFromPbRecord(rec as PbUserRecord, existingLocal, {
+					isCurrentAuth: rec.id === currentAuth.id
+				});
 
-				let first = rec.firstName || '';
-				let last = rec.lastName || '';
-				const full = rec.name || `${rec.firstName || ''} ${rec.lastName || ''}`.trim();
-				if ((!first || !last) && full) {
-					// Match the splitting logic used in loginWithEmail so Dexie records from roster pulls
-					// have consistent first/last for UI (edit forms, filters, etc.) even if PB only stores "name".
-					const parts = full.split(' ');
-					first = first || parts[0] || '';
-					last = last || parts.slice(1).join(' ') || '';
-				}
-
-				const serverUser = {
-					id: existingLocal ? existingLocal.id : rec.id,
-					pbId: rec.id,
-					firstName: first,
-					lastName: last,
-					name: full,
-					pinHash: rec.id === currentAuth.id ? rec.pinHash || existingLocal?.pinHash || '' : '',
-					email: rec.email || existingLocal?.email || '',
-					role: rec.role || 'crew',
-					photo: rec.photo || existingLocal?.photo || '',
-					active: rec.active ?? true,
-					forcePinUpdate: existingLocal?.forcePinUpdate ?? false,
-					forcePhotoUpdate: rec.forcePhotoUpdate ?? false,
-					// Preserve a local verified:false (from initial admin creation of a temp-password crew member)
-					// so the first-login Welcome + ForcePhoto gates still trigger even after roster pulls.
-					// PB record is created with verified:true for immediate auth; local flag is the onboarding signal.
-					verified:
-						existingLocal?.verified === false
-							? false
-							: typeof rec.verified === 'boolean'
-								? rec.verified
-								: (existingLocal?.verified ?? false),
-					createdAt: new Date(rec.created || rec.createdAt),
-					updatedAt: new Date(rec.updated || rec.updatedAt)
-				};
-
-				const localUser = await db.users.get(serverUser.id);
+				const localUser = await db.users.get(serverUser.id!);
 				if (localUser && localUser.updatedAt > serverUser.updatedAt) {
 					continue;
 				}
@@ -544,12 +409,19 @@ export async function pullUsersFromServer(force = false) {
 			page++;
 		}
 
-		const localUsers = await db.users.toArray();
-		for (const lu of localUsers) {
-			if (lu.pbId && !pbUserIds.has(lu.pbId)) {
-				await db.users.delete(lu.id!);
-				console.log(`🗑️ Removed stale user from Dexie: ${lu.name}`);
+		if (canRunStaleUserDelete(pbUserIds, serverTotalItems)) {
+			const localUsers = await db.users.toArray();
+			for (const lu of localUsers) {
+				if (!lu.pbId || lu.pbId === currentAuth.id) continue;
+				if (!pbUserIds.has(lu.pbId)) {
+					await db.users.delete(lu.id!);
+					console.log(`🗑️ Removed stale user from Dexie: ${lu.name}`);
+				}
 			}
+		} else {
+			console.warn(
+				`[pullUsers] Skipping stale delete — roster incomplete (pulled ${pbUserIds.size}/${serverTotalItems} PB ids)`
+			);
 		}
 
 		if (pulled > 0) {

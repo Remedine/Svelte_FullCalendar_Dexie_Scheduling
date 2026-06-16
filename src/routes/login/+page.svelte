@@ -1,15 +1,9 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-	// )=- Completely removed PIN login option (per user request). Now ONLY email/password via PocketBase authWithPassword.
-	// No tabs, no PIN fields, no activeTab, no pinLogin import or forcePin redirects.
-	// handleLogin does email path + Dexie lookup + setCurrentUser + goto('/calendar').
-	// Layout + auth store provide the single source of truth (no more dual auth paths).
-	// BEM classes preserved on the form (login-card, login-form__*).
-	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	import { loginWithEmail } from '$lib/db/pb';
 	import { goto } from '$app/navigation';
-	import { setCurrentUser } from '$lib/stores/auth.svelte';
 	import { db } from '$lib/db';
+	import type { User } from '$lib/db';
 	import WelcomeModal from '$lib/components/WelcomeModal.svelte';
 	import ForcePhotoUpdate from '$lib/components/ForcePhotoUpdate.svelte';
 
@@ -18,76 +12,43 @@
 	let isLoading = $state(false);
 	let error = $state('');
 	let showWelcome = $state(false);
-	let welcomeUser = $state<any>(null);
+	let welcomeUser = $state<User | null>(null);
 
 	// Separate force-photo gate (can appear after Welcome password step for new crew,
 	// or directly on login for verified users where an admin set forcePhotoUpdate).
 	let showForcePhoto = $state(false);
-	let forcePhotoUser = $state<any>(null);
+	let forcePhotoUser = $state<User | null>(null);
 
-	$effect(() => {
-		// Auto-redirect if already authenticated via layout/store restore.
-	});
+	function userNeedsPhoto(user: User): boolean {
+		if (!user.forcePhotoUpdate) return false;
+		const photo = user.photo?.trim();
+		return !photo;
+	}
 
 	async function handleLogin() {
 		isLoading = true;
 		error = '';
 
 		try {
-			// Email / PB path only. Always normalize to lowercase before PB (case can cause validation/auth errors).
 			const normalizedEmail = (email || '').trim().toLowerCase();
-			await loginWithEmail(normalizedEmail, password);
-
-			// Sync the PB-authenticated user into the central Dexie-backed store
-			// so the UI (nav, guards, role checks) sees a consistent user object.
-			// Prefer email lookup (unique). Fallback to firstName or legacy name.
-			let cachedUser = await db.users.where('email').equalsIgnoreCase(normalizedEmail).first();
-
-			if (!cachedUser) {
-				const guess = normalizedEmail.split('@')[0];
-				cachedUser =
-					(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
-					(await db.users.where('name').equalsIgnoreCase(guess).first());
-			}
-
-			if (!cachedUser) {
-				// Fallback to a seeded admin for development if email user not yet in Dexie
-				cachedUser = await db.users.where('name').equalsIgnoreCase('admin').first();
-			}
-
-			// Keep original email var in sync for any UI display (the normalized one is used for all PB/Dexie logic).
+			const { localUser } = await loginWithEmail(normalizedEmail, password);
 			email = normalizedEmail;
 
-			if (cachedUser) {
-				setCurrentUser(cachedUser);
-				console.log('✅ User synced to central auth store after PB email login');
-
-				// Separate gates:
-				// - !verified → WelcomeModal (temp password → real password + verified flag)
-				// - verified + forcePhotoUpdate → ForcePhotoUpdate modal (reusable; can be triggered
-				//   without a password change when admin forces a new photo later via Crew).
-				// The Welcome onClose will chain into ForcePhoto (if still flagged) so first-time
-				// crew get both steps in one flow without re-logging in.
-				// Use explicit === false (the marker we set at admin creation time for temp-password crew).
-				// After protection in loginWithEmail / pullUsers, already-onboarded users keep verified:true
-				// even if later forcePhotoUpdate is set by admin. This prevents "force photo" from also
-				// triggering the password Welcome flow.
-				if (cachedUser.verified === false) {
-					welcomeUser = cachedUser;
-					showWelcome = true;
-				} else if (cachedUser.forcePhotoUpdate) {
-					forcePhotoUser = cachedUser;
-					showForcePhoto = true;
-				} else {
-					goto('/calendar', { replaceState: true });
-				}
+			// Separate gates:
+			// - !verified → WelcomeModal (temp password → real password + verified flag)
+			// - verified + forcePhotoUpdate → ForcePhotoUpdate modal
+			// PB verified is source of truth (mergeAuthUserIntoLocal); local false only applies
+			// when PB has not yet marked the account verified (temp-password first login).
+			if (localUser.verified === false) {
+				welcomeUser = localUser;
+				showWelcome = true;
+			} else if (userNeedsPhoto(localUser)) {
+				forcePhotoUser = localUser;
+				showForcePhoto = true;
 			} else {
 				goto('/calendar', { replaceState: true });
 			}
 		} catch (err: any) {
-			// Surface better messages from PocketBase auth errors (e.g. bad credentials, disabled, etc.)
-			// Our custom inactive-account rejection (thrown from loginWithEmail after successful PB auth but before
-			// establishing the session) will come through as err.message.
 			const pbData = err?.response?.data;
 			error = pbData?.password?.message || pbData?.email?.message || err?.message || 'Login failed';
 			console.error('Login attempt failed:', err);
@@ -97,8 +58,6 @@
 	}
 
 	// Re-check Dexie after WelcomeModal completes (the Welcome step only sets verified, not forcePhotoUpdate).
-	// Uses the email $state (which is normalized to lowercase in handleLogin) for lookups.
-	// If the flag is still true we show the dedicated photo component immediately.
 	async function checkPhotoRequirementAndContinue() {
 		const currentEmail = (email || '').trim().toLowerCase();
 		if (!currentEmail) {
@@ -110,14 +69,13 @@
 			let fresh = await db.users.where('email').equalsIgnoreCase(currentEmail).first();
 
 			if (!fresh) {
-				// Fallbacks (same as handleLogin)
 				const guess = currentEmail.split('@')[0];
 				fresh =
 					(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
 					(await db.users.where('name').equalsIgnoreCase(guess).first());
 			}
 
-			if (fresh && fresh.forcePhotoUpdate) {
+			if (fresh && userNeedsPhoto(fresh)) {
 				forcePhotoUser = fresh;
 				showForcePhoto = true;
 			} else {
@@ -135,11 +93,6 @@
 			<h1 class="login-card__title">CapitalCity Windows</h1>
 			<p class="login-card__subtitle">Crew Login</p>
 
-			<!-- )=- PIN login completely removed. This page is now email/password ONLY.
-         No tabs, no activeTab, no pinLogin path, no forcePinUpdate redirects.
-         All auth goes through PocketBase authWithPassword (loginWithEmail).
-         Layout guards + central auth store handle post-login state.
-         )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 			<form
 				onsubmit={(e) => {
 					e.preventDefault();
@@ -192,8 +145,6 @@
 			onClose={() => {
 				showWelcome = false;
 				welcomeUser = null;
-				// After password+verify step, check Dexie for the (possibly still-set) forcePhotoUpdate flag.
-				// This makes the photo step part of the natural first-login flow for new crew without requiring another login.
 				checkPhotoRequirementAndContinue();
 			}}
 		/>

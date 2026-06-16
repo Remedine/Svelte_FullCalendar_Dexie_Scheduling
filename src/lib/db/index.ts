@@ -1081,8 +1081,20 @@ export async function deleteUser(userId: string) {
 	if (!exists) return;
 
 	const idToDelete = exists.pbId || userId;
+	const emailKey = exists.email?.toLowerCase();
 
-	await db.users.delete(userId);
+	const siblings = await db.users
+		.filter(
+			(u) =>
+				u.id === userId ||
+				(exists.pbId && u.pbId === exists.pbId) ||
+				(!!emailKey && u.email?.toLowerCase() === emailKey)
+		)
+		.toArray();
+
+	for (const s of siblings) {
+		await db.users.delete(s.id!);
+	}
 
 	await addToSyncQueue({
 		type: 'delete',
@@ -1091,6 +1103,25 @@ export async function deleteUser(userId: string) {
 	});
 
 	if (navigator.onLine) await processSyncQueue();
+}
+
+export async function resolveUserPbId(localUserId: string): Promise<string | null> {
+	if (!localUserId) return null;
+
+	let user = await db.users.get(localUserId);
+	if (user?.pbId) return user.pbId;
+
+	await new Promise((r) => setTimeout(r, 60));
+	user = await db.users.get(localUserId);
+	if (user?.pbId) return user.pbId;
+
+	const isUuid = (id: string) =>
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+	// Never PATCH PocketBase with a Dexie UUID — caller must skip or wait for sync.
+	if (user?.id && isUuid(user.id)) return null;
+
+	return user?.id || null;
 }
 
 export async function resolveClientPbId(localClientId: string): Promise<string> {
@@ -1325,8 +1356,13 @@ export async function processSyncQueue() {
 					}
 				} else if (item.type === 'update') {
 					try {
-						const currentUser = await db.users.get(item.recordId);
-						const realId = currentUser?.pbId || currentUser?.id || item.recordId;
+						const realId = await resolveUserPbId(item.recordId);
+						if (!realId) {
+							console.warn(
+								`ℹ️ Skipping user update for ${item.recordId} — no PocketBase id yet (awaiting create sync)`
+							);
+							continue;
+						}
 
 						const { id, pbId, createdAt: _createdAt, updatedAt: _updatedAt, ...cleanData } = item.data;
 
@@ -1827,36 +1863,7 @@ export async function processSyncQueue() {
 	}
 }
 
-export async function cleanupDuplicateUsers() {
-	// )=- General dedup for users by email to handle cases where loginWithEmail created a shadow record (PB id as key) alongside a local UUID record from admin creation.
-	// Prefers keeping a record with firstName/lastName (from creation), ensures pbId is on kept, deletes others.
-	// Called from user list loads and login to keep Dexie clean. UI also has per-list dedup.
-	const allUsers = await db.users.toArray();
-	const byEmail: { [k: string]: any[] } = {};
-	for (const u of allUsers) {
-		if (u.email) {
-			(byEmail[u.email] ||= []).push(u);
-		}
-	}
-	for (const email in byEmail) {
-		const group = byEmail[email];
-		if (group.length > 1) {
-			const keep = group.find((g) => g.firstName && g.lastName) || group[0];
-			console.log(
-				`🧹 cleanupDuplicateUsers: keeping ${keep.id} for ${email}, removing ${group.length - 1} dup(s)`
-			);
-			for (const g of group) {
-				if (g.id !== keep.id) {
-					await db.users.delete(g.id!);
-				}
-			}
-			const pbIdCandidate = group.find((g) => g.pbId)?.pbId;
-			if (pbIdCandidate && !keep.pbId) {
-				await db.users.update(keep.id!, { pbId: pbIdCandidate });
-			}
-		}
-	}
-}
+export { cleanupDuplicateUsers } from '$lib/db/userSync';
 
 export { db };
 // )=- No need for extra "export type" re-export. The `export interface Invoice` declaration (above) already makes
