@@ -17,10 +17,6 @@
 
 	let showAvatarMenu = $state(false);
 
-	// Refs for reliable positioning of the mobile avatar menu (fixed + on-screen clamp).
-	let avatarWrapperEl: HTMLDivElement | null = $state(null);
-	let menuEl: HTMLDivElement | null = $state(null);
-
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
 		await logout();
@@ -65,10 +61,9 @@
 		}
 	});
 
-	// Robust outside-click closer for the mobile avatar menu.
+	// Robust outside-click closer for the mobile avatar menu (typical submenu pattern).
 	// Always attached (while layout is mounted) and only acts when menu is open.
-	// This avoids timing issues with adding the listener inside the "open" click itself
-	// (which previously could prevent reliable opening on tap/click).
+	// This avoids timing issues with adding the listener inside the "open" click itself.
 	$effect(() => {
 		const handleOutsideClick = (event: MouseEvent) => {
 			if (!showAvatarMenu) return;
@@ -83,60 +78,6 @@
 		return () => {
 			document.removeEventListener('click', handleOutsideClick, { capture: true });
 		};
-	});
-
-	// Position the mobile dropdown using position:fixed + measurements + clamping.
-	// This guarantees it opens "top left" (above + extending left from the avatar)
-	// and is fully visible on screen regardless of ancestor overflow/clipping.
-	// We still rely on the CSS class:open rule for display:none <-> flex.
-	$effect(() => {
-		if (!menuEl) return;
-
-		if (!showAvatarMenu || !avatarWrapperEl) {
-			// Clear any inline fixed positioning when closed so CSS takes over (display:none).
-			menuEl.style.position = '';
-			menuEl.style.top = '';
-			menuEl.style.left = '';
-			menuEl.style.right = '';
-			menuEl.style.zIndex = '';
-			return;
-		}
-
-		// Defer to ensure Svelte has applied class:open (display:flex) and layout is updated.
-		queueMicrotask(() => {
-			if (!showAvatarMenu || !avatarWrapperEl || !menuEl) return;
-
-			const rect = avatarWrapperEl.getBoundingClientRect();
-			const vw = window.innerWidth || 360;
-			const menuWidth = 150;
-			const approxMenuHeight = 102; // Profile row + theme row + logout row + paddings/borders/gap
-			const gapAbove = 6;
-
-			// Anchor above the bottom bar near the avatar.
-			let top = rect.top - approxMenuHeight - gapAbove;
-			top = Math.max(8, top); // never off the top of the screen
-
-			// "Top left" placement: position the menu entirely to the left of the avatar
-			// (menu right edge near the left side of the wrapper/avatar). This prevents
-			// the logout (and other items) from sitting "underneath" the avatar visually
-			// or in hit-testing, and leaves the avatar tappable to dismiss the menu.
-			// The menu still gets clamped so it's fully on-screen with margins.
-			let desiredRight = rect.left - 4; // small gap so menu is left of the avatar
-			let left = desiredRight - menuWidth;
-			if (left < 8) left = 8;
-			// If the menu would overflow the right edge of the viewport, shift it left.
-			const menuRight = left + menuWidth;
-			if (menuRight > vw - 8) {
-				left = vw - 8 - menuWidth;
-			}
-
-			menuEl.style.position = 'fixed';
-			menuEl.style.top = `${top}px`;
-			menuEl.style.left = `${left}px`;
-			menuEl.style.right = 'auto';
-			menuEl.style.bottom = 'auto';
-			menuEl.style.zIndex = '999'; // above the fixed bottom nav and page content
-		});
 	});
 </script>
 
@@ -289,13 +230,13 @@
 
 		<!-- Mobile-only: avatar with dropdown menu integrated into bottom nav.
 		     Clicking avatar toggles the menu (Profile + dark mode toggle + Logout).
-		     Menu opens top-left of the avatar (JS fixed + clamped) and is fully on-screen.
-		     Clicks inside the menu are stopped from bubbling to the wrapper toggle.
+		     Typical submenu: position:absolute on the menu (relative parent), bottom:100% + right:100%
+		     so it appears above + to the left of the avatar wrapper without affecting nav height.
+		     stopPropagation prevents clicks inside from triggering the wrapper toggle.
 		     Theme toggle is inside the dropdown. No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
 			<div 
 				class="bottom-nav__avatar-wrapper"
-				bind:this={avatarWrapperEl}
 				role="button"
 				tabindex="0"
 				aria-expanded={showAvatarMenu}
@@ -325,7 +266,7 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl} onclick={(e) => e.stopPropagation()}>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} onclick={(e) => e.stopPropagation()}>
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
 					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
@@ -620,16 +561,19 @@
 	}
 
 	/* Mobile: avatar integrated into right side of bottom nav.
-	   Dropdown menu (opened by click) contains Profile + Theme toggle (as item) + Logout.
-	   Opens top-left (right:calc(100%+...) + overflow-y:visible) to ensure fully visible on screen.
-	   No stacking of toggle under avatar. Avatar wrapper pushed to far right. */
+	   Dropdown is a classic submenu: the wrapper is position:relative; the menu child uses
+	   position:absolute so it pops out above + to the left without ever affecting the
+	   height or flex layout of the bottom-nav or wrapper (no "expanding the nav menu height").
+	   bottom:100% + gap → directly above the avatar.
+	   right:100% + small → menu body extends left of the parent wrapper.
+	   .open (from click) or :hover/:focus-within controls visibility. */
 	@media (max-width: 768px) {
 		.bottom-nav {
 			align-items: center;
 			padding: 0 8px 0 0; /* extra right padding so the avatar on the far right has breathing room like the other tabs */
 			box-sizing: border-box;
 			overflow-x: hidden; /* prevent horizontal page widening from nav tabs */
-			overflow-y: visible; /* allow the avatar dropdown menu (positioned above) to be fully visible, not clipped */
+			overflow-y: visible; /* allow absolute submenu to pop upward without clipping */
 			max-width: 100vw;
 		}
 
@@ -671,16 +615,16 @@
 		}
 
 		.bottom-nav__user-menu {
-			/* Positioning is now handled via JS + position:fixed + clamping in the $effect
-			   (when .open + showAvatarMenu) to guarantee "top left" placement that is always
-			   fully visible on screen (no ancestor clipping, right-edge breathing room).
-			   We keep display control + visual styles here. */
+			position: absolute;
+			bottom: calc(100% + 6px); /* above the avatar/wrapper */
+			right: calc(100% + 2px); /* to the left of the parent wrapper (menu body extends left) */
+			left: auto;
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
 			box-shadow: var(--shadow-md);
 			min-width: 140px;
-			z-index: var(--z-dropdown);
+			z-index: 400; /* above bottom-nav content */
 			display: none;
 			flex-direction: column;
 		}
