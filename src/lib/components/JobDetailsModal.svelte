@@ -691,6 +691,7 @@
 		font-weight: var(--font-weight-medium);
 		border: 1px solid var(--color-border-strong);
 		background: var(--color-surface);
+		color: var(--color-text);
 		cursor: pointer;
 	}
 
@@ -794,6 +795,9 @@
 		.job-details-modal__small-btn {
 			font-size: var(--font-size-xs);
 			padding: 0.1rem 0.4rem;
+			color: var(--color-text);
+			background: var(--color-surface);
+			border: 1px solid var(--color-border-strong);
 		}
 	}
 </style>

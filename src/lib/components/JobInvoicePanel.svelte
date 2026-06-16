@@ -478,8 +478,11 @@
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
-		cursor: pointer;
 		color: var(--color-text);
+		cursor: pointer;
+	}
+	.job-invoice-panel__small-btn:hover {
+		background: var(--color-surface-alt);
 	}
 	@media (max-width: 768px) {
 		.job-invoice-panel__small-btn {
@@ -491,6 +494,9 @@
 		background: var(--color-primary);
 		color: white;
 		border-color: var(--color-primary);
+	}
+	.job-invoice-panel__small-btn--primary:hover {
+		filter: brightness(1.1);
 	}
 
 	.job-invoice-panel__file-row {
