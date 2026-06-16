@@ -17,6 +17,10 @@
 
 	let showAvatarMenu = $state(false);
 
+	// Refs for reliable positioning of the mobile avatar menu (fixed + on-screen clamp).
+	let avatarWrapperEl: HTMLDivElement | null = $state(null);
+	let menuEl: HTMLDivElement | null = $state(null);
+
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
 		await logout();
@@ -61,11 +65,13 @@
 		}
 	});
 
-	// Close avatar menu on outside click (important for mobile tap support, since :hover doesn't work on touch)
+	// Robust outside-click closer for the mobile avatar menu.
+	// Always attached (while layout is mounted) and only acts when menu is open.
+	// This avoids timing issues with adding the listener inside the "open" click itself
+	// (which previously could prevent reliable opening on tap/click).
 	$effect(() => {
-		if (!showAvatarMenu) return;
-
 		const handleOutsideClick = (event: MouseEvent) => {
+			if (!showAvatarMenu) return;
 			const wrapper = document.querySelector('.bottom-nav__avatar-wrapper');
 			if (wrapper && !wrapper.contains(event.target as Node)) {
 				showAvatarMenu = false;
@@ -77,6 +83,53 @@
 		return () => {
 			document.removeEventListener('click', handleOutsideClick, { capture: true });
 		};
+	});
+
+	// Position the mobile dropdown using position:fixed + measurements + clamping.
+	// This guarantees it opens "top left" (above + extending left from the avatar)
+	// and is fully visible on screen regardless of ancestor overflow/clipping.
+	// We still rely on the CSS class:open rule for display:none <-> flex.
+	$effect(() => {
+		if (!menuEl) return;
+
+		if (!showAvatarMenu || !avatarWrapperEl) {
+			// Clear any inline fixed positioning when closed so CSS takes over (display:none).
+			menuEl.style.position = '';
+			menuEl.style.top = '';
+			menuEl.style.left = '';
+			menuEl.style.right = '';
+			menuEl.style.zIndex = '';
+			return;
+		}
+
+		// Defer to ensure Svelte has applied class:open (display:flex) and layout is updated.
+		queueMicrotask(() => {
+			if (!showAvatarMenu || !avatarWrapperEl || !menuEl) return;
+
+			const rect = avatarWrapperEl.getBoundingClientRect();
+			const vw = window.innerWidth || 360;
+			const menuWidth = 150;
+			const approxMenuHeight = 102; // Profile row + theme row + logout row + paddings/borders/gap
+			const gapAbove = 6;
+
+			// Anchor above the bottom bar near the avatar.
+			let top = rect.top - approxMenuHeight - gapAbove;
+			top = Math.max(8, top); // never off the top of the screen
+
+			// "Top left" visible placement: menu's right edge near the avatar's right but
+			// clamped so the entire menu (incl. border + shadow) has breathing room from the viewport right edge.
+			// This extends the menu body leftward (inward) from the right side of the bar.
+			let desiredRight = Math.min(rect.right, vw - 8);
+			let left = desiredRight - menuWidth;
+			if (left < 8) left = 8;
+
+			menuEl.style.position = 'fixed';
+			menuEl.style.top = `${top}px`;
+			menuEl.style.left = `${left}px`;
+			menuEl.style.right = 'auto';
+			menuEl.style.bottom = 'auto';
+			menuEl.style.zIndex = '999'; // above the fixed bottom nav and page content
+		});
 	});
 </script>
 
@@ -234,6 +287,7 @@
 		{#if auth.currentUser}
 			<div 
 				class="bottom-nav__avatar-wrapper"
+				bind:this={avatarWrapperEl}
 				role="button"
 				tabindex="0"
 				aria-expanded={showAvatarMenu}
@@ -263,7 +317,7 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu" class:open={showAvatarMenu}>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl}>
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
 					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
@@ -609,10 +663,10 @@
 		}
 
 		.bottom-nav__user-menu {
-			position: absolute;
-			bottom: calc(100% + 6px);
-			right: calc(100% + 2px); /* open top-left of the avatar: menu's right edge aligns near wrapper's left so menu body extends left (inward) and is fully on-screen even on mobile */
-			left: auto;
+			/* Positioning is now handled via JS + position:fixed + clamping in the $effect
+			   (when .open + showAvatarMenu) to guarantee "top left" placement that is always
+			   fully visible on screen (no ancestor clipping, right-edge breathing room).
+			   We keep display control + visual styles here. */
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
