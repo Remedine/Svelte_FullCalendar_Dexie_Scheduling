@@ -17,10 +17,6 @@
 
 	let showAvatarMenu = $state(false);
 
-	// Refs for the avatar wrapper (for positioning the menu relative to it).
-	let avatarWrapperEl = $state(null);
-	let menuEl = $state(null);
-
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
 		await logout();
@@ -65,68 +61,21 @@
 		}
 	});
 
-	// Robust outside-click closer for the mobile avatar menu (typical submenu pattern).
-	// Always attached (while layout is mounted) and only acts when menu is open.
-	// This avoids timing issues with adding the listener inside the "open" click itself.
+	// Close the avatar modal on Escape key.
 	$effect(() => {
-		const handleOutsideClick = (event: MouseEvent) => {
-			if (!showAvatarMenu) return;
-			const wrapper = document.querySelector('.bottom-nav__avatar-wrapper');
-			if (wrapper && !wrapper.contains(event.target as Node)) {
+		if (!showAvatarMenu) return;
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
 				showAvatarMenu = false;
 			}
 		};
 
-		document.addEventListener('click', handleOutsideClick, { capture: true });
+		document.addEventListener('keydown', handleEscape);
 
 		return () => {
-			document.removeEventListener('click', handleOutsideClick, { capture: true });
+			document.removeEventListener('keydown', handleEscape);
 		};
-	});
-
-	// Position the menu using fixed (viewport) so it always appears on-screen above the avatar
-	// and to the left of the wrapper, without being clipped by any ancestor overflow.
-	// Declaring position:fixed in CSS base ensures it never participates in the parent's
-	// flex layout (avoids expanding the bottom nav height when opening).
-	$effect(() => {
-		if (!menuEl) return;
-
-		if (!showAvatarMenu || !avatarWrapperEl) {
-			if (menuEl) {
-				menuEl.style.top = '';
-				menuEl.style.left = '';
-				menuEl.style.right = '';
-				menuEl.style.bottom = '';
-				menuEl.style.zIndex = '';
-			}
-			return;
-		}
-
-		queueMicrotask(() => {
-			if (!showAvatarMenu || !avatarWrapperEl || !menuEl) return;
-
-			const rect = avatarWrapperEl.getBoundingClientRect();
-			const approxMenuHeight = 110;
-			const menuWidth = 150;
-			const gap = 6;
-
-			// Place directly above the avatar area
-			// Shift up an extra ~70px as requested (translate the whole menu higher)
-			let top = rect.top - approxMenuHeight - gap - 70;
-			top = Math.max(8, top);
-
-			// "Top left of the parent": align menu's right edge near the wrapper's left
-			// so the menu body extends to the left of the avatar.
-			let left = rect.left - menuWidth - 2;
-			if (left < 8) left = 8;
-
-			menuEl.style.position = 'fixed';
-			menuEl.style.top = `${top}px`;
-			menuEl.style.left = `${left}px`;
-			menuEl.style.right = 'auto';
-			menuEl.style.bottom = 'auto';
-			menuEl.style.zIndex = '999';
-		});
 	});
 </script>
 
@@ -277,20 +226,17 @@
 			</a>
 		{/if}
 
-		<!-- Mobile-only: avatar with dropdown menu integrated into bottom nav.
-		     Clicking avatar toggles the menu (Profile + dark mode toggle + Logout).
-		     Typical submenu: position:absolute on the menu (relative parent), bottom:100% + right:100%
-		     so it appears above + to the left of the avatar wrapper without affecting nav height.
-		     stopPropagation prevents clicks inside from triggering the wrapper toggle.
-		     Theme toggle is inside the dropdown. No separate footer or brand text on mobile. -->
+		<!-- Mobile-only: avatar that opens a modal popup (Profile, dark mode, Logout).
+		     Changed from problematic submenu to a proper centered modal for reliable visibility
+		     on mobile. Backdrop handles outside clicks. Theme toggle is inside the modal.
+		     No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
 			<div 
 				class="bottom-nav__avatar-wrapper"
-				bind:this={avatarWrapperEl}
 				role="button"
 				tabindex="0"
 				aria-expanded={showAvatarMenu}
-				aria-haspopup="menu"
+				aria-haspopup="dialog"
 				aria-label="User menu"
 				onclick={() => showAvatarMenu = !showAvatarMenu}
 				onkeydown={(e) => {
@@ -298,7 +244,6 @@
 						showAvatarMenu = !showAvatarMenu;
 						e.preventDefault();
 					}
-					if (e.key === 'Escape') showAvatarMenu = false;
 				}}
 			>
 				<div class="bottom-nav__avatar">
@@ -316,22 +261,30 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl} onclick={(e) => e.stopPropagation()}>
-					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
-					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
-					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
-						<ThemeToggle />
-					</div>
-					<button
-						onclick={() => { showAvatarMenu = false; handleLogout(); }}
-						class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
-					>
-						Logout
-					</button>
-				</div>
 			</div>
 		{/if}
 	</nav>
+
+	<!-- Avatar modal popup (replaces the old submenu that had positioning/clipping/height issues).
+	     Centered, with backdrop. Clicking backdrop or items closes it. -->
+	{#if showAvatarMenu}
+		<div class="bottom-nav__user-modal-backdrop" onclick={() => showAvatarMenu = false}>
+			<div class="bottom-nav__user-modal" onclick={(e) => e.stopPropagation()}>
+				<div class="bottom-nav__user-modal-header">Account</div>
+				<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
+				<!-- Theme toggle inside the modal for cleaner mobile nav -->
+				<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
+					<ThemeToggle />
+				</div>
+				<button
+					onclick={() => { showAvatarMenu = false; handleLogout(); }}
+					class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
+				>
+					Logout
+				</button>
+			</div>
+		</div>
+	{/if}
 
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
 	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
@@ -756,6 +709,59 @@
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
+		}
+
+		/* Avatar modal popup styles (centered modal instead of submenu for reliable mobile UX).
+		   Backdrop covers screen; modal is a simple card with the menu actions. */
+		.bottom-nav__user-modal-backdrop {
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.55);
+			z-index: 999;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+
+		.bottom-nav__user-modal {
+			background: var(--color-surface);
+			border: 1px solid var(--color-border);
+			border-radius: var(--radius-lg);
+			box-shadow: var(--shadow-lg);
+			width: 100%;
+			max-width: 280px;
+			padding: 0;
+			overflow: hidden;
+			display: flex;
+			flex-direction: column;
+		}
+
+		.bottom-nav__user-modal-header {
+			padding: var(--space-3) var(--space-4);
+			font-size: var(--font-size-sm);
+			font-weight: var(--font-weight-semibold);
+			color: var(--color-text-muted);
+			border-bottom: 1px solid var(--color-border);
+			background: var(--color-surface-alt);
+		}
+
+		/* Reuse and enhance the existing menu-item styles for the modal content */
+		.bottom-nav__user-modal .bottom-nav__user-menu-item {
+			padding: 14px 18px;
+			font-size: var(--font-size-base);
+			border-bottom: 1px solid var(--color-border);
+		}
+
+		.bottom-nav__user-modal .bottom-nav__user-menu-item:last-child {
+			border-bottom: none;
+		}
+
+		.bottom-nav__user-modal .bottom-nav__user-menu-item--logout {
+			color: var(--color-danger);
+		}
+
+		.bottom-nav__user-modal .bottom-nav__user-menu-item--logout:hover {
+			background: var(--color-danger-soft);
 		}
 	}
 </style>
