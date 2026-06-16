@@ -7,6 +7,7 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs } from '$lib/db/index';
 	import { pullJobsFromServer, pb } from '$lib/db/pb';
+	import { onJobsRealtime } from '$lib/db/realtime';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -202,72 +203,64 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 	});
 
 	// === Realtime push for cross-device appointment changes ===
-	// PocketBase realtime subscription so that when another phone/tablet (or desktop) updates a job,
-	// the change appears quickly here without requiring a manual pull or page reload.
-	// We put the incoming record into Dexie (same shape as pullJobsFromServer) and refresh the
-	// in-memory jobs snapshot + the FullCalendar view.
-	// Self-changes (from this device) are harmless (replay of what we already did optimistically).
-	// Cleanup on unmount. Only active while the calendar component is mounted.
+	// Uses shared jobs realtime (single SSE client) — see $lib/db/realtime.ts.
+	// If realtime fails (PB restart, Railway multi-instance, stale clientId), login pulls + manual
+	// sync + periodic fallback pull below still keep the calendar correct.
 	$effect(() => {
 		if (!pb.authStore.isValid) return;
 
-		let unsub: (() => void) | null = null;
+		let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-		(async () => {
-			try {
-				unsub = await pb.collection('jobs').subscribe('*', async (e: any) => {
-					// e.action: 'create' | 'update' | 'delete'
-					const rec = e.record;
-					if (!rec) return;
+		const offRealtime = onJobsRealtime(async (e) => {
+			const rec = e.record as any;
+			if (!rec) return;
 
-					// Mirror the serverJob shape used in pullJobsFromServer
-					const serverJob = {
-						id: rec.id,
-						clientId: rec.expand?.client?.id || rec.client,
-						title: rec.title,
-						start: new Date(rec.start),
-						end: new Date(rec.end),
-						assignedCrew: rec.assignedCrew || [],
-						status: rec.status,
-						billableItems: rec.billableItems || [],
-						subtotal: rec.subtotal || 0,
-						taxRate: rec.taxRate || 0.08,
-						taxAmount: rec.taxAmount || 0,
-						totalAmount: rec.totalAmount || 0,
-						areaOfTown: rec.areaOfTown,
-						notes: rec.notes,
-						cancelReason: rec.cancelReason,
-						cancelNotes: rec.cancelNotes,
-						cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
-						cancelledBy: rec.cancelledBy,
-						createdAt: new Date(rec.created),
-						updatedAt: new Date(rec.updated)
-					};
+			const serverJob = {
+				id: rec.id,
+				clientId: rec.expand?.client?.id || rec.client,
+				title: rec.title,
+				start: new Date(rec.start),
+				end: new Date(rec.end),
+				assignedCrew: rec.assignedCrew || [],
+				status: rec.status,
+				billableItems: rec.billableItems || [],
+				subtotal: rec.subtotal || 0,
+				taxRate: rec.taxRate || 0.08,
+				taxAmount: rec.taxAmount || 0,
+				totalAmount: rec.totalAmount || 0,
+				areaOfTown: rec.areaOfTown,
+				notes: rec.notes,
+				cancelReason: rec.cancelReason,
+				cancelNotes: rec.cancelNotes,
+				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+				cancelledBy: rec.cancelledBy,
+				createdAt: new Date(rec.created),
+				updatedAt: new Date(rec.updated)
+			};
 
-					await db.jobs.put(serverJob);
+			await db.jobs.put(serverJob);
 
-					// Refresh our local snapshot (drives MonthPicker + provider) + the FC grid
-					// Use the same wide range we use on initial load.
-					const includeCancelled = filters.statuses.includes('cancelled');
-					const start = new Date();
-					start.setMonth(start.getMonth() - 2);
-					const end = new Date();
-					end.setMonth(end.getMonth() + 2);
+			const includeCancelled = filters.statuses.includes('cancelled');
+			const start = new Date();
+			start.setMonth(start.getMonth() - 2);
+			const end = new Date();
+			end.setMonth(end.getMonth() + 2);
 
-					const fresh = await getJobsForRange(start, end, includeCancelled);
-					jobs.splice(0, jobs.length, ...fresh);
-					dayApi?.refetchEvents();
-				});
-			} catch (err) {
-				// Realtime may fail silently if permissions or connection; calendar still works via pulls
-				console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
+			const fresh = await getJobsForRange(start, end, includeCancelled);
+			jobs.splice(0, jobs.length, ...fresh);
+			dayApi?.refetchEvents();
+		});
+
+		// Fallback when realtime is down: light periodic pull while calendar is open.
+		pollTimer = setInterval(() => {
+			if (navigator.onLine && pb.authStore.isValid) {
+				pullJobsFromServer().catch(() => {});
 			}
-		})();
+		}, 120_000);
 
 		return () => {
-			if (unsub) {
-				try { unsub(); } catch {}
-			}
+			offRealtime();
+			if (pollTimer) clearInterval(pollTimer);
 		};
 	});
 

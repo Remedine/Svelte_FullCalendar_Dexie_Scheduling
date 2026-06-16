@@ -17,6 +17,8 @@ export async function logout() {
 
 	// Clear PB side if it was used
 	try {
+		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
+		disconnectJobsRealtime();
 		const { pb } = await import('$lib/db/pb');
 		pb.authStore.clear();
 	} catch {}

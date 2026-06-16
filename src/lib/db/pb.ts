@@ -84,6 +84,14 @@ export async function loginWithEmail(
 		const fresh = (await db.users.get(localUser.id!)) || localUser;
 		setCurrentUser(fresh);
 		console.log('✅ Login complete + sync queue processed');
+
+		// Fresh auth token — reset realtime so subscribe uses a new PB client id.
+		const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
+			'$lib/db/realtime'
+		);
+		disconnectJobsRealtime();
+		scheduleJobsRealtimeReconnect(400);
+
 		return { authData, localUser: fresh };
 	} catch (err) {
 		console.error('Email login failed:', err);
@@ -500,6 +508,7 @@ export async function pullUsersFromServer(force = false) {
 }
 
 export function logout() {
+	import('$lib/db/realtime').then(({ disconnectJobsRealtime }) => disconnectJobsRealtime());
 	pb.authStore.clear();
 	console.log('👋 Logged out');
 }

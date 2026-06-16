@@ -1,25 +1,15 @@
 <!-- src/lib/components/SyncStatus.svelte -->
 <script lang="ts">
-	import { pb, pullJobsFromServer } from '$lib/db/pb';
-	import { processSyncQueue } from '$lib/db'; // )=- Moved here
+	import { pullJobsFromServer } from '$lib/db/pb';
+	import { onJobsRealtime } from '$lib/db/realtime';
+	import { processSyncQueue } from '$lib/db';
+	import { pb } from '$lib/db/pb';
 
 	let isOnline = $state(true);
 	let lastSynced = $state(new Date());
-	let isSyncing = $state(false); // )=- NEW
-	let currentSubscription: any = null;
+	let isSyncing = $state(false);
 
 	$effect(() => {
-		if (currentSubscription) {
-			try {
-				if (typeof currentSubscription.unsubscribe === 'function') {
-					currentSubscription.unsubscribe();
-				}
-			} catch (e) {
-				console.warn('Cleanup warning:', e);
-			}
-			currentSubscription = null;
-		}
-
 		if (!pb.authStore.isValid) {
 			isOnline = false;
 			return;
@@ -27,53 +17,17 @@
 
 		isOnline = true;
 
-		try {
-			// Force a clean realtime connection before (re)subscribing.
-			// This prevents "Invalid realtime client" 400s that can occur after login,
-			// token restore on refresh, or when a previous (possibly anonymous) realtime client
-			// is still registered on the server. Disconnect resets the internal clientId.
-			// Await the subscribe so errors are caught here and we know the connection succeeded.
-			if (pb.realtime && typeof (pb.realtime as any).disconnect === 'function') {
-				try {
-					(pb.realtime as any).disconnect();
-				} catch {}
-			}
+		const off = onJobsRealtime(async () => {
+			lastSynced = new Date();
+			await pullJobsFromServer();
+		});
 
-			// Wrap in IIFE because the $effect arrow itself is not async, but we want to await the PB subscribe promise.
-			(async () => {
-				currentSubscription = await pb.collection('jobs').subscribe('*', async (e) => {
-					console.log('🔔 Realtime change:', e.action);
-					lastSynced = new Date();
-					await pullJobsFromServer();
-				});
-			})().catch((err) => {
-				console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
-			});
-		} catch (err) {
-			console.warn('[calendar] realtime jobs subscribe failed (non-fatal)', err);
-		}
-
-		return () => {
-			if (currentSubscription) {
-				try {
-					if (typeof currentSubscription.unsubscribe === 'function') {
-						currentSubscription.unsubscribe();
-					}
-				} catch {}
-				currentSubscription = null;
-			}
-			// Also disconnect the realtime transport on unmount to avoid stale client IDs on next mount/login.
-			if (pb.realtime && typeof (pb.realtime as any).disconnect === 'function') {
-				try {
-					(pb.realtime as any).disconnect();
-				} catch {}
-			}
-		};
+		return off;
 	});
 
 	async function manualSync() {
 		try {
-			isSyncing = true; // )=- Start loading
+			isSyncing = true;
 			isOnline = true;
 
 			console.log('🔄 Manual sync triggered');
@@ -86,7 +40,7 @@
 			isOnline = false;
 			console.error('Manual sync failed', err);
 		} finally {
-			isSyncing = false; // )=- End loading
+			isSyncing = false;
 		}
 	}
 </script>
@@ -131,7 +85,6 @@
 	}
 
 	.sync-status__btn {
-		/* base button */
 		margin-left: auto;
 		padding: var(--space-1) var(--space-3);
 		font-size: var(--font-size-xs);
