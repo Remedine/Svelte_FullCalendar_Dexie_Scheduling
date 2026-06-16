@@ -31,6 +31,8 @@ restartPolicyMaxRetries = 10
 # If running PocketBase in the same Railway project, create a separate
 # service (Railway PocketBase template or custom) and point this app's
 # PUBLIC_POCKETBASE_URL at it (use the public domain or internal DNS).
+# PocketBase service must use numReplicas = 1 (see Remedine/pocketbase railway.toml)
+# so SSE + subscribe hit the same instance; Railway has no sticky sessions.
 
 # Variables are intentionally NOT set here (use dashboard or Railway CLI
 # for per-environment values like staging vs prod PB instances).
