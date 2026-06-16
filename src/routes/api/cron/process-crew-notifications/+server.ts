@@ -2,11 +2,7 @@ import { json } from '@sveltejs/kit';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
 import { sendJobAssignmentEmail } from '$lib/server/brevo';
-import {
-	computeCrewNotificationSendAt,
-	isCrewNotificationDue,
-	clientPrefersEmailBilling
-} from '$lib/notifications/crewSchedule';
+import { computeCrewNotificationSendAt, isCrewNotificationDue } from '$lib/notifications/crewSchedule';
 
 type OptionsRecord = {
 	crewAssignmentDaysBefore?: number;
@@ -66,7 +62,7 @@ async function fetchUserEmailByName(name: string): Promise<string | null> {
 	return data.items?.[0]?.email ?? null;
 }
 
-/** Railway cron: send due crew assignment emails (push remains client-only). */
+/** Railway cron: send due crew assignment emails to assigned crew members. */
 export async function POST({ request }: { request: Request }) {
 	const secret = request.headers.get('X-Internal-Secret') || request.headers.get('x-internal-secret');
 	if (!INTERNAL_SECRET || secret !== INTERNAL_SECRET) {
@@ -91,7 +87,6 @@ export async function POST({ request }: { request: Request }) {
 		if (!isCrewNotificationDue(sendAt, now)) continue;
 
 		const client = await fetchClient(job.client);
-		if (!clientPrefersEmailBilling(client?.preferredBillingMethod)) continue;
 
 		const startStr = new Date(job.start).toLocaleString();
 		const endStr = new Date(job.end).toLocaleString();

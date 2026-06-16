@@ -74,7 +74,6 @@
 				invoiceDueDays: 30,
 				crewAssignmentDaysBefore: 1,
 				crewAssignmentHour: 7,
-				notifyCrewAssignmentPush: true,
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -314,9 +313,9 @@
 			<div class="form-section">
 				<h3>Crew Assignment Notifications</h3>
 				<p class="options-page__help">
-					Notifications are queued when crew are assigned and sent at the scheduled time (not
-					immediately). Email is sent only for jobs whose client has preferred billing set to
-					<strong>email</strong> on the client record. Browser push is optional for all assignments.
+					When crew are assigned to a job, an email is queued for each crew member (using their
+					account email) and sent at the scheduled time — not immediately. This is independent of
+					client billing preferences.
 				</p>
 				<div class="form-grid">
 					<label for="opt-crew-days" class="label">Send days before job</label>
@@ -337,12 +336,6 @@
 						class="input"
 						bind:value={editingOptions.crewAssignmentHour}
 					/>
-				</div>
-				<div class="options-page__checkbox-row">
-					<label class="options-page__checkbox-label">
-						<input type="checkbox" bind:checked={editingOptions.notifyCrewAssignmentPush} />
-						Browser push notification (when app is open at send time)
-					</label>
 				</div>
 			</div>
 

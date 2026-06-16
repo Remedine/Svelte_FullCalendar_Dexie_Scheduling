@@ -5,13 +5,8 @@ import { optionsStore } from '$lib/stores/options.svelte';
 import {
 	type CrewNotificationPending,
 	computeCrewNotificationSendAt,
-	isCrewNotificationDue,
-	clientPrefersEmailBilling
+	isCrewNotificationDue
 } from '$lib/notifications/crewSchedule';
-import {
-	ensureNotificationPermission,
-	showCrewAssignmentNotification
-} from '$lib/notifications/push';
 
 const crewNotificationsDb = (
 	db as typeof db & {
@@ -70,36 +65,7 @@ async function sendEmailForAssignment(
 	return res.ok;
 }
 
-async function deliverQueueItem(
-	item: CrewNotificationPending,
-	job: Job,
-	opts: Record<string, unknown>
-): Promise<Partial<CrewNotificationPending>> {
-	const client = job.clientId ? await db.clients.get(job.clientId) : null;
-	const pushOn = opts.notifyCrewAssignmentPush !== false;
-	const emailOn = clientPrefersEmailBilling(client?.preferredBillingMethod);
-
-	const patch: Partial<CrewNotificationPending> = {};
-
-	if (pushOn && !item.pushSent) {
-		await ensureNotificationPermission();
-		showCrewAssignmentNotification(
-			'Job assignment reminder',
-			`${client?.name || 'Client'} — ${new Date(job.start).toLocaleString()}`,
-			`job-assign-${item.jobId}-${item.crewName}`
-		);
-		patch.pushSent = true;
-	}
-
-	if (emailOn && !item.emailSent) {
-		const ok = await sendEmailForAssignment(job, item.crewName, client);
-		if (ok) patch.emailSent = true;
-	}
-
-	return patch;
-}
-
-/** Queue or reschedule notifications for all crew on a job (does not send immediately). */
+/** Queue or reschedule email notifications for assigned crew (does not send immediately). */
 export async function refreshCrewNotificationQueueForJob(jobId: string): Promise<void> {
 	if (!crewNotificationsDb) return;
 
@@ -127,8 +93,7 @@ export async function refreshCrewNotificationQueueForJob(jobId: string): Promise
 	for (const crewName of crewSet) {
 		const id = queueId(jobId, crewName);
 		const prev = existing.find((e) => e.id === id);
-		const fullySent = prev?.emailSent && prev?.pushSent;
-		if (fullySent) continue;
+		if (prev?.emailSent) continue;
 
 		await crewNotificationsDb.put({
 			id,
@@ -136,23 +101,20 @@ export async function refreshCrewNotificationQueueForJob(jobId: string): Promise
 			crewName,
 			scheduledFor,
 			emailSent: prev?.emailSent ?? false,
-			pushSent: prev?.pushSent ?? false,
 			createdAt: prev?.createdAt ?? new Date()
 		});
 	}
 }
 
-/** Process due queued crew notifications (call on app load + interval). */
+/** Process due queued crew assignment emails (call on app load + interval; cron handles server-side). */
 export async function processScheduledCrewNotifications(): Promise<number> {
 	if (!pb.authStore.isValid || !crewNotificationsDb) return 0;
 
-	await optionsStore.load?.();
-	const opts = optionsStore.data || {};
 	const pending = await crewNotificationsDb.toArray();
 	let sent = 0;
 
 	for (const item of pending) {
-		if (!isCrewNotificationDue(item.scheduledFor)) continue;
+		if (!isCrewNotificationDue(item.scheduledFor) || item.emailSent) continue;
 
 		const job = await db.jobs.get(item.jobId);
 		if (!job || job.status === 'cancelled') {
@@ -165,32 +127,17 @@ export async function processScheduledCrewNotifications(): Promise<number> {
 		}
 
 		const client = job.clientId ? await db.clients.get(job.clientId) : null;
-		const pushOn = opts.notifyCrewAssignmentPush !== false;
-		const emailOn = clientPrefersEmailBilling(client?.preferredBillingMethod);
-		const needsEmail = emailOn && !item.emailSent;
-		const needsPush = pushOn && !item.pushSent;
-		if (!needsEmail && !needsPush) {
+		const ok = await sendEmailForAssignment(job, item.crewName, client);
+		if (ok) {
 			await crewNotificationsDb.delete(item.id);
-			continue;
+			sent++;
 		}
-
-		const patch = await deliverQueueItem(item, job, opts);
-		const next = { ...item, ...patch };
-		const done =
-			(!emailOn || next.emailSent) && (!pushOn || next.pushSent);
-
-		if (done) {
-			await crewNotificationsDb.delete(item.id);
-		} else {
-			await crewNotificationsDb.put(next);
-		}
-		if (patch.emailSent || patch.pushSent) sent++;
 	}
 
 	return sent;
 }
 
-/** @deprecated Use refreshCrewNotificationQueueForJob — kept for import sites during transition. */
+/** @deprecated Use refreshCrewNotificationQueueForJob */
 export async function notifyNewCrewAssignments(
 	jobId: string,
 	_previousCrew: string[],

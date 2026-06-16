@@ -4,7 +4,6 @@ export interface CrewNotificationPending {
 	crewName: string;
 	scheduledFor: Date;
 	emailSent: boolean;
-	pushSent: boolean;
 	createdAt: Date;
 }
 
@@ -26,7 +25,7 @@ export function isCrewNotificationDue(scheduledFor: Date | string, now = new Dat
 	return now.getTime() >= at.getTime();
 }
 
-/** Email (crew assignments, invoices) only when the client's preferred billing is email. */
+/** Invoice email to client only when the client's preferred billing is email. */
 export function clientPrefersEmailBilling(preferredBillingMethod: string | undefined): boolean {
 	return preferredBillingMethod === 'email';
 }

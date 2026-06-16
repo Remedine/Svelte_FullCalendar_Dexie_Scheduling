@@ -154,12 +154,10 @@ export interface AppOptions {
 	}>;
 	cancelReasons: string[];
 	invoiceDueDays: number;
-	/** Days before job start to notify assigned crew (at crewAssignmentHour). */
+	/** Days before job start to email assigned crew (at crewAssignmentHour). */
 	crewAssignmentDaysBefore?: number;
-	/** Hour of day (0–23, local) to send crew assignment notifications. */
+	/** Hour of day (0–23, local) to send crew assignment emails. */
 	crewAssignmentHour?: number;
-	/** Browser push for crew assignments (email uses client preferredBillingMethod). */
-	notifyCrewAssignmentPush?: boolean;
 	lastUpdated: Date;
 	updatedBy: string;
 }
