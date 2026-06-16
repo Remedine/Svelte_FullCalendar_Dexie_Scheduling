@@ -3,7 +3,8 @@ import {
 	canRunStaleUserDelete,
 	mergeAuthUserIntoLocal,
 	cleanupDuplicateUsers,
-	resolveUserEmail
+	resolveUserEmail,
+	mergeServerUserOverLocal
 } from '$lib/db/userSync';
 import { db } from '$lib/db';
 
@@ -35,6 +36,33 @@ describe('resolveUserEmail', () => {
 
 	it('uses auth email for current user self-sync', () => {
 		expect(resolveUserEmail({ id: '1' }, undefined, 'tim@example.com')).toBe('tim@example.com');
+	});
+});
+
+describe('mergeServerUserOverLocal', () => {
+	it('patches missing email when local updatedAt is newer', () => {
+		const local = {
+			id: 'local-1',
+			pbId: 'pb-1',
+			email: '',
+			firstName: 'Joe2',
+			lastName: 'Poe2',
+			name: 'Joe2 Poe2',
+			role: 'admin' as const,
+			updatedAt: new Date('2026-06-16T18:45:16Z'),
+			createdAt: new Date('2026-06-16T18:40:15Z'),
+			active: true
+		};
+		const server = {
+			...local,
+			email: 'joe2@example.com',
+			updatedAt: new Date('2026-06-16T18:40:15Z')
+		};
+
+		const merged = mergeServerUserOverLocal(local as any, server as any);
+		expect(merged.email).toBe('joe2@example.com');
+		expect(merged.id).toBe('local-1');
+		expect(merged.updatedAt).toEqual(local.updatedAt);
 	});
 });
 

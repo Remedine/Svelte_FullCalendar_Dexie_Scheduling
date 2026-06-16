@@ -81,6 +81,36 @@ function splitNameFromRecord(rec: PbUserRecord): { first: string; last: string; 
 	return { first, last, full: full || `${first} ${last}`.trim() };
 }
 
+/**
+ * Merge a server roster row into an existing Dexie user.
+ * When local updatedAt is newer, still patch missing identity fields (email, pbId, names).
+ */
+export function mergeServerUserOverLocal(local: User | undefined, server: User): User {
+	if (!local) return server;
+
+	if (server.updatedAt >= local.updatedAt) {
+		return { ...server, id: local.id };
+	}
+
+	return {
+		...local,
+		pbId: local.pbId || server.pbId,
+		email: resolveUserEmail({ id: server.pbId!, email: server.email }, local),
+		firstName: local.firstName || server.firstName,
+		lastName: local.lastName || server.lastName,
+		name: local.name || server.name,
+		role: server.role || local.role,
+		verified: typeof server.verified === 'boolean' ? server.verified : local.verified,
+		photo:
+			local.photo && local.photo.startsWith('data:')
+				? local.photo
+				: local.photo || server.photo,
+		active: server.active ?? local.active,
+		forcePinUpdate: server.forcePinUpdate ?? local.forcePinUpdate,
+		forcePhotoUpdate: server.forcePhotoUpdate ?? local.forcePhotoUpdate
+	};
+}
+
 /** Build a Dexie user object from a PB roster/auth record, preserving local id when known. */
 export function buildUserFromPbRecord(
 	rec: PbUserRecord,

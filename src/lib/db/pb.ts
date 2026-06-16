@@ -9,6 +9,7 @@ import {
 	deleteDuplicateUserRows,
 	findLocalUserForPbRecord,
 	mergeAuthUserIntoLocal,
+	mergeServerUserOverLocal,
 	type PbUserRecord
 } from '$lib/db/userSync';
 
@@ -385,12 +386,16 @@ async function mergeRosterItemsIntoDexie(
 		});
 
 		const localUser = await db.users.get(serverUser.id!);
-		if (localUser && localUser.updatedAt > serverUser.updatedAt) {
-			continue;
-		}
+		const merged = mergeServerUserOverLocal(localUser, serverUser);
+		const hadEmail = !!(localUser?.email || '').trim();
+		const hasEmail = !!(merged.email || '').trim();
 
-		await db.users.put(serverUser);
+		await db.users.put(merged);
 		pulled++;
+
+		if (!hadEmail && hasEmail) {
+			console.log(`📧 Patched email for ${merged.name}: ${merged.email}`);
+		}
 	}
 
 	return { pbUserIds, pulled };

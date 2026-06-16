@@ -4,20 +4,34 @@ import { PUBLIC_PB_URL } from '$env/static/public';
 import type { PbUserRecord } from '$lib/db/userSync';
 
 async function assertAdmin(token: string): Promise<boolean> {
-	const authRes = await fetch(`${PUBLIC_PB_URL}/api/collections/users/auth-refresh`, {
-		method: 'POST',
-		headers: { Authorization: token }
-	});
-	if (!authRes.ok) return false;
-	const authData = await authRes.json();
-	return authData?.record?.role === 'admin';
+	try {
+		const authRes = await fetch(`${PUBLIC_PB_URL}/api/collections/users/auth-refresh`, {
+			method: 'POST',
+			headers: {
+				Authorization: token,
+				'Content-Type': 'application/json'
+			}
+		});
+		if (!authRes.ok) {
+			console.warn('[users-roster] auth-refresh failed:', authRes.status);
+			return false;
+		}
+		const authData = await authRes.json();
+		return authData?.record?.role === 'admin';
+	} catch (e) {
+		console.warn('[users-roster] auth-refresh error:', e);
+		return false;
+	}
 }
 
 async function fetchInternalRoster(): Promise<{ items: PbUserRecord[]; totalItems: number } | null> {
 	const res = await fetch(`${PUBLIC_PB_URL}/api/internal/users-roster`, {
 		headers: { 'X-Internal-Secret': INTERNAL_SECRET }
 	});
-	if (!res.ok) return null;
+	if (!res.ok) {
+		console.warn('[users-roster] internal roster failed:', res.status, await res.text().catch(() => ''));
+		return null;
+	}
 	const data = await res.json();
 	return {
 		items: (data.items || []) as PbUserRecord[],
@@ -25,7 +39,7 @@ async function fetchInternalRoster(): Promise<{ items: PbUserRecord[]; totalItem
 	};
 }
 
-/** Fallback: paginate standard PB list with internal secret (may include emails on some PB builds). */
+/** Fallback: paginate standard PB list with internal secret. */
 async function fetchInternalListRoster(): Promise<{ items: PbUserRecord[]; totalItems: number } | null> {
 	const PAGE_SIZE = 100;
 	let page = 1;
@@ -38,7 +52,10 @@ async function fetchInternalListRoster(): Promise<{ items: PbUserRecord[]; total
 			`${PUBLIC_PB_URL}/api/collections/users/records?page=${page}&perPage=${PAGE_SIZE}&sort=-updated`,
 			{ headers: { 'X-Internal-Secret': INTERNAL_SECRET } }
 		);
-		if (!res.ok) return items.length ? { items, totalItems: totalItems || items.length } : null;
+		if (!res.ok) {
+			console.warn('[users-roster] internal list page failed:', res.status);
+			return items.length ? { items, totalItems: totalItems || items.length } : null;
+		}
 		const data = await res.json();
 		totalPages = data.totalPages ?? 1;
 		totalItems = data.totalItems ?? items.length;
@@ -47,6 +64,29 @@ async function fetchInternalListRoster(): Promise<{ items: PbUserRecord[]; total
 	}
 
 	return { items, totalItems: totalItems || items.length };
+}
+
+/** Per-user lookup when roster rows omit email (PB field privacy on some builds). */
+async function enrichEmailByPbId(rec: PbUserRecord): Promise<PbUserRecord> {
+	if ((rec.email || '').trim()) return rec;
+
+	const filter = `(id='${rec.id}')`;
+	const res = await fetch(
+		`${PUBLIC_PB_URL}/api/collections/users/records?filter=${encodeURIComponent(filter)}&perPage=1`,
+		{ headers: { 'X-Internal-Secret': INTERNAL_SECRET } }
+	);
+	if (!res.ok) return rec;
+
+	const data = await res.json();
+	const item = data.items?.[0];
+	if (item?.email) {
+		return { ...rec, email: item.email };
+	}
+	return rec;
+}
+
+async function enrichRosterEmails(items: PbUserRecord[]): Promise<PbUserRecord[]> {
+	return Promise.all(items.map((rec) => enrichEmailByPbId(rec)));
 }
 
 export async function GET({ request }: { request: Request }) {
@@ -64,5 +104,12 @@ export async function GET({ request }: { request: Request }) {
 		return json({ error: 'Failed to load roster from PocketBase' }, { status: 502 });
 	}
 
-	return json(roster);
+	const items = await enrichRosterEmails(roster.items);
+	const withEmail = items.filter((u) => (u.email || '').trim()).length;
+	console.log(`[users-roster] Returning ${items.length} users (${withEmail} with email)`);
+
+	return json({
+		items,
+		totalItems: roster.totalItems
+	});
 }
