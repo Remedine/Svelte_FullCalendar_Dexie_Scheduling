@@ -343,6 +343,59 @@ export async function pullInvoicesFromServer() {
 // Guard to avoid spamming the server on repeated reactive loads in Crew.
 let rosterPullAttemptedThisSession = false;
 
+/** Admin-only: fetch full roster (with emails) via Svelte server + internal PB secret. */
+async function fetchAdminRosterFromServer(): Promise<{
+	items: PbUserRecord[];
+	totalItems: number;
+} | null> {
+	if (!navigator.onLine || !pb.authStore.isValid || !pb.authStore.token) return null;
+	try {
+		const res = await fetch('/api/admin/users-roster', {
+			headers: { Authorization: pb.authStore.token }
+		});
+		if (!res.ok) {
+			console.warn('[pullUsers] Admin roster API failed:', res.status);
+			return null;
+		}
+		const data = await res.json();
+		return {
+			items: (data.items || []) as PbUserRecord[],
+			totalItems: data.totalItems ?? data.items?.length ?? 0
+		};
+	} catch (e) {
+		console.warn('[pullUsers] Admin roster API error:', e);
+		return null;
+	}
+}
+
+async function mergeRosterItemsIntoDexie(
+	items: PbUserRecord[],
+	currentAuthId: string
+): Promise<{ pbUserIds: Set<string>; pulled: number }> {
+	const pbUserIds = new Set<string>();
+	let pulled = 0;
+
+	for (const rec of items) {
+		pbUserIds.add(rec.id);
+
+		const existingLocal = await findLocalUserForPbRecord(rec);
+		const serverUser = buildUserFromPbRecord(rec, existingLocal, {
+			isCurrentAuth: rec.id === currentAuthId,
+			authEmail: rec.id === currentAuthId ? pb.authStore.model?.email : undefined
+		});
+
+		const localUser = await db.users.get(serverUser.id!);
+		if (localUser && localUser.updatedAt > serverUser.updatedAt) {
+			continue;
+		}
+
+		await db.users.put(serverUser);
+		pulled++;
+	}
+
+	return { pbUserIds, pulled };
+}
+
 export async function pullUsersFromServer(force = false) {
 	if (!pb.authStore.isValid) return;
 
@@ -374,39 +427,39 @@ export async function pullUsersFromServer(force = false) {
 	let serverTotalItems = 0;
 
 	try {
-		const PAGE_SIZE = 100;
-		let page = 1;
-		let totalPages = 1;
 		const pbUserIds = new Set<string>();
 		let pulled = 0;
 
-		while (page <= totalPages) {
-			const result = await pb.collection('users').getList(page, PAGE_SIZE, {
-				sort: '-updatedAt',
-				$autoCancel: false
-			});
+		const adminRoster = await fetchAdminRosterFromServer();
+		if (adminRoster && adminRoster.items.length > 0) {
+			serverTotalItems = adminRoster.totalItems;
+			const merged = await mergeRosterItemsIntoDexie(adminRoster.items, currentAuth.id);
+			merged.pbUserIds.forEach((id) => pbUserIds.add(id));
+			pulled = merged.pulled;
+			console.log(`✅ Pulled ${pulled} users via admin roster API (emails included)`);
+		} else {
+			const PAGE_SIZE = 100;
+			let page = 1;
+			let totalPages = 1;
 
-			totalPages = result.totalPages;
-			serverTotalItems = result.totalItems;
-
-			for (const rec of result.items) {
-				pbUserIds.add(rec.id);
-
-				const existingLocal = await findLocalUserForPbRecord(rec as PbUserRecord);
-				const serverUser = buildUserFromPbRecord(rec as PbUserRecord, existingLocal, {
-					isCurrentAuth: rec.id === currentAuth.id
+			while (page <= totalPages) {
+				const result = await pb.collection('users').getList(page, PAGE_SIZE, {
+					sort: '-updatedAt',
+					$autoCancel: false
 				});
 
-				const localUser = await db.users.get(serverUser.id!);
-				if (localUser && localUser.updatedAt > serverUser.updatedAt) {
-					continue;
-				}
+				totalPages = result.totalPages;
+				serverTotalItems = result.totalItems;
 
-				await db.users.put(serverUser);
-				pulled++;
+				const merged = await mergeRosterItemsIntoDexie(
+					result.items as PbUserRecord[],
+					currentAuth.id
+				);
+				merged.pbUserIds.forEach((id) => pbUserIds.add(id));
+				pulled += merged.pulled;
+
+				page++;
 			}
-
-			page++;
 		}
 
 		if (canRunStaleUserDelete(pbUserIds, serverTotalItems)) {

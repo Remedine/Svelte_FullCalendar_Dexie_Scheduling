@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
 	canRunStaleUserDelete,
 	mergeAuthUserIntoLocal,
-	cleanupDuplicateUsers
+	cleanupDuplicateUsers,
+	resolveUserEmail
 } from '$lib/db/userSync';
 import { db } from '$lib/db';
 
@@ -18,6 +19,22 @@ describe('canRunStaleUserDelete', () => {
 
 	it('allows full roster', () => {
 		expect(canRunStaleUserDelete(new Set(['a', 'b', 'c']), 3)).toBe(true);
+	});
+});
+
+describe('resolveUserEmail', () => {
+	it('prefers PB email when present', () => {
+		expect(resolveUserEmail({ id: '1', email: 'joe@example.com' }, { email: 'old@example.com' } as any)).toBe(
+			'joe@example.com'
+		);
+	});
+
+	it('keeps local email when PB omits it (list rule privacy)', () => {
+		expect(resolveUserEmail({ id: '1' }, { email: 'brick@example.com' } as any)).toBe('brick@example.com');
+	});
+
+	it('uses auth email for current user self-sync', () => {
+		expect(resolveUserEmail({ id: '1' }, undefined, 'tim@example.com')).toBe('tim@example.com');
 	});
 });
 

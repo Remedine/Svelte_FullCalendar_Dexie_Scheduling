@@ -57,6 +57,18 @@ export async function findLocalUserForPbRecord(rec: PbUserRecord): Promise<User 
 	return undefined;
 }
 
+/** Prefer PB email, then local Dexie, then auth context — never downgrade to empty. */
+export function resolveUserEmail(
+	rec: PbUserRecord,
+	existingLocal?: User,
+	authEmail?: string
+): string {
+	const fromPb = (rec.email || '').trim().toLowerCase();
+	const fromLocal = (existingLocal?.email || '').trim().toLowerCase();
+	const fromAuth = (authEmail || '').trim().toLowerCase();
+	return fromPb || fromLocal || fromAuth || '';
+}
+
 function splitNameFromRecord(rec: PbUserRecord): { first: string; last: string; full: string } {
 	let first = rec.firstName || '';
 	let last = rec.lastName || '';
@@ -76,7 +88,7 @@ export function buildUserFromPbRecord(
 	options?: { isCurrentAuth?: boolean; authEmail?: string }
 ): User {
 	const isCurrentAuth = options?.isCurrentAuth ?? false;
-	const email = rec.email || existingLocal?.email || options?.authEmail || '';
+	const email = resolveUserEmail(rec, existingLocal, options?.authEmail);
 	const { first, last, full } = splitNameFromRecord(rec);
 
 	return {
@@ -115,7 +127,7 @@ export function mergeAuthUserIntoLocal(
 			...existing,
 			id: existing.id,
 			pbId,
-			email: email || existing.email || pbUser.email,
+			email: resolveUserEmail(pbUser, existing, email),
 			firstName:
 				pbUser.firstName ||
 				existing.firstName ||
@@ -156,7 +168,7 @@ export function mergeAuthUserIntoLocal(
 			`${pbUser.firstName || ''} ${pbUser.lastName || ''}`.trim() ||
 			email.split('@')[0] ||
 			'Admin',
-		email: email || pbUser.email,
+		email: resolveUserEmail(pbUser, undefined, email),
 		pinHash: pbUser.pinHash || '',
 		role: (pbUser.role as User['role']) || 'crew',
 		photo: pbUser.photo ? pbUser.photo : undefined,

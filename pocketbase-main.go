@@ -192,6 +192,39 @@ func main() {
 			return e.JSON(http.StatusOK, map[string]string{"link": link})
 		})
 
+		// Full user roster for admin Dexie sync (includes emails hidden from client list rules).
+		se.Router.GET("/api/internal/users-roster", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			records, err := e.App.FindAllRecords("users")
+			if err != nil {
+				return err
+			}
+			items := make([]map[string]any, 0, len(records))
+			for _, rec := range records {
+				items = append(items, map[string]any{
+					"id":               rec.Id,
+					"email":            rec.Email(),
+					"firstName":        rec.GetString("firstName"),
+					"lastName":         rec.GetString("lastName"),
+					"name":             rec.GetString("name"),
+					"role":             rec.GetString("role"),
+					"photo":            rec.GetString("photo"),
+					"active":           rec.GetBool("active"),
+					"forcePinUpdate":   rec.GetBool("forcePinUpdate"),
+					"forcePhotoUpdate": rec.GetBool("forcePhotoUpdate"),
+					"verified":         rec.Verified(),
+					"created":          rec.GetDateTime("created").Time(),
+					"updated":          rec.GetDateTime("updated").Time(),
+				})
+			}
+			return e.JSON(http.StatusOK, map[string]any{
+				"items":      items,
+				"totalItems": len(items),
+			})
+		})
+
 		se.Router.POST("/api/internal/request-email-change", func(e *core.RequestEvent) error {
 			if err := checkSecret(e); err != nil {
 				return err
