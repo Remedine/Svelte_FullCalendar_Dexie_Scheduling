@@ -228,8 +228,9 @@
 		{/if}
 
 		<!-- Mobile-only: avatar with dropdown menu integrated into bottom nav.
-		     Theme toggle is now an item inside the avatar dropdown (not stacked below the avatar).
-		     No separate footer or brand text on mobile. -->
+		     Clicking avatar toggles the menu (Profile + dark mode toggle + Logout).
+		     Menu opens top-left of avatar (via right calc + visible overflow) so it is always on-screen on mobile.
+		     Theme toggle is inside the dropdown. No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
 			<div 
 				class="bottom-nav__avatar-wrapper"
@@ -557,14 +558,16 @@
 	}
 
 	/* Mobile: avatar integrated into right side of bottom nav.
-	   Dropdown menu now contains Profile + Theme toggle (as item) + Logout.
+	   Dropdown menu (opened by click) contains Profile + Theme toggle (as item) + Logout.
+	   Opens top-left (right:calc(100%+...) + overflow-y:visible) to ensure fully visible on screen.
 	   No stacking of toggle under avatar. Avatar wrapper pushed to far right. */
 	@media (max-width: 768px) {
 		.bottom-nav {
 			align-items: center;
 			padding: 0 8px 0 0; /* extra right padding so the avatar on the far right has breathing room like the other tabs */
 			box-sizing: border-box;
-			overflow: hidden; /* safety net: ensure no child content can force the fixed bar (or page) wider than viewport */
+			overflow-x: hidden; /* prevent horizontal page widening from nav tabs */
+			overflow-y: visible; /* allow the avatar dropdown menu (positioned above) to be fully visible, not clipped */
 			max-width: 100vw;
 		}
 
@@ -608,7 +611,7 @@
 		.bottom-nav__user-menu {
 			position: absolute;
 			bottom: calc(100% + 6px);
-			right: 0; /* aligns menu right edge near avatar; menu content extends to the left (inward from bottom-right corner) */
+			right: calc(100% + 2px); /* open top-left of the avatar: menu's right edge aligns near wrapper's left so menu body extends left (inward) and is fully on-screen even on mobile */
 			left: auto;
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
