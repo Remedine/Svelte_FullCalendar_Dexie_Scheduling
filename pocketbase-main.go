@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -201,8 +202,19 @@ func main() {
 			if err != nil {
 				return err
 			}
+			recordTime := func(rec *core.Record, names ...string) string {
+				for _, name := range names {
+					dt := rec.GetDateTime(name)
+					if !dt.IsZero() {
+						return dt.Time().UTC().Format(time.RFC3339)
+					}
+				}
+				return ""
+			}
 			items := make([]map[string]any, 0, len(records))
 			for _, rec := range records {
+				created := recordTime(rec, "createdAt", "created")
+				updated := recordTime(rec, "updatedAt", "updated")
 				items = append(items, map[string]any{
 					"id":               rec.Id,
 					"email":            rec.Email(),
@@ -215,8 +227,10 @@ func main() {
 					"forcePinUpdate":   rec.GetBool("forcePinUpdate"),
 					"forcePhotoUpdate": rec.GetBool("forcePhotoUpdate"),
 					"verified":         rec.Verified(),
-					"created":          rec.GetDateTime("created").Time(),
-					"updated":          rec.GetDateTime("updated").Time(),
+					"createdAt":        created,
+					"updatedAt":        updated,
+					"created":          created,
+					"updated":          updated,
 				})
 			}
 			return e.JSON(http.StatusOK, map[string]any{

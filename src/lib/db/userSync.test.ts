@@ -39,6 +39,44 @@ describe('resolveUserEmail', () => {
 	});
 });
 
+describe('buildUserFromPbRecord timestamps', () => {
+	it('ignores Go zero-time created/updated from internal roster', async () => {
+		const { buildUserFromPbRecord } = await import('$lib/db/userSync');
+		const existing = {
+			id: 'pb-1',
+			createdAt: new Date('2026-06-15T10:00:00Z'),
+			updatedAt: new Date('2026-06-16T10:00:00Z')
+		};
+
+		const built = buildUserFromPbRecord(
+			{
+				id: 'pb-1',
+				created: '0001-01-01T00:00:00Z',
+				updated: '0001-01-01T00:00:00Z',
+				role: 'crew'
+			},
+			existing as any
+		);
+
+		expect(built.createdAt).toEqual(existing.createdAt);
+		expect(built.updatedAt).toEqual(existing.updatedAt);
+	});
+
+	it('prefers createdAt/updatedAt custom fields when present', async () => {
+		const { buildUserFromPbRecord } = await import('$lib/db/userSync');
+
+		const built = buildUserFromPbRecord({
+			id: 'pb-2',
+			createdAt: '2026-06-16T20:44:09.330Z',
+			updatedAt: '2026-06-16T20:45:07.864Z',
+			role: 'admin'
+		});
+
+		expect(built.createdAt.toISOString()).toBe('2026-06-16T20:44:09.330Z');
+		expect(built.updatedAt.toISOString()).toBe('2026-06-16T20:45:07.864Z');
+	});
+});
+
 describe('mergeServerUserOverLocal', () => {
 	it('patches missing email when local updatedAt is newer', () => {
 		const local = {

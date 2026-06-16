@@ -69,6 +69,16 @@ export function resolveUserEmail(
 	return fromPb || fromLocal || fromAuth || '';
 }
 
+/** Parse PB timestamps; ignore zero/invalid dates from internal roster (Go zero time → year 0001). */
+function parsePbTimestamp(...values: (string | undefined)[]): Date | undefined {
+	for (const v of values) {
+		if (!v) continue;
+		const d = new Date(v);
+		if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) return d;
+	}
+	return undefined;
+}
+
 function splitNameFromRecord(rec: PbUserRecord): { first: string; last: string; full: string } {
 	let first = rec.firstName || '';
 	let last = rec.lastName || '';
@@ -139,8 +149,10 @@ export function buildUserFromPbRecord(
 		forcePhotoUpdate: rec.forcePhotoUpdate ?? existingLocal?.forcePhotoUpdate ?? false,
 		verified:
 			typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
-		createdAt: new Date(rec.created || rec.createdAt || existingLocal?.createdAt || Date.now()),
-		updatedAt: new Date(rec.updated || rec.updatedAt || existingLocal?.updatedAt || Date.now())
+		createdAt:
+			parsePbTimestamp(rec.createdAt, rec.created) ?? existingLocal?.createdAt ?? new Date(),
+		updatedAt:
+			parsePbTimestamp(rec.updatedAt, rec.updated) ?? existingLocal?.updatedAt ?? new Date()
 	};
 }
 
