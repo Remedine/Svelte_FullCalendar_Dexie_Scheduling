@@ -261,6 +261,76 @@ export async function getJobsForCrewMember(crewName: string): Promise<Job[]> {
 	}
 }
 
+/** Display-name variants that may appear in job.assignedCrew for a user. */
+export function getUserCrewNameAliases(
+	user: Pick<User, 'name' | 'firstName' | 'lastName'>
+): string[] {
+	const names = new Set<string>();
+	const full = (user.name || `${user.firstName || ''} ${user.lastName || ''}`).trim();
+	if (full) names.add(full);
+	if (user.firstName && user.lastName) {
+		names.add(`${user.firstName} ${user.lastName}`.trim());
+	}
+	return [...names].filter(Boolean);
+}
+
+async function patchJobAssignedCrewList(
+	job: Job,
+	patch: (crew: string[]) => string[],
+	opts?: { skipCrewNotify?: boolean }
+): Promise<boolean> {
+	const current = job.assignedCrew || [];
+	const next = [...new Set(patch([...current]).map((s) => s.trim()).filter(Boolean))];
+	const unchanged =
+		next.length === current.length && next.every((n, i) => n === current[i]);
+	if (unchanged) return false;
+	await updateJob(job.id!, { assignedCrew: next }, { skipCrewNotify: opts?.skipCrewNotify });
+	return true;
+}
+
+/** Replace old crew display names on all jobs (e.g. after admin renames a user). */
+export async function renameCrewNamesOnJobs(fromNames: string[], toName: string): Promise<number> {
+	const fromSet = new Set(fromNames.map((n) => n.trim()).filter(Boolean));
+	const to = toName.trim();
+	if (!fromSet.size || !to) return 0;
+
+	const jobs = dedupJobs(await db.jobs.toArray());
+	let count = 0;
+	for (const job of jobs) {
+		const changed = await patchJobAssignedCrewList(
+			job,
+			(crew) => crew.map((c) => (fromSet.has(c) ? to : c)),
+			{ skipCrewNotify: true }
+		);
+		if (changed) count++;
+	}
+	if (count > 0) {
+		console.log(`✅ Renamed crew on ${count} job(s): ${[...fromSet].join(', ')} → ${to}`);
+	}
+	return count;
+}
+
+/** Remove crew display names from all jobs (e.g. before deleting a user). */
+export async function removeCrewNamesFromJobs(names: string[]): Promise<number> {
+	const nameSet = new Set(names.map((n) => n.trim()).filter(Boolean));
+	if (!nameSet.size) return 0;
+
+	const jobs = dedupJobs(await db.jobs.toArray());
+	let count = 0;
+	for (const job of jobs) {
+		const changed = await patchJobAssignedCrewList(
+			job,
+			(crew) => crew.filter((c) => !nameSet.has(c)),
+			{ skipCrewNotify: true }
+		);
+		if (changed) count++;
+	}
+	if (count > 0) {
+		console.log(`✅ Removed crew from ${count} job(s): ${[...nameSet].join(', ')}`);
+	}
+	return count;
+}
+
 // ==================== JOB FUNCTIONS ====================
 
 export async function createJob(jobData: any): Promise<string> {
@@ -314,17 +384,28 @@ export async function createJob(jobData: any): Promise<string> {
 
 	if (navigator.onLine) await processSyncQueue();
 
+	if (newJob.assignedCrew?.length) {
+		import('$lib/notifications/crewAssignment')
+			.then((m) => m.notifyNewCrewAssignments(String(id), [], newJob.assignedCrew))
+			.catch(() => {});
+	}
+
 	return String(id);
 }
 
-export async function updateJob(jobId: string, updates: Partial<Job>) {
+export async function updateJob(
+	jobId: string,
+	updates: Partial<Job>,
+	opts?: { skipCrewNotify?: boolean }
+) {
+	const existing = await db.jobs.get(jobId);
 	const resolvedUpdates = { ...updates };
 
 	if (resolvedUpdates.clientId) {
 		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId);
 	}
 
-	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
+	const safeUpdates = safeClone({ ...resolvedUpdates, updatedAt: new Date() });
 	await db.jobs.update(jobId, safeUpdates);
 
 	const updatedJob = await db.jobs.get(jobId);
@@ -338,6 +419,23 @@ export async function updateJob(jobId: string, updates: Partial<Job>) {
 	}
 
 	if (navigator.onLine) await processSyncQueue();
+
+	if (
+		!opts?.skipCrewNotify &&
+		updates.assignedCrew &&
+		existing &&
+		navigator.onLine
+	) {
+		import('$lib/notifications/crewAssignment')
+			.then((m) =>
+				m.notifyNewCrewAssignments(
+					jobId,
+					existing.assignedCrew || [],
+					updates.assignedCrew || []
+				)
+			)
+			.catch(() => {});
+	}
 }
 
 export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
@@ -439,17 +537,52 @@ export function dedupJobs(list: Job[]): Job[] {
 		if (!existing) {
 			byKey.set(key, j);
 		} else {
-			// Prefer the canonical server record (where Dexie id === pbId) over a local-UUID record
-			// that has pbId set. This keeps the "official" row from PB.
 			const existingIsCanonical = existing.id === existing.pbId;
 			const candidateIsCanonical = j.id === j.pbId;
+			const existingUpdated = new Date(existing.updatedAt || 0).getTime();
+			const candidateUpdated = new Date(j.updatedAt || 0).getTime();
+
 			if (candidateIsCanonical && !existingIsCanonical) {
 				byKey.set(key, j);
+			} else if (!candidateIsCanonical && existingIsCanonical) {
+				// keep existing canonical row
+			} else if (candidateUpdated > existingUpdated) {
+				byKey.set(key, j);
 			}
-			// otherwise keep existing (prefer first seen, or canonical)
 		}
 	}
 	return Array.from(byKey.values());
+}
+
+/**
+ * Delete duplicate Dexie job rows that share the same pbId (local-uuid + canonical pbId rows).
+ * Returns the number of rows removed.
+ */
+export async function cleanupDuplicateJobs(): Promise<number> {
+	const all = await db.jobs.toArray();
+	const groups = new Map<string, Job[]>();
+
+	for (const job of all) {
+		if (!job.pbId) continue;
+		const group = groups.get(job.pbId) || [];
+		group.push(job);
+		groups.set(job.pbId, group);
+	}
+
+	let removed = 0;
+	for (const [, group] of groups) {
+		if (group.length <= 1) continue;
+		const keep = dedupJobs(group)[0];
+		for (const job of group) {
+			if (job.id !== keep.id) {
+				await db.jobs.delete(job.id!);
+				removed++;
+				console.log(`🗑️ Removed duplicate job row ${job.id} (canonical pbId ${job.pbId})`);
+			}
+		}
+	}
+
+	return removed;
 }
 
 // )=- New paginated job query specifically for the expandable "Related Jobs" lists on the clients page.
@@ -715,9 +848,22 @@ export async function generateInvoiceDocx(
 	} = await import('docx');
 
 	const businessName = opts.businessName || 'Capital City Windows';
+	const invoiceNumber = (job.pbId || job.id || 'draft').slice(0, 12).toUpperCase();
+	const serviceDate = new Date(job.start).toLocaleDateString();
 	const dueDate = job.end
 		? new Date(new Date(job.end).getTime() + (opts.invoiceDueDays ?? 30) * 86400000)
 		: null;
+	const dueDateStr = dueDate ? dueDate.toLocaleDateString() : '—';
+	const clientName = client?.name || 'Client';
+	const clientAddress = client
+		? [
+				client.serviceAddressStreet,
+				`${client.serviceAddressCity}, ${client.serviceAddressState} ${client.serviceAddressZip}`
+			]
+				.filter(Boolean)
+				.join('\n')
+		: '';
+	const clientContact = [client?.phone, client?.email].filter(Boolean).join(' • ');
 
 	const billableRows = (job.billableItems || []).map(
 		(item: any, idx: number) =>
@@ -765,23 +911,65 @@ export async function generateInvoiceDocx(
 				children: [
 					new Paragraph({
 						alignment: AlignmentType.CENTER,
-						children: [new TextRun({ text: businessName, bold: true, size: 36 })]
+						children: [new TextRun({ text: businessName, bold: true, size: 40 })]
 					}),
 					new Paragraph({
 						alignment: AlignmentType.CENTER,
-						children: [new TextRun({ text: 'INVOICE', bold: true, size: 28, color: '1e40af' })]
+						children: [
+							new TextRun({ text: 'INVOICE', bold: true, size: 32, color: '1e40af' })
+						]
 					}),
 					new Paragraph({ text: '' }),
 					new Paragraph({
-						children: [new TextRun({ text: `Job: ${job.title || 'Untitled'}`, bold: true })]
+						children: [new TextRun({ text: 'Bill To', bold: true, size: 24 })]
 					}),
 					new Paragraph({
-						children: [new TextRun({ text: `Date: ${new Date(job.start).toLocaleDateString()}` })]
+						children: [new TextRun({ text: clientName, size: 24 })]
+					}),
+					...(clientAddress
+						? clientAddress.split('\n').map(
+								(line) =>
+									new Paragraph({
+										children: [new TextRun({ text: line, size: 22 })]
+									})
+							)
+						: []),
+					...(clientContact
+						? [
+								new Paragraph({
+									children: [new TextRun({ text: clientContact, size: 22 })]
+								})
+							]
+						: []),
+					new Paragraph({ text: '' }),
+					new Paragraph({
+						children: [
+							new TextRun({ text: 'Invoice #', bold: true }),
+							new TextRun({ text: ` ${invoiceNumber}` })
+						]
 					}),
 					new Paragraph({
-						children: [new TextRun({ text: `Client: ${client?.name || job.clientId}` })]
+						children: [
+							new TextRun({ text: 'Service date', bold: true }),
+							new TextRun({ text: ` ${serviceDate}` })
+						]
+					}),
+					new Paragraph({
+						children: [
+							new TextRun({ text: 'Due date', bold: true }),
+							new TextRun({ text: ` ${dueDateStr}` })
+						]
+					}),
+					new Paragraph({
+						children: [
+							new TextRun({ text: 'Job', bold: true }),
+							new TextRun({ text: ` ${job.title || 'Window cleaning service'}` })
+						]
 					}),
 					new Paragraph({ text: '' }),
+					new Paragraph({
+						children: [new TextRun({ text: 'Services', bold: true, size: 24 })]
+					}),
 					new Table({
 						rows: [
 							new TableRow({
@@ -888,14 +1076,33 @@ export async function generateInvoiceDocx(
 					new Paragraph({ text: '' }),
 					new Paragraph({
 						children: [
-							new TextRun({ text: `Due Date: ${dueDate ? dueDate.toLocaleDateString() : '—'}` })
+							new TextRun({
+								text: `Amount due by ${dueDateStr}: $${(job.totalAmount || 0).toFixed(2)}`,
+								bold: true,
+								size: 26
+							})
 						]
 					}),
 					new Paragraph({ text: '' }),
 					new Paragraph({
-						children: [new TextRun({ text: job.notes ? `Notes: ${job.notes}` : '' })]
+						children: [
+							new TextRun({
+								text: 'Payment: Please remit payment by the due date above. Thank you for choosing Capital City Windows!',
+								size: 22
+							})
+						]
 					}),
-					new Paragraph({ text: 'Thank you for your business!' })
+					...(job.notes
+						? [
+								new Paragraph({ text: '' }),
+								new Paragraph({
+									children: [
+										new TextRun({ text: 'Notes', bold: true }),
+										new TextRun({ text: `: ${job.notes}` })
+									]
+								})
+							]
+						: [])
 				]
 			}
 		]
@@ -1063,8 +1270,22 @@ export async function createUser(
 }
 
 export async function updateUser(userId: string, updates: Partial<User>) {
+	const existing = await db.users.get(userId);
 	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
 	await db.users.update(userId, safeUpdates);
+
+	if (
+		existing &&
+		(updates.name !== undefined || updates.firstName !== undefined || updates.lastName !== undefined)
+	) {
+		const merged = { ...existing, ...safeUpdates };
+		const newName =
+			merged.name || `${merged.firstName || ''} ${merged.lastName || ''}`.trim();
+		const oldAliases = getUserCrewNameAliases(existing);
+		if (newName && oldAliases.some((a) => a !== newName)) {
+			await renameCrewNamesOnJobs(oldAliases, newName);
+		}
+	}
 
 	await addToSyncQueue({
 		type: 'update',
@@ -1079,6 +1300,8 @@ export async function updateUser(userId: string, updates: Partial<User>) {
 export async function deleteUser(userId: string) {
 	const exists = await db.users.get(userId);
 	if (!exists) return;
+
+	await removeCrewNamesFromJobs(getUserCrewNameAliases(exists));
 
 	const idToDelete = exists.pbId || userId;
 	const emailKey = exists.email?.toLowerCase();

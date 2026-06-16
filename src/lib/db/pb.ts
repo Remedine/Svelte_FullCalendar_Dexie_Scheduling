@@ -166,18 +166,11 @@ export async function pullJobsFromServer() {
 			}
 		}
 
-		// Additional dedup cleanup: remove any local-UUID record that has a pbId for which we now have the canonical
-		// server record (id = pbId). These are the pre-sync local versions left behind by local create + pull.
-		// The server record (with Dexie key = pbId) is the one we keep.
-		for (const localJob of localJobs) {
-			if (localJob.pbId && pbJobIds.has(localJob.pbId) && localJob.id !== localJob.pbId) {
-				await db.jobs.delete(localJob.id!);
-				console.log(`🗑️ Removed pre-sync local duplicate for job ${localJob.pbId} (title: ${localJob.title})`);
-			}
-		}
+		const { cleanupDuplicateJobs } = await import('$lib/db');
+		const dupesRemoved = await cleanupDuplicateJobs();
 
-		if (records.length > 0) {
-			console.log(`✅ Pulled, merged, and cleaned ${records.length} jobs`);
+		if (records.length > 0 || dupesRemoved > 0) {
+			console.log(`✅ Pulled ${records.length} jobs, removed ${dupesRemoved} duplicate row(s)`);
 		}
 		// )=- Reduced log noise: only log when there are actual records. 0-job case was spamming console.
 	} catch (err: any) {

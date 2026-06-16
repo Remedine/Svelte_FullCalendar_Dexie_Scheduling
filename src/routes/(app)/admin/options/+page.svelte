@@ -85,6 +85,13 @@
 			return;
 		}
 
+		const emailNotify = editingOptions.notifyCrewAssignmentEmail !== false;
+		const pushNotify = editingOptions.notifyCrewAssignmentPush !== false;
+		if (!emailNotify && !pushNotify) {
+			toast.error('Enable at least one crew assignment notification (email or push).');
+			return;
+		}
+
 		isSaving = true;
 
 		try {
@@ -297,6 +304,24 @@
 				</button>
 			</div>
 
+			<div class="form-section">
+				<h3>Crew Assignment Notifications</h3>
+				<p class="options-page__help">
+					When a crew member is added to a job, notify them by email and/or browser push. At least
+					one must be enabled.
+				</p>
+				<div class="options-page__checkbox-row">
+					<label class="options-page__checkbox-label">
+						<input type="checkbox" bind:checked={editingOptions.notifyCrewAssignmentEmail} />
+						Email (Brevo)
+					</label>
+					<label class="options-page__checkbox-label">
+						<input type="checkbox" bind:checked={editingOptions.notifyCrewAssignmentPush} />
+						Browser push notification
+					</label>
+				</div>
+			</div>
+
 			<!-- Cancellation Reasons -->
 			<div class="form-section">
 				<h3>Cancellation Reasons</h3>
@@ -365,6 +390,12 @@
 					<input id="opt-tax" type="number" step="0.01" class="input" bind:value={editingOptions.taxRate} />
 					<label for="opt-due" class="label">Invoice Due Days</label>
 					<input id="opt-due" type="number" class="input" bind:value={editingOptions.invoiceDueDays} />
+				</div>
+				<div class="options-page__checkbox-row">
+					<label class="options-page__checkbox-label">
+						<input type="checkbox" bind:checked={editingOptions.autoEmailInvoiceOnGenerate} />
+						Automatically email invoice to client when generating (if client has email)
+					</label>
 				</div>
 			</div>
 
@@ -545,6 +576,21 @@
 	.options-page__help {
 		color: var(--color-text-muted);
 		margin-bottom: var(--space-6);
+	}
+
+	.options-page__checkbox-row {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		margin-top: var(--space-4);
+	}
+
+	.options-page__checkbox-label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		cursor: pointer;
+		font-size: var(--font-size-sm);
 	}
 
 	.areas-list {

@@ -36,6 +36,48 @@
 
 	let isGenerating = $state(false);
 	let isUploading = $state(false);
+	let emailClientOnGenerate = $state(false);
+
+	$effect(() => {
+		if (optionsStore.data) {
+			emailClientOnGenerate = optionsStore.data.autoEmailInvoiceOnGenerate === true;
+		}
+	});
+
+	async function maybeEmailInvoiceToClient(
+		blob: Blob,
+		filename: string,
+		client: Client | null,
+		dueDate: Date | null
+	) {
+		if (!emailClientOnGenerate || !client?.email) return;
+		const buf = await blob.arrayBuffer();
+		const bytes = new Uint8Array(buf);
+		let binary = '';
+		for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+		const docxBase64 = btoa(binary);
+
+		const res = await fetch('/api/invoices/send-email', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: pb.authStore.token
+			},
+			body: JSON.stringify({
+				clientEmail: client.email,
+				clientName: client.name,
+				jobTitle: job?.title || 'Service',
+				amount: job?.totalAmount || 0,
+				dueDate: dueDate ? dueDate.toLocaleDateString() : '—',
+				filename,
+				docxBase64
+			})
+		});
+		if (!res.ok) {
+			const err = await res.json().catch(() => ({}));
+			console.warn('[invoice] auto-email failed', err);
+		}
+	}
 
 	// )=- The two date helpers were moved to $lib/utils/dates (see import above).
 	// This component now uses the shared, tested versions.
@@ -47,14 +89,18 @@
 			await optionsStore.load?.();
 			const client = job.clientId ? await db.clients.get(job.clientId) : null;
 
+			const dueDays = optionsStore.data?.invoiceDueDays ?? 30;
 			const blob = await generateInvoiceDocx(job, client, {
 				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: optionsStore.data?.invoiceDueDays
+				invoiceDueDays: dueDays
 			});
 
-			// Immediate download for the user (editable .docx)
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
+			const dueDate = job.end
+				? new Date(new Date(job.end).getTime() + dueDays * 86400000)
+				: null;
 			saveAs(blob, filename);
+			await maybeEmailInvoiceToClient(blob, filename, client, dueDate);
 
 			// Persist to our system (metadata + the actual file blob via the files param we built in Phase 2)
 			// This will go through createInvoice → queue → PB with FormData file upload.
@@ -368,6 +414,10 @@
 			</label>
 		</div>
 	{:else}
+		<label class="job-invoice-panel__email-opt">
+			<input type="checkbox" bind:checked={emailClientOnGenerate} />
+			Email invoice to client (requires client email)
+		</label>
 		<button
 			class="job-invoice-panel__generate-btn"
 			onclick={handleGenerateDraft}
@@ -377,7 +427,7 @@
 		</button>
 		<p class="job-invoice-panel__hint">
 			Creates an editable .docx, downloads it immediately, and saves a copy to the job (via
-			PocketBase).
+			PocketBase). Optional email uses Brevo.
 		</p>
 	{/if}
 </div>
@@ -538,6 +588,15 @@
 	/* Supporting docs label slightly different. */
 	.job-invoice-panel__upload-label--supporting {
 		font-size: var(--font-size-xs);
+	}
+
+	.job-invoice-panel__email-opt {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		margin-bottom: var(--space-2);
+		cursor: pointer;
 	}
 
 	.job-invoice-panel__generate-btn {

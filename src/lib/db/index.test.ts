@@ -19,6 +19,11 @@ import {
 	createInvoice,
 	generateInvoiceDocx,
 	cleanupDuplicateUsers,
+	cleanupDuplicateJobs,
+	getUserCrewNameAliases,
+	renameCrewNamesOnJobs,
+	removeCrewNamesFromJobs,
+	dedupJobs,
 	db,
 	type Invoice,
 	type Job,
@@ -985,5 +990,138 @@ describe('processSyncQueue (with mocked pb)', () => {
 
 		// Note: pbId stamping depends on exact mock of the create response matching the internal pbPayload; this smoke verifies the queue processing path runs cleanly.
 		vi.doUnmock('$lib/db/pb');
+	});
+});
+
+describe('getUserCrewNameAliases', () => {
+	it('returns name and first+last variants', () => {
+		const aliases = getUserCrewNameAliases({
+			name: 'Alex Smith',
+			firstName: 'Alex',
+			lastName: 'Smith'
+		});
+		expect(aliases).toContain('Alex Smith');
+	});
+});
+
+describe('assignedCrew job sync', () => {
+	it('renames crew on jobs when user display name changes', async () => {
+		await db.jobs.add({
+			id: 'job-crew-1',
+			clientId: 'c1',
+			title: 'Test',
+			start: new Date(),
+			end: new Date(),
+			assignedCrew: ['Old Name'],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: 'a1',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		});
+
+		const count = await renameCrewNamesOnJobs(['Old Name'], 'New Name');
+		expect(count).toBe(1);
+		const job = await db.jobs.get('job-crew-1');
+		expect(job?.assignedCrew).toEqual(['New Name']);
+	});
+
+	it('removes crew names from jobs on delete path', async () => {
+		await db.jobs.add({
+			id: 'job-crew-2',
+			clientId: 'c1',
+			title: 'Test 2',
+			start: new Date(),
+			end: new Date(),
+			assignedCrew: ['Gone User', 'Stay User'],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: 'a1',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		});
+
+		const count = await removeCrewNamesFromJobs(['Gone User']);
+		expect(count).toBe(1);
+		const job = await db.jobs.get('job-crew-2');
+		expect(job?.assignedCrew).toEqual(['Stay User']);
+	});
+});
+
+describe('cleanupDuplicateJobs', () => {
+	it('removes local-uuid row when canonical pbId row exists', async () => {
+		const now = new Date();
+		const older = new Date(now.getTime() - 10000);
+		await db.jobs.bulkAdd([
+			{
+				id: 'local-uuid-1',
+				pbId: 'pb-job-1',
+				clientId: 'c1',
+				title: 'Dup local',
+				start: now,
+				end: now,
+				assignedCrew: [],
+				status: 'scheduled',
+				billableItems: [],
+				subtotal: 0,
+				taxRate: 0,
+				taxAmount: 0,
+				totalAmount: 0,
+				areaOfTown: 'a1',
+				createdAt: older,
+				updatedAt: older
+			},
+			{
+				id: 'pb-job-1',
+				pbId: 'pb-job-1',
+				clientId: 'c1',
+				title: 'Canonical',
+				start: now,
+				end: now,
+				assignedCrew: [],
+				status: 'scheduled',
+				billableItems: [],
+				subtotal: 0,
+				taxRate: 0,
+				taxAmount: 0,
+				totalAmount: 0,
+				areaOfTown: 'a1',
+				createdAt: now,
+				updatedAt: now
+			}
+		]);
+
+		const removed = await cleanupDuplicateJobs();
+		expect(removed).toBe(1);
+		expect(await db.jobs.get('local-uuid-1')).toBeUndefined();
+		expect((await db.jobs.get('pb-job-1'))?.title).toBe('Canonical');
+	});
+});
+
+describe('dedupJobs prefers newer updatedAt', () => {
+	it('keeps the row with the latest updatedAt when both share pbId', () => {
+		const older = {
+			id: 'a',
+			pbId: 'same',
+			updatedAt: new Date('2020-01-01'),
+			title: 'old'
+		} as Job;
+		const newer = {
+			id: 'b',
+			pbId: 'same',
+			updatedAt: new Date('2025-01-01'),
+			title: 'new'
+		} as Job;
+		const result = dedupJobs([older, newer]);
+		expect(result).toHaveLength(1);
+		expect(result[0].title).toBe('new');
 	});
 });

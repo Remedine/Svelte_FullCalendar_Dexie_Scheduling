@@ -34,6 +34,7 @@ interface BrevoEmailPayload {
 	to: Array<{ email: string; name?: string }>;
 	subject: string;
 	htmlContent: string;
+	attachment?: Array<{ content: string; name: string }>;
 }
 
 async function getOutboundIp(): Promise<string> {
@@ -222,6 +223,43 @@ export async function sendJobAssignmentEmail(
 		to: [{ email: to }],
 		subject: "You've been assigned jobs - Capital City Windows",
 		htmlContent: html
+	});
+}
+
+// === INVOICE TO CLIENT (optional auto-email with .docx attachment) ===
+
+export async function sendInvoiceToClientEmail(
+	to: string,
+	data: {
+		clientName: string;
+		jobTitle: string;
+		amount: number;
+		dueDate: string;
+		filename: string;
+		docxBase64: string;
+	}
+) {
+	const html = `
+		<div style="font-family: sans-serif; max-width: 600px; line-height: 1.5;">
+			${LOGO_HTML}
+			<h2>Invoice from Capital City Windows</h2>
+			<p>Hello ${data.clientName},</p>
+			<p>Please find your invoice attached for <strong>${data.jobTitle}</strong>.</p>
+			<ul>
+				<li><strong>Amount due:</strong> $${data.amount.toFixed(2)}</li>
+				<li><strong>Due date:</strong> ${data.dueDate}</li>
+			</ul>
+			<p>Open the attached Word document (.docx) to review line items. Reply to this email if you have questions.</p>
+			${CREDIT_HTML}
+		</div>
+	`;
+
+	await sendBrevoEmail({
+		sender: SENDER,
+		to: [{ email: to, name: data.clientName }],
+		subject: `Invoice — ${data.jobTitle} — Capital City Windows`,
+		htmlContent: html,
+		attachment: [{ content: data.docxBase64, name: data.filename }]
 	});
 }
 
