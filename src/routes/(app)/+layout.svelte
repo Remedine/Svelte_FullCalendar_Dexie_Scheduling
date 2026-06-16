@@ -7,6 +7,7 @@
 	import { getUserPhotoSrc } from '$lib/db';
 	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import { theme } from '$lib/stores/theme.svelte.ts';
 
 	// Import global design tokens + base styles (tokens power the entire overhaul)
 	import '$lib/styles/globals.css';
@@ -268,6 +269,9 @@
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the submenu for cleaner mobile nav -->
 					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
+						<span class="bottom-nav__theme-label">
+							{theme.isDark ? 'Dark' : 'Light'}
+						</span>
 						<ThemeToggle />
 					</div>
 					<button
@@ -619,7 +623,7 @@
 			position: absolute;
 			bottom: 100%;
 			right: 0; /* aligns right edge with trigger's right; submenu extends left onto screen */
-			transform: translateX(-10%);
+			transform: translateX(-11%);
 			opacity: 0;
 			visibility: hidden;
 			pointer-events: none;
@@ -674,21 +678,28 @@
 			background: var(--color-danger-soft);
 		}
 
-		/* Theme toggle as a menu item inside the avatar dropdown.
-		   Make the toggle button blend as a full-width menu row with icon only (or minimal). */
+		/* Theme toggle as a menu item inside the avatar submenu.
+		   Label to the left of the icon button, using the parent item's flex + gap.
+		   The btn is now icon-only sized. */
 		.bottom-nav__theme-item {
-			padding: 0;
+			/* no padding override; rely on .bottom-nav__user-menu-item padding + gap */
+		}
+
+		.bottom-nav__theme-label {
+			font-size: var(--font-size-sm);
+			color: var(--color-text);
+			white-space: nowrap;
 		}
 
 		.bottom-nav__theme-item .theme-toggle__btn {
-			width: 100%;
+			width: auto;
 			height: 28px;
-			padding: 0 10px;
+			padding: 0;
 			border: none;
 			background: transparent;
-			justify-content: flex-start;
+			justify-content: center;
 			border-radius: 0;
-			gap: 8px;
+			flex-shrink: 0;
 		}
 
 		.bottom-nav__theme-item .theme-toggle__btn:hover {
