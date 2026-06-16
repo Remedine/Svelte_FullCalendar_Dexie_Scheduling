@@ -61,20 +61,22 @@
 		}
 	});
 
-	// Close the avatar modal on Escape key.
+	// Robust outside-click closer for the mobile avatar submenu.
+	// Always attached (while layout is mounted) and only acts when menu is open.
+	// This avoids timing issues.
 	$effect(() => {
-		if (!showAvatarMenu) return;
-
-		const handleEscape = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
+		const handleOutsideClick = (event: MouseEvent) => {
+			if (!showAvatarMenu) return;
+			const wrapper = document.querySelector('.bottom-nav__avatar-wrapper');
+			if (wrapper && !wrapper.contains(event.target as Node)) {
 				showAvatarMenu = false;
 			}
 		};
 
-		document.addEventListener('keydown', handleEscape);
+		document.addEventListener('click', handleOutsideClick, { capture: true });
 
 		return () => {
-			document.removeEventListener('keydown', handleEscape);
+			document.removeEventListener('click', handleOutsideClick, { capture: true });
 		};
 	});
 </script>
@@ -226,9 +228,9 @@
 			</a>
 		{/if}
 
-		<!-- Mobile-only: avatar that opens a modal popup (Profile, dark mode, Logout).
-		     Changed from problematic submenu to a proper centered modal for reliable visibility
-		     on mobile. Backdrop handles outside clicks. Theme toggle is inside the modal.
+		<!-- Mobile-only: avatar with submenu in bottom-right corner.
+		     Submenu opens upward (bottom: 100%) and left (right: 0) per the recommended pattern
+		     so it stays on screen. Uses .open class for visibility (or hover). Theme toggle inside.
 		     No separate footer or brand text on mobile. -->
 		{#if auth.currentUser}
 			<div 
@@ -236,7 +238,7 @@
 				role="button"
 				tabindex="0"
 				aria-expanded={showAvatarMenu}
-				aria-haspopup="dialog"
+				aria-haspopup="menu"
 				aria-label="User menu"
 				onclick={() => showAvatarMenu = !showAvatarMenu}
 				onkeydown={(e) => {
@@ -244,6 +246,7 @@
 						showAvatarMenu = !showAvatarMenu;
 						e.preventDefault();
 					}
+					if (e.key === 'Escape') showAvatarMenu = false;
 				}}
 			>
 				<div class="bottom-nav__avatar">
@@ -261,30 +264,22 @@
 						</span>
 					{/if}
 				</div>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} onclick={(e) => e.stopPropagation()}>
+					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
+					<!-- Theme toggle inside the submenu for cleaner mobile nav -->
+					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
+						<ThemeToggle />
+					</div>
+					<button
+						onclick={() => { showAvatarMenu = false; handleLogout(); }}
+						class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
+					>
+						Logout
+					</button>
+				</div>
 			</div>
 		{/if}
 	</nav>
-
-	<!-- Avatar modal popup (replaces the old submenu that had positioning/clipping/height issues).
-	     Centered, with backdrop. Clicking backdrop or items closes it. -->
-	{#if showAvatarMenu}
-		<div class="bottom-nav__user-modal-backdrop" onclick={() => showAvatarMenu = false}>
-			<div class="bottom-nav__user-modal" onclick={(e) => e.stopPropagation()}>
-				<div class="bottom-nav__user-modal-header">Account</div>
-				<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
-				<!-- Theme toggle inside the modal for cleaner mobile nav -->
-				<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
-					<ThemeToggle />
-				</div>
-				<button
-					onclick={() => { showAvatarMenu = false; handleLogout(); }}
-					class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"
-				>
-					Logout
-				</button>
-			</div>
-		</div>
-	{/if}
 
 	<!-- )=- Global mount for JobDetailsModal (and future shared modals).
 	     The singleton openJobDetailsModal pattern means the component only needs to be in the tree once.
@@ -616,21 +611,38 @@
 		}
 
 		.bottom-nav__user-menu {
-			position: fixed; /* declared in base so it is never a flex item - prevents height expansion of the nav */
+			/* Recommended pattern for bottom-right corner trigger:
+			   Opens upward (bottom:100%) and left (right:0 so body extends left).
+			   position:absolute on relative parent (.bottom-nav__avatar-wrapper).
+			   Uses opacity/visibility for smooth open instead of display toggle
+			   to avoid any layout shifts. */
+			position: absolute;
+			bottom: 100%;
+			right: 0; /* aligns right edge with trigger's right; submenu extends left onto screen */
+			transform: translateX(-10%);
+			opacity: 0;
+			visibility: hidden;
+			pointer-events: none;
+
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
 			box-shadow: var(--shadow-md);
 			min-width: 140px;
-			z-index: 999;
-			display: none;
+			padding: var(--space-1) 0;
+			display: flex;
 			flex-direction: column;
+			transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			z-index: 400;
 		}
 
 		.bottom-nav__user-menu.open,
 		.bottom-nav__avatar-wrapper:hover .bottom-nav__user-menu,
 		.bottom-nav__avatar-wrapper:focus-within .bottom-nav__user-menu {
-			display: flex;
+			opacity: 1;
+			visibility: visible;
+			pointer-events: auto;
+			transform: translateX(0);
 		}
 
 		.bottom-nav__user-menu-item {
@@ -711,57 +723,5 @@
 			text-overflow: ellipsis;
 		}
 
-		/* Avatar modal popup styles (centered modal instead of submenu for reliable mobile UX).
-		   Backdrop covers screen; modal is a simple card with the menu actions. */
-		.bottom-nav__user-modal-backdrop {
-			position: fixed;
-			inset: 0;
-			background: rgba(0, 0, 0, 0.55);
-			z-index: 999;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-		}
-
-		.bottom-nav__user-modal {
-			background: var(--color-surface);
-			border: 1px solid var(--color-border);
-			border-radius: var(--radius-lg);
-			box-shadow: var(--shadow-lg);
-			width: 100%;
-			max-width: 280px;
-			padding: 0;
-			overflow: hidden;
-			display: flex;
-			flex-direction: column;
-		}
-
-		.bottom-nav__user-modal-header {
-			padding: var(--space-3) var(--space-4);
-			font-size: var(--font-size-sm);
-			font-weight: var(--font-weight-semibold);
-			color: var(--color-text-muted);
-			border-bottom: 1px solid var(--color-border);
-			background: var(--color-surface-alt);
-		}
-
-		/* Reuse and enhance the existing menu-item styles for the modal content */
-		.bottom-nav__user-modal .bottom-nav__user-menu-item {
-			padding: 14px 18px;
-			font-size: var(--font-size-base);
-			border-bottom: 1px solid var(--color-border);
-		}
-
-		.bottom-nav__user-modal .bottom-nav__user-menu-item:last-child {
-			border-bottom: none;
-		}
-
-		.bottom-nav__user-modal .bottom-nav__user-menu-item--logout {
-			color: var(--color-danger);
-		}
-
-		.bottom-nav__user-modal .bottom-nav__user-menu-item--logout:hover {
-			background: var(--color-danger-soft);
-		}
 	}
 </style>
