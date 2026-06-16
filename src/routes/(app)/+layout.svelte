@@ -17,6 +17,10 @@
 
 	let showAvatarMenu = $state(false);
 
+	// Refs for the avatar wrapper (for positioning the menu relative to it).
+	let avatarWrapperEl = $state(null);
+	let menuEl = $state(null);
+
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
 		await logout();
@@ -78,6 +82,50 @@
 		return () => {
 			document.removeEventListener('click', handleOutsideClick, { capture: true });
 		};
+	});
+
+	// Position the menu using fixed (viewport) so it always appears on-screen above the avatar
+	// and to the left of the wrapper, without being clipped by any ancestor overflow.
+	// Declaring position:fixed in CSS base ensures it never participates in the parent's
+	// flex layout (avoids expanding the bottom nav height when opening).
+	$effect(() => {
+		if (!menuEl) return;
+
+		if (!showAvatarMenu || !avatarWrapperEl) {
+			if (menuEl) {
+				menuEl.style.top = '';
+				menuEl.style.left = '';
+				menuEl.style.right = '';
+				menuEl.style.bottom = '';
+				menuEl.style.zIndex = '';
+			}
+			return;
+		}
+
+		queueMicrotask(() => {
+			if (!showAvatarMenu || !avatarWrapperEl || !menuEl) return;
+
+			const rect = avatarWrapperEl.getBoundingClientRect();
+			const approxMenuHeight = 110;
+			const menuWidth = 150;
+			const gap = 6;
+
+			// Place directly above the avatar area
+			let top = rect.top - approxMenuHeight - gap;
+			top = Math.max(8, top);
+
+			// "Top left of the parent": align menu's right edge near the wrapper's left
+			// so the menu body extends to the left of the avatar.
+			let left = rect.left - menuWidth - 2;
+			if (left < 8) left = 8;
+
+			menuEl.style.position = 'fixed';
+			menuEl.style.top = `${top}px`;
+			menuEl.style.left = `${left}px`;
+			menuEl.style.right = 'auto';
+			menuEl.style.bottom = 'auto';
+			menuEl.style.zIndex = '999';
+		});
 	});
 </script>
 
@@ -237,6 +285,7 @@
 		{#if auth.currentUser}
 			<div 
 				class="bottom-nav__avatar-wrapper"
+				bind:this={avatarWrapperEl}
 				role="button"
 				tabindex="0"
 				aria-expanded={showAvatarMenu}
@@ -266,7 +315,7 @@
 						</span>
 					{/if}
 				</div>
-				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} onclick={(e) => e.stopPropagation()}>
+				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} bind:this={menuEl} onclick={(e) => e.stopPropagation()}>
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
 					<!-- Theme toggle inside the dropdown for cleaner mobile nav -->
 					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
@@ -561,19 +610,17 @@
 	}
 
 	/* Mobile: avatar integrated into right side of bottom nav.
-	   Dropdown is a classic submenu: the wrapper is position:relative; the menu child uses
-	   position:absolute so it pops out above + to the left without ever affecting the
-	   height or flex layout of the bottom-nav or wrapper (no "expanding the nav menu height").
-	   bottom:100% + gap → directly above the avatar.
-	   right:100% + small → menu body extends left of the parent wrapper.
-	   .open (from click) or :hover/:focus-within controls visibility. */
+	   The dropdown uses position:fixed (declared in base rule) + JS-calculated coords
+	   so it reliably appears above the avatar and to its left, fully on-screen,
+	   and NEVER affects the height/layout of the bottom nav (no expansion).
+	   The .open class (toggled on click) controls display. Hover/focus also work.
+	   overflow on nav is safe because fixed is viewport-based. */
 	@media (max-width: 768px) {
 		.bottom-nav {
 			align-items: center;
 			padding: 0 8px 0 0; /* extra right padding so the avatar on the far right has breathing room like the other tabs */
 			box-sizing: border-box;
-			overflow-x: hidden; /* prevent horizontal page widening from nav tabs */
-			overflow-y: visible; /* allow absolute submenu to pop upward without clipping */
+			overflow: visible; /* safe with fixed-positioned submenu */
 			max-width: 100vw;
 		}
 
@@ -615,16 +662,13 @@
 		}
 
 		.bottom-nav__user-menu {
-			position: absolute;
-			bottom: calc(100% + 6px); /* above the avatar/wrapper */
-			right: calc(100% + 2px); /* to the left of the parent wrapper (menu body extends left) */
-			left: auto;
+			position: fixed; /* declared in base so it is never a flex item - prevents height expansion of the nav */
 			background: var(--color-surface);
 			border: 1px solid var(--color-border);
 			border-radius: var(--radius-sm);
 			box-shadow: var(--shadow-md);
 			min-width: 140px;
-			z-index: 400; /* above bottom-nav content */
+			z-index: 999;
 			display: none;
 			flex-direction: column;
 		}
