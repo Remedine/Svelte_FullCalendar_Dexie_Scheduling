@@ -154,6 +154,12 @@ export interface AppOptions {
 	}>;
 	cancelReasons: string[];
 	invoiceDueDays: number;
+	/** Days before job start to notify assigned crew (at crewAssignmentHour). */
+	crewAssignmentDaysBefore?: number;
+	/** Hour of day (0–23, local) to send crew assignment notifications. */
+	crewAssignmentHour?: number;
+	/** Browser push for crew assignments (email uses client preferredBillingMethod). */
+	notifyCrewAssignmentPush?: boolean;
 	lastUpdated: Date;
 	updatedBy: string;
 }
@@ -217,6 +223,10 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 	// - status + dueDate for facets, overdue computation, and has/no-invoice filtering
 	// - pbId added in v19 (was missing, causing SchemaError on pull after first PB invoice save)
 	invoices: EntityTable<Invoice, 'id'>;
+	crewNotifications: EntityTable<
+		import('$lib/notifications/crewSchedule').CrewNotificationPending,
+		'id'
+	>;
 };
 
 // )=- Bumped to version 21 (was 20) to force schema upgrade on all clients for the *assignedCrew
@@ -236,6 +246,17 @@ db.version(21).stores({
 	syncQueue: '++id, type, collection, recordId, createdAt',
 	options: 'id',
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId'
+});
+
+db.version(22).stores({
+	clients: 'id, name, areaOfTown, email, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName'
 });
 
 /**
@@ -386,7 +407,7 @@ export async function createJob(jobData: any): Promise<string> {
 
 	if (newJob.assignedCrew?.length) {
 		import('$lib/notifications/crewAssignment')
-			.then((m) => m.notifyNewCrewAssignments(String(id), [], newJob.assignedCrew))
+			.then((m) => m.refreshCrewNotificationQueueForJob(String(id)))
 			.catch(() => {});
 	}
 
@@ -422,18 +443,11 @@ export async function updateJob(
 
 	if (
 		!opts?.skipCrewNotify &&
-		updates.assignedCrew &&
 		existing &&
-		navigator.onLine
+		(updates.assignedCrew !== undefined || updates.start !== undefined)
 	) {
 		import('$lib/notifications/crewAssignment')
-			.then((m) =>
-				m.notifyNewCrewAssignments(
-					jobId,
-					existing.assignedCrew || [],
-					updates.assignedCrew || []
-				)
-			)
+			.then((m) => m.refreshCrewNotificationQueueForJob(jobId))
 			.catch(() => {});
 	}
 }
@@ -460,6 +474,9 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 	});
 
 	if (navigator.onLine) await processSyncQueue();
+	import('$lib/notifications/crewAssignment')
+		.then((m) => m.refreshCrewNotificationQueueForJob(jobId))
+		.catch(() => {});
 	console.log(`✅ Job ${jobId} cancelled by ${currentUser?.name || 'Unknown'}`);
 }
 

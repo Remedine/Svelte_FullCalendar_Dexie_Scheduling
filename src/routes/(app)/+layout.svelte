@@ -39,6 +39,28 @@
 		};
 	});
 
+	// Process scheduled crew assignment notifications while the app is open.
+	$effect(() => {
+		if (auth.loading || !auth.currentUser) return;
+
+		let cancelled = false;
+		const tick = async () => {
+			if (cancelled) return;
+			const { processScheduledCrewNotifications } = await import(
+				'$lib/notifications/crewAssignment'
+			);
+			await processScheduledCrewNotifications();
+		};
+
+		tick();
+		const interval = setInterval(tick, 5 * 60 * 1000);
+
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
+	});
+
 	// )=- Strengthened central auth guard using $effect.
 	// - Waits for loading to complete before any redirects (prevents flash/early redirect).
 	// - Single source of truth: central `auth` store (email/password via PB only; PIN login removed).

@@ -1,15 +1,4 @@
 <!-- src/lib/components/JobInvoicePanel.svelte -->
-<!-- 
-)= - Reusable invoice panel extracted as requested during planning.
-   Lives under the Billing Items section in JobDetailsModal (and can be reused elsewhere later).
-   Handles:
-     - Generate Draft (calls generateInvoiceDocx, downloads via file-saver, then persists via createInvoice with file blob)
-     - Re-upload of edited .docx (file input → Blob → updateInvoice with files param)
-     - Status display + quick transitions (delegated to parent or direct)
-   Uses the new Phase 4 generate helper + the files support we added to createInvoice/updateInvoice in Phase 2.
-   BEM + runes + TypeScript per AGENTS.md.
-   Reference: JOBS_AND_INVOICES_SPEC.md (Phase 4)
--->
 <script lang="ts">
 	import {
 		db,
@@ -23,10 +12,9 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { saveAs } from 'file-saver';
 	import { pb } from '$lib/db/pb';
-	// )=- Date helpers extracted to a pure module in Phase 1 for testability and to eliminate duplication.
-	// All local calendar-day logic now lives in $lib/utils/dates (avoids the classic UTC vs local day shift bugs).
-	// Reference: TESTING_PLAN.md Phase 1 + JOBS_AND_INVOICES_SPEC.md
+	import { clientPrefersEmailBilling } from '$lib/notifications/crewSchedule';
 	import { dateToInputValue, inputValueToDate } from '$lib/utils/dates';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	let {
 		job = $bindable<Job | null>(null),
@@ -36,74 +24,106 @@
 
 	let isGenerating = $state(false);
 	let isUploading = $state(false);
-	let emailClientOnGenerate = $state(false);
+	let isSending = $state(false);
+
+	let client = $state<Client | null>(null);
 
 	$effect(() => {
-		if (optionsStore.data) {
-			emailClientOnGenerate = optionsStore.data.autoEmailInvoiceOnGenerate === true;
+		const clientId = job?.clientId;
+		if (!clientId) {
+			client = null;
+			return;
 		}
+		db.clients.get(clientId).then((c) => {
+			client = c ?? null;
+		});
 	});
 
-	async function maybeEmailInvoiceToClient(
-		blob: Blob,
-		filename: string,
-		client: Client | null,
-		dueDate: Date | null
-	) {
-		if (!emailClientOnGenerate || !client?.email) return;
-		const buf = await blob.arrayBuffer();
-		const bytes = new Uint8Array(buf);
-		let binary = '';
-		for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-		const docxBase64 = btoa(binary);
+	const canEmailInvoice = $derived(
+		clientPrefersEmailBilling(client?.preferredBillingMethod) && !!client?.email
+	);
 
-		const res = await fetch('/api/invoices/send-email', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: pb.authStore.token
-			},
-			body: JSON.stringify({
-				clientEmail: client.email,
-				clientName: client.name,
-				jobTitle: job?.title || 'Service',
-				amount: job?.totalAmount || 0,
-				dueDate: dueDate ? dueDate.toLocaleDateString() : '—',
-				filename,
-				docxBase64
-			})
-		});
-		if (!res.ok) {
-			const err = await res.json().catch(() => ({}));
-			console.warn('[invoice] auto-email failed', err);
+	async function fetchPrimaryInvoiceBlob(inv: Invoice): Promise<Blob | null> {
+		if (!inv.pbId || !inv.primaryInvoiceFile?.filename) return null;
+		const url = pb.files.getURL(
+			{ id: inv.pbId, collectionName: 'invoices' },
+			inv.primaryInvoiceFile.filename
+		);
+		const res = await fetch(url);
+		if (!res.ok) return null;
+		return res.blob();
+	}
+
+	async function handleSendInvoiceToClient() {
+		if (!job || !invoice || !canEmailInvoice || !client?.email) return;
+		isSending = true;
+		try {
+			const blob = await fetchPrimaryInvoiceBlob(invoice);
+			if (!blob) {
+				toast.error('Invoice file not ready yet — wait for sync or upload a revised .docx.');
+				return;
+			}
+			const filename = invoice.primaryInvoiceFile?.filename || 'invoice.docx';
+			const buf = await blob.arrayBuffer();
+			const bytes = new Uint8Array(buf);
+			let binary = '';
+			for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+			const docxBase64 = btoa(binary);
+
+			const dueDate = invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '—';
+			const res = await fetch('/api/invoices/send-email', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: pb.authStore.token
+				},
+				body: JSON.stringify({
+					clientEmail: client.email,
+					clientName: client.name,
+					jobTitle: job.title || 'Service',
+					amount: invoice.amount ?? job.totalAmount ?? 0,
+					dueDate,
+					filename,
+					docxBase64
+				})
+			});
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({}));
+				throw new Error(err.details || err.error || 'Send failed');
+			}
+			if (invoice.status === 'generated' || invoice.status === 'draft') {
+				await updateInvoice(invoice.id!, { status: 'sent', updatedAt: new Date() });
+				const fresh = await db.invoices.get(invoice.id!);
+				if (fresh) {
+					invoice = fresh;
+					onStatusChange(fresh);
+				}
+			}
+			toast.success(`Invoice emailed to ${client.email}`);
+		} catch (err) {
+			console.error('Failed to send invoice', err);
+			toast.error(err instanceof Error ? err.message : 'Failed to send invoice email');
+		} finally {
+			isSending = false;
 		}
 	}
 
-	// )=- The two date helpers were moved to $lib/utils/dates (see import above).
-	// This component now uses the shared, tested versions.
 	async function handleGenerateDraft() {
 		if (!job) return;
 		isGenerating = true;
 
 		try {
 			await optionsStore.load?.();
-			const client = job.clientId ? await db.clients.get(job.clientId) : null;
+			const c = job.clientId ? await db.clients.get(job.clientId) : null;
 
-			const dueDays = optionsStore.data?.invoiceDueDays ?? 30;
-			const blob = await generateInvoiceDocx(job, client, {
+			const blob = await generateInvoiceDocx(job, c, {
 				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: dueDays
+				invoiceDueDays: optionsStore.data?.invoiceDueDays
 			});
 
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
-			const dueDate = job.end
-				? new Date(new Date(job.end).getTime() + dueDays * 86400000)
-				: null;
 			saveAs(blob, filename);
-			await maybeEmailInvoiceToClient(blob, filename, client, dueDate);
 
-			// Persist to our system (metadata + the actual file blob via the files param we built in Phase 2)
-			// This will go through createInvoice → queue → PB with FormData file upload.
 			const newInvoiceId = await createInvoice(
 				{
 					jobId: job.id,
@@ -119,7 +139,6 @@
 				}
 			);
 
-			// Refresh local invoice state for the parent modal
 			const fresh = await db.invoices.get(newInvoiceId);
 			if (fresh) {
 				invoice = fresh;
@@ -139,11 +158,9 @@
 
 		isUploading = true;
 		const file = input.files[0];
-		const blob = file; // already a Blob/File
+		const blob = file;
 
 		try {
-			// Update the existing invoice record with the new file.
-			// The _files mechanism + FormData in sync will replace the primary file in PB.
 			await updateInvoice(
 				invoice.id!,
 				{
@@ -154,7 +171,6 @@
 				}
 			);
 
-			// Refresh
 			const fresh = await db.invoices.get(invoice.id!);
 			if (fresh) {
 				invoice = fresh;
@@ -165,18 +181,12 @@
 			alert('Upload failed. Check console.');
 		} finally {
 			isUploading = false;
-			input.value = ''; // allow re-select same file
+			input.value = '';
 		}
 	}
 
 	async function handleQuickStatus(newStatus: Invoice['status']) {
 		if (!invoice || !invoice.id) return;
-		// )=- Now performs the actual persistence (like regenerate, revised upload, and editPaidAt do).
-		// Previously the parent modal's onStatusChange was blindly calling updateInvoice for every notification,
-		// causing double (or more) queue items + repeated PB updates + the spam of "updated in PocketBase" / "Synced update" logs
-		// the user saw after every status transition or regenerate.
-		// With bind:invoice + onStatusChange we still lift the fresh state for the modal header badges/overdue/due.
-		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 		const patch: Partial<Invoice> = { status: newStatus };
 		if (newStatus === 'paid' && !invoice.paidAt) {
 			patch.paidAt = new Date();
@@ -194,12 +204,8 @@
 		}
 	}
 
-	// )=- Download/open the existing primary invoice .docx from PB when one has been generated.
-	// Uses the pbId from the Dexie invoice record (populated after sync) to build the file URL via pb.files.getURL.
-	// Triggers a direct download so user can open/edit the .docx in Word/etc.
 	async function downloadPrimary() {
 		if (!invoice?.pbId || !invoice.primaryInvoiceFile?.filename) {
-			// )=- Guard kept (defensive). The UI now hides the Open button + shows "syncing…" instead of alert (better UX right after generate before queue roundtrip).
 			console.info('Open invoice requested before pbId stamped (still syncing).');
 			return;
 		}
@@ -216,15 +222,13 @@
 		document.body.removeChild(a);
 	}
 
-	// )=- Regenerate the primary .docx using current job data (for when billables or details changed after initial generate).
-	// Downloads fresh copy and updates the primaryInvoiceFile on the existing invoice record (via _files in update).
 	async function handleRegenerate() {
 		if (!job || !invoice) return;
 		isGenerating = true;
 		try {
 			await optionsStore.load?.();
-			const client = job.clientId ? await db.clients.get(job.clientId) : null;
-			const blob = await generateInvoiceDocx(job, client, {
+			const c = job.clientId ? await db.clients.get(job.clientId) : null;
+			const blob = await generateInvoiceDocx(job, c, {
 				taxRate: optionsStore.data?.taxRate,
 				invoiceDueDays: optionsStore.data?.invoiceDueDays
 			});
@@ -244,14 +248,10 @@
 		}
 	}
 
-	// )=- Edit the paidAt date directly (for corrections). Updates via updateInvoice and refreshes bound state.
 	async function handleEditPaidAt(e: Event) {
 		if (!invoice) return;
 		const input = e.target as HTMLInputElement;
-		const val = input.value;
-		// )=- Use inputValueToDate (instead of new Date(val)) to prevent the same local vs UTC date shift bug
-		// that was causing the due date picker (07/10) vs displayed (07/09) discrepancy.
-		const paidAt = inputValueToDate(val);
+		const paidAt = inputValueToDate(input.value);
 		try {
 			await updateInvoice(invoice.id!, { paidAt, updatedAt: new Date() });
 			const fresh = await db.invoices.get(invoice.id!);
@@ -265,18 +265,10 @@
 		}
 	}
 
-	// )=- Edit the dueDate directly (user override for the due date that was originally computed from job.end + options.invoiceDueDays).
-	// Updates via updateInvoice (which queues the change + persists to PB on sync).
-	// Refreshes the bound invoice so the modal header "Due:" display and any other UI updates immediately.
-	// This fulfills the request to "be able to override the due date put in a new due date".
-	// )=- Reference: JOBS_AND_INVOICES_SPEC.md (dueDate on Invoice, set at generation but now overridable) + Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	async function handleEditDueDate(e: Event) {
 		if (!invoice) return;
 		const input = e.target as HTMLInputElement;
-		const val = input.value;
-		// )=- Use inputValueToDate to create a true local calendar date instead of new Date(val) (which treats YYYY-MM-DD as UTC).
-		// This ensures the stored dueDate matches exactly what the user picked in the browser's date picker.
-		const dueDate = inputValueToDate(val) ?? invoice.dueDate;
+		const dueDate = inputValueToDate(input.value) ?? invoice.dueDate;
 		try {
 			await updateInvoice(invoice.id!, { dueDate, updatedAt: new Date() });
 			const fresh = await db.invoices.get(invoice.id!);
@@ -290,11 +282,6 @@
 		}
 	}
 
-	// )=- Add (append) supporting documents (scans, photos, exports, etc.) for the invoice.
-	// Uses the same files mechanism; updateInvoice now appends to the supportingDocuments metadata list (see index.ts).
-	// Only the new blobs are sent in this batch to the queue/FormData. Existing files on PB are preserved.
-	// After success we refresh the bound invoice so the modal's "Supporting Documents" list (and any future UI) sees the new entries.
-	// Per JOBS_AND_INVOICES_SPEC.md Phase 4/10 (supporting docs for legacy + manual adds).
 	async function handleAddSupporting(e: Event) {
 		const input = e.target as HTMLInputElement;
 		if (!input.files?.length || !invoice?.id) return;
@@ -318,7 +305,7 @@
 			alert('Failed to add supporting documents. See console.');
 		} finally {
 			isUploading = false;
-			input.value = ''; // allow selecting the same files again later
+			input.value = '';
 		}
 	}
 </script>
@@ -337,8 +324,6 @@
 					onclick={handleRegenerate}
 					disabled={isGenerating}>Regenerate</button
 				>
-				<!-- )=- Due date override UI. Always available for an existing invoice so user can adjust the due date that was set at generation time.
-				     Uses the same pattern as the paid date editor. BEM class for styling. -->
 				<span class="job-invoice-panel__due-edit">
 					Due on:
 					<input
@@ -347,6 +332,20 @@
 						onchange={handleEditDueDate}
 					/>
 				</span>
+			{/if}
+			{#if canEmailInvoice && invoice.primaryInvoiceFile?.filename}
+				<button
+					class="job-invoice-panel__small-btn job-invoice-panel__small-btn--primary"
+					onclick={handleSendInvoiceToClient}
+					disabled={isSending || !invoice.pbId}
+					title={invoice.pbId ? 'Email current .docx to client' : 'Waiting for invoice sync'}
+				>
+					{isSending ? 'Sending…' : 'Send to Client'}
+				</button>
+			{:else if client && !canEmailInvoice}
+				<span class="job-invoice-panel__sync-hint"
+					>Client billing preference is not email — send manually</span
+				>
 			{/if}
 			{#if invoice.status === 'generated'}
 				<button class="job-invoice-panel__small-btn" onclick={() => handleQuickStatus('sent')}
@@ -378,12 +377,8 @@
 			{#if invoice.primaryInvoiceFile?.filename}
 				<span class="job-invoice-panel__filename">{invoice.primaryInvoiceFile.filename}</span>
 				{#if invoice.pbId}
-					<!-- )=- Open uses pb.files.getURL on the server record (after queue stamped pbId). Per spec "there needs to be a way to open it" once generated. -->
 					<button class="job-invoice-panel__small-btn" onclick={downloadPrimary}>Open</button>
 				{:else}
-					<!-- )=- Per JOBS_AND_INVOICES_SPEC.md Phase 7: clear offline / not-yet-synced messaging for primary file.
-					     Files live only on PB (no local blobs for invoices except avatars). Show explicit message instead of silent fail or vague "syncing".
-					     "syncing…" kept only for the very brief post-generate optimistic window before queue processes. -->
 					<span class="job-invoice-panel__sync-hint">not available offline (pending sync)</span>
 				{/if}
 			{/if}
@@ -398,9 +393,6 @@
 			</label>
 		</div>
 
-		<!-- )=- Supporting documents upload (additive). Multiple files allowed. Appends to existing list both in Dexie metadata (optimistic) and on PB via the files queue branch.
-		     The list of current supporting filenames is still shown in the JobDetailsModal "Supporting Documents" section for now.
-		     This fulfills the "ability to add more for legacy imports" requirement. -->
 		<div class="job-invoice-panel__file-row">
 			<label class="job-invoice-panel__upload-label job-invoice-panel__upload-label--supporting">
 				<input
@@ -414,10 +406,6 @@
 			</label>
 		</div>
 	{:else}
-		<label class="job-invoice-panel__email-opt">
-			<input type="checkbox" bind:checked={emailClientOnGenerate} />
-			Email invoice to client (requires client email)
-		</label>
 		<button
 			class="job-invoice-panel__generate-btn"
 			onclick={handleGenerateDraft}
@@ -426,16 +414,13 @@
 			{isGenerating ? 'Generating…' : 'Generate Draft Invoice'}
 		</button>
 		<p class="job-invoice-panel__hint">
-			Creates an editable .docx, downloads it immediately, and saves a copy to the job (via
-			PocketBase). Optional email uses Brevo.
+			Downloads an editable .docx for review. Tweak in Word, re-upload if needed, then use
+			<strong>Send to Client</strong> when ready (email clients only).
 		</p>
 	{/if}
 </div>
 
 <style>
-	/* Invoice panel now uses design tokens for cohesion (standardized like other modals/panels).
-	   Mobile styling added for bottom-sheet context in JobDetailsModal (full-width, touch-friendly).
-	   BEM + runes per AGENTS.md. */
 	.job-invoice-panel {
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
@@ -444,7 +429,6 @@
 		margin-top: var(--space-2);
 	}
 
-	/* Mobile adjustments for bottom sheet: tighter but still usable, better wrapping. */
 	@media (max-width: 768px) {
 		.job-invoice-panel {
 			padding: var(--space-2);
@@ -506,7 +490,6 @@
 		color: var(--color-text);
 	}
 
-	/* Due date override (consistent with paid-edit). */
 	.job-invoice-panel__due-edit {
 		font-size: var(--font-size-xs);
 		display: flex;
@@ -567,7 +550,6 @@
 		white-space: nowrap;
 	}
 
-	/* )=- Small hint... */
 	.job-invoice-panel__sync-hint {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
@@ -585,18 +567,8 @@
 		display: none;
 	}
 
-	/* Supporting docs label slightly different. */
 	.job-invoice-panel__upload-label--supporting {
 		font-size: var(--font-size-xs);
-	}
-
-	.job-invoice-panel__email-opt {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		margin-bottom: var(--space-2);
-		cursor: pointer;
 	}
 
 	.job-invoice-panel__generate-btn {

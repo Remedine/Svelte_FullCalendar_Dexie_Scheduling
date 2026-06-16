@@ -72,6 +72,9 @@
 				defaultJobDurationHours: 2,
 				taxRate: 6.5,
 				invoiceDueDays: 30,
+				crewAssignmentDaysBefore: 1,
+				crewAssignmentHour: 7,
+				notifyCrewAssignmentPush: true,
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -85,10 +88,14 @@
 			return;
 		}
 
-		const emailNotify = editingOptions.notifyCrewAssignmentEmail !== false;
-		const pushNotify = editingOptions.notifyCrewAssignmentPush !== false;
-		if (!emailNotify && !pushNotify) {
-			toast.error('Enable at least one crew assignment notification (email or push).');
+		const daysBefore = Number(editingOptions.crewAssignmentDaysBefore);
+		const hour = Number(editingOptions.crewAssignmentHour);
+		if (Number.isNaN(daysBefore) || daysBefore < 0 || daysBefore > 365) {
+			toast.error('Crew notification days-before must be between 0 and 365.');
+			return;
+		}
+		if (Number.isNaN(hour) || hour < 0 || hour > 23) {
+			toast.error('Crew notification hour must be between 0 and 23.');
 			return;
 		}
 
@@ -307,17 +314,34 @@
 			<div class="form-section">
 				<h3>Crew Assignment Notifications</h3>
 				<p class="options-page__help">
-					When a crew member is added to a job, notify them by email and/or browser push. At least
-					one must be enabled.
+					Notifications are queued when crew are assigned and sent at the scheduled time (not
+					immediately). Email is sent only for jobs whose client has preferred billing set to
+					<strong>email</strong> on the client record. Browser push is optional for all assignments.
 				</p>
+				<div class="form-grid">
+					<label for="opt-crew-days" class="label">Send days before job</label>
+					<input
+						id="opt-crew-days"
+						type="number"
+						min="0"
+						max="365"
+						class="input"
+						bind:value={editingOptions.crewAssignmentDaysBefore}
+					/>
+					<label for="opt-crew-hour" class="label">Send at hour (0–23, local)</label>
+					<input
+						id="opt-crew-hour"
+						type="number"
+						min="0"
+						max="23"
+						class="input"
+						bind:value={editingOptions.crewAssignmentHour}
+					/>
+				</div>
 				<div class="options-page__checkbox-row">
 					<label class="options-page__checkbox-label">
-						<input type="checkbox" bind:checked={editingOptions.notifyCrewAssignmentEmail} />
-						Email (Brevo)
-					</label>
-					<label class="options-page__checkbox-label">
 						<input type="checkbox" bind:checked={editingOptions.notifyCrewAssignmentPush} />
-						Browser push notification
+						Browser push notification (when app is open at send time)
 					</label>
 				</div>
 			</div>
@@ -391,12 +415,11 @@
 					<label for="opt-due" class="label">Invoice Due Days</label>
 					<input id="opt-due" type="number" class="input" bind:value={editingOptions.invoiceDueDays} />
 				</div>
-				<div class="options-page__checkbox-row">
-					<label class="options-page__checkbox-label">
-						<input type="checkbox" bind:checked={editingOptions.autoEmailInvoiceOnGenerate} />
-						Automatically email invoice to client when generating (if client has email)
-					</label>
-				</div>
+				<p class="options-page__help">
+					Invoices are generated for owner review first. Use <strong>Send to Client</strong> in the job
+					invoice panel after tweaking the Word doc. Email send is only offered when the client's
+					preferred billing method is <strong>email</strong>.
+				</p>
 			</div>
 
 			<div class="form-section">
