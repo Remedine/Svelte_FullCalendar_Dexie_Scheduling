@@ -423,16 +423,18 @@
 									>
 										<span class="date">{new Date(job.start).toLocaleDateString()}</span>
 										<span class="title">{job.title}</span>
-										<span class="status status--{job.status}">{job.status}</span>
-										{#if job._hasInvoice}
-											<span class="invoice-badge" class:overdue={job._isOverdue}>
-												📄 {job._invoiceStatus || 'invoice'}
-												{#if job._isOverdue}
-													<span class="overdue-pill">OVERDUE</span>
-												{/if}
-											</span>
-										{/if}
-										<span class="amount">${(job.totalAmount || 0).toFixed(2)}</span>
+										<div class="client-card__related-meta">
+											<span class="status status--{job.status}">{job.status}</span>
+											{#if job._hasInvoice}
+												<span class="invoice-badge" class:overdue={job._isOverdue}>
+													📄 {job._invoiceStatus || 'invoice'}
+													{#if job._isOverdue}
+														<span class="overdue-pill">OVERDUE</span>
+													{/if}
+												</span>
+											{/if}
+											<span class="amount">${(job.totalAmount || 0).toFixed(2)}</span>
+										</div>
 									</div>
 								{:else}
 									<div class="client-card__related-empty">
@@ -533,7 +535,7 @@
 
 	.clients-page__search {
 		flex: 1;
-		min-width: 280px;
+		min-width: 160px;
 		padding: var(--space-3) var(--space-4);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
@@ -545,7 +547,7 @@
 		padding: var(--space-3) var(--space-4);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
-		min-width: 180px;
+		min-width: 100px;
 		background: var(--color-surface);
 		color: var(--color-text);
 	}
@@ -706,7 +708,7 @@
 
 	.client-card__related-job {
 		display: grid;
-		grid-template-columns: auto 1fr auto auto;
+		grid-template-columns: auto 1fr auto;
 		gap: var(--space-2);
 		align-items: center;
 		font-size: var(--font-size-xs);
@@ -714,6 +716,13 @@
 		background: var(--color-surface-alt);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
+	}
+
+	.client-card__related-meta {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		justify-content: flex-end;
 	}
 	.client-card__related-job:hover {
 		background: var(--color-surface);
@@ -795,5 +804,34 @@
 		border: none;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
+	}
+
+	/* Mobile fixes for horizontal scroll: reduce min-widths, allow header wrap, contain grids. */
+	@media (max-width: 480px) {
+		.clients-page {
+			padding: var(--space-4) var(--space-3);
+		}
+
+		.clients-page__search {
+			min-width: 120px;
+		}
+
+		.clients-page__select {
+			min-width: 80px;
+		}
+
+		.clients-page__filters {
+			gap: var(--space-2);
+		}
+
+		.clients-page__header {
+			flex-wrap: wrap;
+			gap: var(--space-2);
+		}
+
+		.clients-page__title {
+			font-size: var(--font-size-2xl);
+			flex-basis: 100%;
+		}
 	}
 </style>
