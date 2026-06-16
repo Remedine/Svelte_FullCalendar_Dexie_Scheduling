@@ -383,131 +383,165 @@
 </div>
 
 <style>
+	/* Invoice panel now uses design tokens for cohesion (standardized like other modals/panels).
+	   Mobile styling added for bottom-sheet context in JobDetailsModal (full-width, touch-friendly).
+	   BEM + runes per AGENTS.md. */
 	.job-invoice-panel {
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		padding: 0.75rem;
-		background: #fafafa;
-		margin-top: 0.5rem;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-3);
+		background: var(--color-surface-alt);
+		margin-top: var(--space-2);
+	}
+
+	/* Mobile adjustments for bottom sheet: tighter but still usable, better wrapping. */
+	@media (max-width: 768px) {
+		.job-invoice-panel {
+			padding: var(--space-2);
+			border-radius: var(--radius-sm);
+			margin-top: var(--space-1);
+		}
 	}
 
 	.job-invoice-panel__status {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.5rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-2);
 		flex-wrap: wrap;
 	}
 
+	@media (max-width: 768px) {
+		.job-invoice-panel__status {
+			gap: var(--space-1);
+		}
+	}
+
 	.job-invoice-panel__status-badge {
-		font-size: 0.7rem;
+		font-size: var(--font-size-xs);
 		padding: 0.15rem 0.55rem;
-		border-radius: 999px;
-		font-weight: 600;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
 		text-transform: uppercase;
 	}
 	.job-invoice-panel__status-badge--draft {
-		background: #fef3c7;
-		color: #92400e;
+		background: var(--color-warning-soft);
+		color: var(--color-warning);
 	}
 	.job-invoice-panel__status-badge--generated {
-		background: #dbeafe;
-		color: #1e40af;
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
 	}
 	.job-invoice-panel__status-badge--sent {
-		background: #d1fae5;
-		color: #166534;
+		background: var(--color-success-soft);
+		color: var(--color-success);
 	}
 	.job-invoice-panel__status-badge--paid {
-		background: #a7f3d0;
-		color: #065f46;
+		background: var(--color-success-soft);
+		color: var(--color-success);
 	}
 
 	.job-invoice-panel__paid-edit {
-		font-size: 0.7rem;
+		font-size: var(--font-size-xs);
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-invoice-panel__paid-edit input {
-		padding: 0.1rem 0.2rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 3px;
-		font-size: 0.65rem;
+		padding: var(--space-1) var(--space-1);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
-	/* )=- Due date override editor style. Matches the paid-edit for visual consistency.
-	   Allows user to put in a new due date after initial generation (which used options.invoiceDueDays + job end).
-	   )=- Reference: user request + JOBS_AND_INVOICES_SPEC.md */
+	/* Due date override (consistent with paid-edit). */
 	.job-invoice-panel__due-edit {
-		font-size: 0.7rem;
+		font-size: var(--font-size-xs);
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 	.job-invoice-panel__due-edit input {
-		padding: 0.1rem 0.2rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 3px;
-		font-size: 0.65rem;
+		padding: var(--space-1) var(--space-1);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.job-invoice-panel__small-btn {
-		font-size: 0.7rem;
-		padding: 0.15rem 0.5rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 4px;
-		background: white;
+		font-size: var(--font-size-xs);
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
 		cursor: pointer;
+		color: var(--color-text);
+	}
+	@media (max-width: 768px) {
+		.job-invoice-panel__small-btn {
+			padding: var(--space-1) var(--space-2);
+			font-size: var(--font-size-xs);
+		}
 	}
 	.job-invoice-panel__small-btn--primary {
-		background: #3b82f6;
+		background: var(--color-primary);
 		color: white;
-		border-color: #3b82f6;
+		border-color: var(--color-primary);
 	}
 
 	.job-invoice-panel__file-row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.5rem;
-		font-size: 0.8rem;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
 	}
 
 	.job-invoice-panel__filename {
-		color: #475569;
+		color: var(--color-text-muted);
 		font-family: monospace;
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	/* )=- Small hint for the brief window after Generate (local Dexie + queue) before PB create in processSyncQueue stamps the pbId and filename metadata is enough for Open. */
+	/* )=- Small hint... */
 	.job-invoice-panel__sync-hint {
-		font-size: 0.65rem;
-		color: #64748b;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
 		font-style: italic;
 	}
 
 	.job-invoice-panel__upload-label {
 		cursor: pointer;
-		color: #0369a1;
+		color: var(--color-primary);
 		text-decoration: underline;
+		font-size: var(--font-size-xs);
+		white-space: nowrap;
 	}
 	.job-invoice-panel__upload-label input {
 		display: none;
 	}
 
-	/* )=- Slightly different treatment for the "add more" supporting button (not a replace action). */
+	/* Supporting docs label slightly different. */
 	.job-invoice-panel__upload-label--supporting {
-		font-size: 0.75rem;
+		font-size: var(--font-size-xs);
 	}
 
 	.job-invoice-panel__generate-btn {
 		width: 100%;
-		padding: 0.6rem;
-		background: #fef3c7;
-		color: #92400e;
-		border: 1px solid #fde68c;
-		border-radius: 6px;
-		font-weight: 600;
+		padding: var(--space-3);
+		background: var(--color-warning-soft);
+		color: var(--color-warning);
+		border: 1px solid var(--color-warning);
+		border-radius: var(--radius-md);
+		font-weight: var(--font-weight-semibold);
 		cursor: pointer;
 	}
 	.job-invoice-panel__generate-btn:disabled {
@@ -515,8 +549,8 @@
 	}
 
 	.job-invoice-panel__hint {
-		font-size: 0.75rem;
-		color: #64748b;
-		margin: 0.4rem 0 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		margin: var(--space-1) 0 0;
 	}
 </style>

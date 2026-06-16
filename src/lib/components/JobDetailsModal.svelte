@@ -641,6 +641,20 @@
 		border-bottom: 1px dotted var(--color-border);
 	}
 
+	/* Mobile bottom-sheet refinements for billing/invoice area (tighter spacing, full use of width). */
+	@media (max-width: 768px) {
+		.job-details-modal__section {
+			padding: var(--space-3);
+		}
+		.job-details-modal__billables {
+			margin-bottom: var(--space-2);
+		}
+		.job-details-modal__billable-row {
+			font-size: var(--font-size-xs);
+			padding: 0.05rem 0;
+		}
+	}
+
 	.job-details-modal__empty-text {
 		color: var(--color-text-subtle);
 		font-size: var(--font-size-sm);
@@ -735,5 +749,51 @@
 	.job-details-modal__btn--cancel-confirm:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	/* Supporting documents list (invoice-related). Mobile bottom-sheet friendly. */
+	.job-details-modal__docs {
+		list-style: none;
+		padding: 0;
+		margin: 0 0 var(--space-2);
+		font-size: var(--font-size-xs);
+	}
+	.job-details-modal__docs li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+		padding: var(--space-1) 0;
+		border-bottom: 1px dotted var(--color-border);
+	}
+	.job-details-modal__docs li:last-child {
+		border-bottom: none;
+	}
+
+	.job-details-modal__not-available {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-style: italic;
+	}
+
+	.job-details-modal__offline-note {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		margin: var(--space-1) 0 0;
+	}
+
+	/* Mobile tweaks for invoice/supporting sections inside bottom sheet */
+	@media (max-width: 768px) {
+		.job-details-modal__docs {
+			font-size: var(--font-size-xs);
+		}
+		.job-details-modal__docs li {
+			flex-wrap: wrap;
+			gap: var(--space-1);
+		}
+		.job-details-modal__small-btn {
+			font-size: var(--font-size-xs);
+			padding: 0.1rem 0.4rem;
+		}
 	}
 </style>
