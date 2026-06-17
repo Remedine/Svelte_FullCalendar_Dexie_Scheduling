@@ -9,8 +9,8 @@ export default defineConfig({
 		VitePWA({
 			registerType: 'autoUpdate',
 			manifest: {
-				name: 'Capital City Windows Scheduler',
-				short_name: 'CCW Scheduler',
+				name: 'Capital City Windows',
+				short_name: 'Capital City Windows',
 				description: 'Window Cleaning CRM & Scheduler',
 				theme_color: '#002b5c',
 				background_color: '#002b5c',

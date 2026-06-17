@@ -15,6 +15,7 @@
 </script>
 
 <svelte:head>
+	<title>Capital City Windows</title>
 	<!-- )=- Primary SVG favicon. Modern browsers use this.
 	     The /favicon.ico 404 (and similar LastPass extension errors on inputs) are expected legacy/extension noise and harmless.
 	     If you want to fully silence the .ico 404, add a favicon.ico to /static (1x1 transparent png renamed works). -->
@@ -29,7 +30,7 @@
 {:else}
 	<div class="loading-screen">
 		<div class="loading-screen__spinner"></div>
-		<p>Loading CapitalCity Windows...</p>
+		<p>Loading Capital City Windows...</p>
 	</div>
 {/if}
 

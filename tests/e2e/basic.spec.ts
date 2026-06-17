@@ -13,7 +13,7 @@ test('app shell loads without crashing', async ({ page }) => {
 
 	// The root layout + client app should at least render the html shell.
 	// Title comes from the PWA manifest + app.html or +layout.
-	await expect(page).toHaveTitle(/Capital City Windows|CCW Scheduler/i);
+	await expect(page).toHaveTitle(/Capital City Windows/i);
 
 	// Sanity: the body should exist and not show a catastrophic error page.
 	const bodyText = await page.textContent('body');
