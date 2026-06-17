@@ -295,6 +295,7 @@ export async function pullInvoicesFromServer() {
 					amount: Number(rec.amount) || 0,
 					billableItems: rec.billableItems || [],
 					notes: rec.notes || '',
+					invoiceNumber: rec.invoiceNumber || undefined,
 					importSource: rec.importSource || undefined,
 					primaryInvoiceFile: rec.primaryInvoiceFile
 						? { filename: rec.primaryInvoiceFile }

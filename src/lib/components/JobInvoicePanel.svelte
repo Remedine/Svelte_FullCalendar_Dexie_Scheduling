@@ -8,6 +8,8 @@
 		createInvoice,
 		updateInvoice,
 		generateInvoiceDocx,
+		businessInfoFromOptions,
+		allocateInvoiceNumber,
 		deleteInvoice,
 		removeInvoiceSupportingDocuments,
 		addSupportingDocumentsToJob
@@ -48,6 +50,30 @@
 	const canEmailInvoice = $derived(
 		clientPrefersEmailBilling(client?.preferredBillingMethod) && !!client?.email
 	);
+
+	function docxContext(invoiceNumber: string, invoiceNotes?: string) {
+		return {
+			...businessInfoFromOptions(optionsStore.data),
+			invoiceNumber,
+			invoiceNotes,
+			invoiceDate: new Date()
+		};
+	}
+
+	async function handleSaveInvoiceNotes() {
+		if (!invoice?.id) return;
+		try {
+			await updateInvoice(invoice.id, { notes: invoice.notes ?? '', updatedAt: new Date() });
+			const fresh = await db.invoices.get(invoice.id);
+			if (fresh) {
+				invoice = fresh;
+				onStatusChange(fresh);
+			}
+		} catch (err) {
+			console.error('Failed to save invoice notes', err);
+			toast.error('Failed to save invoice notes');
+		}
+	}
 
 	async function fetchPrimaryInvoiceBlob(inv: Invoice): Promise<Blob | null> {
 		if (!inv.pbId || !inv.primaryInvoiceFile?.filename) return null;
@@ -122,10 +148,8 @@
 			await optionsStore.load?.();
 			const c = job.clientId ? await db.clients.get(job.clientId) : null;
 
-			const blob = await generateInvoiceDocx(job, c, {
-				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: optionsStore.data?.invoiceDueDays
-			});
+			const invoiceNumber = await allocateInvoiceNumber();
+			const blob = await generateInvoiceDocx(job, c, docxContext(invoiceNumber));
 
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
@@ -138,10 +162,10 @@
 					jobId: job.id,
 					clientId: job.clientId,
 					status: job.status === 'completed' ? 'generated' : 'draft',
+					invoiceNumber,
 					dueDate,
 					amount: job.totalAmount,
 					billableItems: job.billableItems,
-					notes: job.notes,
 					importSource: job.importSource
 				},
 				{
@@ -238,10 +262,15 @@
 		try {
 			await optionsStore.load?.();
 			const c = job.clientId ? await db.clients.get(job.clientId) : null;
-			const blob = await generateInvoiceDocx(job, c, {
-				taxRate: optionsStore.data?.taxRate,
-				invoiceDueDays: optionsStore.data?.invoiceDueDays
-			});
+			let invoiceNumber = invoice.invoiceNumber;
+			if (!invoiceNumber) {
+				invoiceNumber = await allocateInvoiceNumber();
+			}
+			const blob = await generateInvoiceDocx(
+				job,
+				c,
+				docxContext(invoiceNumber, invoice.notes)
+			);
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
 
@@ -249,7 +278,7 @@
 			const dueDate = getInvoiceDueDateForJob(job, dueDays);
 			await updateInvoice(
 				invoice.id!,
-				{ dueDate, updatedAt: new Date() },
+				{ dueDate, invoiceNumber, updatedAt: new Date() },
 				{ primary: { blob, filename } }
 			);
 			const fresh = await db.invoices.get(invoice.id!);
@@ -437,6 +466,22 @@
 					<input type="date" value={dateToInputValue(invoice.paidAt)} onchange={handleEditPaidAt} />
 				</span>
 			{/if}
+		</div>
+
+		{#if invoice.invoiceNumber}
+			<p class="job-invoice-panel__inv-num">Invoice #{invoice.invoiceNumber}</p>
+		{/if}
+
+		<div class="job-invoice-panel__notes-block">
+			<label class="job-invoice-panel__notes-label" for="invoice-notes">Invoice notes</label>
+			<textarea
+				id="invoice-notes"
+				class="job-invoice-panel__notes-input"
+				rows="2"
+				placeholder="Notes for the .docx only (not job notes)"
+				bind:value={invoice.notes}
+				onchange={handleSaveInvoiceNotes}
+			></textarea>
 		</div>
 
 		<div class="job-invoice-panel__file-row">
@@ -662,6 +707,37 @@
 		justify-content: space-between;
 		gap: var(--space-2);
 		font-size: var(--font-size-sm);
+	}
+
+	.job-invoice-panel__inv-num {
+		margin: 0 0 var(--space-2);
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: var(--color-text-muted);
+	}
+
+	.job-invoice-panel__notes-block {
+		margin-bottom: var(--space-2);
+	}
+
+	.job-invoice-panel__notes-label {
+		display: block;
+		font-size: 0.8rem;
+		font-weight: 600;
+		margin-bottom: var(--space-1);
+		color: var(--color-text-muted);
+	}
+
+	.job-invoice-panel__notes-input {
+		width: 100%;
+		box-sizing: border-box;
+		padding: var(--space-2);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		font: inherit;
+		resize: vertical;
+		min-height: 3rem;
+		background: var(--color-surface);
 	}
 
 	.job-invoice-panel__filename {

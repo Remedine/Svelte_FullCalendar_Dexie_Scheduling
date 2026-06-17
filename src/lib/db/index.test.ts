@@ -20,6 +20,7 @@ import {
 	deleteInvoice,
 	removeInvoiceSupportingDocuments,
 	addSupportingDocumentsToJob,
+	allocateInvoiceNumber,
 	generateInvoiceDocx,
 	cleanupDuplicateUsers,
 	cleanupDuplicateJobs,
@@ -780,6 +781,30 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 		expect(queue[0].recordId).toBe('pb-inv-del');
 	});
 
+	it('allocateInvoiceNumber returns sequential CCW-YEAR-#### and increments counter', async () => {
+		const year = new Date().getFullYear();
+		await db.options.put({
+			id: '1',
+			taxRate: 5,
+			invoiceDueDays: 15,
+			invoiceNumberPrefix: 'CCW',
+			nextInvoiceNumber: 42,
+			invoiceNumberYear: year,
+			defaultJobDurationHours: 2,
+			areasOfTown: [],
+			defaultBillableItems: [],
+			cancelReasons: [],
+			lastUpdated: new Date(),
+			updatedBy: 'test'
+		});
+
+		const num = await allocateInvoiceNumber();
+		expect(num).toBe(`CCW-${year}-0042`);
+
+		const opts = await db.options.get('1');
+		expect(opts!.nextInvoiceNumber).toBe(43);
+	});
+
 	it('addSupportingDocumentsToJob creates draft invoice when none exists', async () => {
 		const jobId = 'job-no-inv';
 		await db.jobs.add({
@@ -892,9 +917,11 @@ describe('generateInvoiceDocx', () => {
 		};
 
 		const blob = await generateInvoiceDocx(job, client, {
-			taxRate: 6.5,
-			invoiceDueDays: 30,
-			businessName: 'Capital City Windows Test'
+			taxRate: 5,
+			invoiceDueDays: 15,
+			businessName: 'Capital City Windows Test',
+			invoiceNumber: 'CCW-2026-0001',
+			salesTaxJurisdiction: 'City and Borough of Juneau sales tax'
 		});
 
 		expect(blob).toBeInstanceOf(Blob);
@@ -921,7 +948,11 @@ describe('generateInvoiceDocx', () => {
 			updatedAt: new Date()
 		};
 
-		const blob = await generateInvoiceDocx(job, null, { taxRate: 6.5, invoiceDueDays: 30 });
+		const blob = await generateInvoiceDocx(job, null, {
+			taxRate: 5,
+			invoiceDueDays: 15,
+			invoiceNumber: 'CCW-2026-0099'
+		});
 		expect(blob).toBeInstanceOf(Blob);
 		expect(blob.size).toBeGreaterThan(500);
 	});

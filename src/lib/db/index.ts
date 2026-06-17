@@ -5,6 +5,13 @@ import { pb, pullJobsFromServer } from '$lib/db/pb';
 // )=- Import pure date helper extracted in Phase 2 so due date logic is testable and not duplicated.
 // Reference: TESTING_PLAN.md + JOBS_AND_INVOICES_SPEC.md
 import { getInvoiceDueDateForJob } from '$lib/utils/dates';
+export {
+	generateInvoiceDocx,
+	businessInfoFromOptions,
+	buildPaymentInstructions,
+	type InvoiceDocxContext,
+	type InvoiceDocxBusinessInfo
+} from '$lib/utils/invoiceDocx';
 // )=- bcryptjs import removed (was only for PIN hashing in login/create/setInitialPin flows). PIN login deleted; password hashing is handled by PocketBase on the server side for email auth.
 
 // Dynamic import to break circular dependency with auth.svelte.ts
@@ -162,6 +169,24 @@ export interface AppOptions {
 	calendarDayStartHour?: number;
 	/** Calendar day view ends at this hour (1–24, local; e.g. 22 = 10 PM). */
 	calendarDayEndHour?: number;
+	/** Letterhead + invoice numbering (Admin → Options → Invoice). */
+	businessName?: string;
+	businessStreet?: string;
+	businessCity?: string;
+	businessState?: string;
+	businessZip?: string;
+	businessPhone?: string;
+	businessEmail?: string;
+	businessWebsite?: string;
+	businessMailingStreet?: string;
+	businessMailingCity?: string;
+	businessMailingState?: string;
+	businessMailingZip?: string;
+	businessSalesTaxAccount?: string;
+	salesTaxJurisdiction?: string;
+	invoiceNumberPrefix?: string;
+	nextInvoiceNumber?: number;
+	invoiceNumberYear?: number;
 	lastUpdated: Date;
 	updatedBy: string;
 }
@@ -176,6 +201,8 @@ export interface Invoice {
 	jobId: string; // local or PB id — resolved during sync like clientId on jobs
 	clientId: string; // denormalized for queries and legacy import flexibility
 	status: 'draft' | 'generated' | 'sent' | 'paid';
+	/** Human-readable sequential number, e.g. CCW-2026-0001 */
+	invoiceNumber?: string;
 	dueDate: Date;
 	paidAt?: Date;
 	amount: number;
@@ -186,6 +213,7 @@ export interface Invoice {
 		quantity: number;
 		total: number;
 	}>;
+	/** Invoice-specific notes for the .docx (not job or client notes). */
 	notes?: string;
 	// )=- 'asana-export', 'handwritten-ocr', 'manual', etc. Must allow imperfect data for imports.
 	importSource?: string;
@@ -372,7 +400,7 @@ export async function createJob(jobData: any): Promise<string> {
 
 	// )=- Pull tax rate from options table instead of hardcoded value
 	const optionsRecord = await db.options.get('1');
-	const taxRate = optionsRecord?.taxRate ?? 0.08;
+	const taxRate = optionsRecord?.taxRate ?? 5;
 
 	const newJob = safeClone({
 		id: newId,
@@ -846,6 +874,37 @@ export async function removeInvoiceSupportingDocuments(
 	});
 }
 
+/** Allocate the next sequential invoice number and persist the counter in options. */
+export async function allocateInvoiceNumber(): Promise<string> {
+	const opts = (await db.options.get('1')) || { id: '1' };
+	const prefix = (opts.invoiceNumberPrefix || 'CCW').trim() || 'CCW';
+	const year = new Date().getFullYear();
+	const storedYear = opts.invoiceNumberYear ?? year;
+	let seq = opts.nextInvoiceNumber ?? 1;
+	if (storedYear !== year) seq = 1;
+
+	const number = `${prefix}-${year}-${String(seq).padStart(4, '0')}`;
+	const updated = {
+		...opts,
+		id: '1',
+		nextInvoiceNumber: seq + 1,
+		invoiceNumberYear: year,
+		lastUpdated: new Date()
+	};
+	await db.options.put(updated);
+
+	if (navigator.onLine) {
+		import('$lib/stores/options.svelte')
+			.then(({ optionsStore }) => {
+				optionsStore.data = updated;
+				return optionsStore.syncToPB(updated);
+			})
+			.catch(() => {});
+	}
+
+	return number;
+}
+
 /** Attach supporting documents to a job, creating a draft invoice shell when none exists yet. */
 export async function addSupportingDocumentsToJob(
 	job: Job,
@@ -920,300 +979,6 @@ export async function getInvoicesForClient(clientId: string, limit = 50): Promis
 		.then((invs: Invoice[]) => invs.slice(0, limit));
 }
 
-// )=- generateInvoiceDocx helper (Phase 4).
-// Uses the existing docx + file-saver dependencies to produce an editable .docx the user can open in Word.
-// Called from the JobInvoicePanel (or directly from modal for the "Generate Draft" button).
-// The returned Blob is immediately downloadable and can be passed to createInvoice/updateInvoice via the files param
-// so it gets stored in PB as the primaryInvoiceFile.
-// We keep the document simple but professional for now (title, client info, billables table, totals, notes).
-// This is the implementation of the "one-click Mark Complete → auto-generated editable Word invoice" promise in the readme.
-// Uses browser-safe Packer.toBlob() (not toBuffer) so it runs in the SvelteKit/Vite client without nodebuffer errors.
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
-export async function generateInvoiceDocx(
-	job: Job,
-	client: Client | null | undefined,
-	opts: { taxRate?: number; invoiceDueDays?: number; businessName?: string } = {}
-): Promise<Blob> {
-	// Dynamic import so we don't pull docx into every bundle that imports db
-	const {
-		Document,
-		Packer,
-		Paragraph,
-		Table,
-		TableRow,
-		TableCell,
-		TextRun,
-		AlignmentType,
-		BorderStyle
-	} = await import('docx');
-
-	const businessName = opts.businessName || 'Capital City Windows';
-	const invoiceNumber = (job.pbId || job.id || 'draft').slice(0, 12).toUpperCase();
-	const serviceDate = new Date(job.start).toLocaleDateString();
-	const dueDate = getInvoiceDueDateForJob(job, opts.invoiceDueDays ?? 30);
-	const dueDateStr = dueDate.toLocaleDateString();
-	const clientName = client?.name || 'Client';
-	const clientAddress = client
-		? [
-				client.serviceAddressStreet,
-				`${client.serviceAddressCity}, ${client.serviceAddressState} ${client.serviceAddressZip}`
-			]
-				.filter(Boolean)
-				.join('\n')
-		: '';
-	const clientContact = [client?.phone, client?.email].filter(Boolean).join(' • ');
-
-	const billableRows = (job.billableItems || []).map(
-		(item: any, idx: number) =>
-			new TableRow({
-				children: [
-					new TableCell({
-						children: [
-							new Paragraph({
-								children: [new TextRun({ text: item.title || `Item ${idx + 1}` })]
-							})
-						]
-					}),
-					new TableCell({
-						children: [
-							new Paragraph({
-								alignment: AlignmentType.RIGHT,
-								children: [new TextRun({ text: String(item.quantity || 1) })]
-							})
-						]
-					}),
-					new TableCell({
-						children: [
-							new Paragraph({
-								alignment: AlignmentType.RIGHT,
-								children: [new TextRun({ text: `$${(item.price || 0).toFixed(2)}` })]
-							})
-						]
-					}),
-					new TableCell({
-						children: [
-							new Paragraph({
-								alignment: AlignmentType.RIGHT,
-								children: [new TextRun({ text: `$${(item.total || 0).toFixed(2)}` })]
-							})
-						]
-					})
-				]
-			})
-	);
-
-	const doc = new Document({
-		sections: [
-			{
-				properties: {},
-				children: [
-					new Paragraph({
-						alignment: AlignmentType.CENTER,
-						children: [new TextRun({ text: businessName, bold: true, size: 40 })]
-					}),
-					new Paragraph({
-						alignment: AlignmentType.CENTER,
-						children: [
-							new TextRun({ text: 'INVOICE', bold: true, size: 32, color: '1e40af' })
-						]
-					}),
-					new Paragraph({ text: '' }),
-					new Paragraph({
-						children: [new TextRun({ text: 'Bill To', bold: true, size: 24 })]
-					}),
-					new Paragraph({
-						children: [new TextRun({ text: clientName, size: 24 })]
-					}),
-					...(clientAddress
-						? clientAddress.split('\n').map(
-								(line) =>
-									new Paragraph({
-										children: [new TextRun({ text: line, size: 22 })]
-									})
-							)
-						: []),
-					...(clientContact
-						? [
-								new Paragraph({
-									children: [new TextRun({ text: clientContact, size: 22 })]
-								})
-							]
-						: []),
-					new Paragraph({ text: '' }),
-					new Paragraph({
-						children: [
-							new TextRun({ text: 'Invoice #', bold: true }),
-							new TextRun({ text: ` ${invoiceNumber}` })
-						]
-					}),
-					new Paragraph({
-						children: [
-							new TextRun({ text: 'Service date', bold: true }),
-							new TextRun({ text: ` ${serviceDate}` })
-						]
-					}),
-					new Paragraph({
-						children: [
-							new TextRun({ text: 'Due date', bold: true }),
-							new TextRun({ text: ` ${dueDateStr}` })
-						]
-					}),
-					new Paragraph({
-						children: [
-							new TextRun({ text: 'Job', bold: true }),
-							new TextRun({ text: ` ${job.title || 'Window cleaning service'}` })
-						]
-					}),
-					new Paragraph({ text: '' }),
-					new Paragraph({
-						children: [new TextRun({ text: 'Services', bold: true, size: 24 })]
-					}),
-					new Table({
-						rows: [
-							new TableRow({
-								children: [
-									new TableCell({
-										children: [
-											new Paragraph({
-												children: [new TextRun({ text: 'Description', bold: true })]
-											})
-										]
-									}),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [new TextRun({ text: 'Qty', bold: true })]
-											})
-										]
-									}),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [new TextRun({ text: 'Unit', bold: true })]
-											})
-										]
-									}),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [new TextRun({ text: 'Total', bold: true })]
-											})
-										]
-									})
-								]
-							}),
-							...billableRows,
-							new TableRow({
-								children: [
-									new TableCell({
-										children: [
-											new Paragraph({ children: [new TextRun({ text: 'Subtotal', bold: true })] })
-										]
-									}),
-									new TableCell({ children: [] }),
-									new TableCell({ children: [] }),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [
-													new TextRun({ text: `$${(job.subtotal || 0).toFixed(2)}`, bold: true })
-												]
-											})
-										]
-									})
-								]
-							}),
-							new TableRow({
-								children: [
-									new TableCell({
-										children: [
-											new Paragraph({
-												children: [new TextRun({ text: `Tax (${(job.taxRate || 0).toFixed(1)}%)` })]
-											})
-										]
-									}),
-									new TableCell({ children: [] }),
-									new TableCell({ children: [] }),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [new TextRun({ text: `$${(job.taxAmount || 0).toFixed(2)}` })]
-											})
-										]
-									})
-								]
-							}),
-							new TableRow({
-								children: [
-									new TableCell({
-										children: [
-											new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true })] })
-										]
-									}),
-									new TableCell({ children: [] }),
-									new TableCell({ children: [] }),
-									new TableCell({
-										children: [
-											new Paragraph({
-												alignment: AlignmentType.RIGHT,
-												children: [
-													new TextRun({ text: `$${(job.totalAmount || 0).toFixed(2)}`, bold: true })
-												]
-											})
-										]
-									})
-								]
-							})
-						]
-					}),
-					new Paragraph({ text: '' }),
-					new Paragraph({
-						children: [
-							new TextRun({
-								text: `Amount due by ${dueDateStr}: $${(job.totalAmount || 0).toFixed(2)}`,
-								bold: true,
-								size: 26
-							})
-						]
-					}),
-					new Paragraph({ text: '' }),
-					new Paragraph({
-						children: [
-							new TextRun({
-								text: 'Payment: Please remit payment by the due date above. Thank you for choosing Capital City Windows!',
-								size: 22
-							})
-						]
-					}),
-					...(job.notes
-						? [
-								new Paragraph({ text: '' }),
-								new Paragraph({
-									children: [
-										new TextRun({ text: 'Notes', bold: true }),
-										new TextRun({ text: `: ${job.notes}` })
-									]
-								})
-							]
-						: [])
-				]
-			}
-		]
-	});
-
-	const blob = await Packer.toBlob(doc);
-	// )=- Switched from Packer.toBuffer() (Node-only, causes "nodebuffer is not supported by this platform" in browser via jszip/docx internals) to Packer.toBlob().
-	// toBlob() is the official browser path, returns a proper Blob directly (correct mime). Matches exactly what JobInvoicePanel passes to createInvoice/updateInvoice _files.primary and what saveAs expects.
-	// This fixes the exact error from the pasted logs (JobInvoicePanel:69 during handleGenerateDraft / handleRegenerate).
-	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md Phase 4. Also keeps the dynamic import.
-	return blob;
-}
-
 // )=- Convenience helper used by "Mark Complete" flow and draft generation.
 // Creates (or returns existing) invoice linked to the job, with proper dueDate from options.
 // Does NOT generate the .docx here — that will live in the UI layer / dedicated helper (Phase 4).
@@ -1248,7 +1013,6 @@ export async function ensureInvoiceForJob(
 		dueDate,
 		amount: job.totalAmount,
 		billableItems: job.billableItems ? job.billableItems.map((i: any) => ({ ...i })) : undefined,
-		notes: job.notes,
 		importSource: job.importSource
 	};
 
@@ -1844,6 +1608,7 @@ export async function processSyncQueue() {
 								if (data.billableItems)
 									formData.append('billableItems', JSON.stringify(data.billableItems));
 								if (data.notes) formData.append('notes', data.notes);
+								if (data.invoiceNumber) formData.append('invoiceNumber', data.invoiceNumber);
 								if (data.importSource) formData.append('importSource', data.importSource);
 
 								// Primary .docx (the editable one)
@@ -1886,6 +1651,7 @@ export async function processSyncQueue() {
 									amount: Number(data.amount) || 0,
 									billableItems: data.billableItems || [],
 									notes: data.notes || undefined,
+									invoiceNumber: data.invoiceNumber || undefined,
 									importSource: data.importSource || undefined
 								};
 								const record = await pb.collection('invoices').create(pbPayload);
@@ -1949,6 +1715,8 @@ export async function processSyncQueue() {
 								if (localInvoice.billableItems)
 									formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
 								if (localInvoice.notes) formData.append('notes', localInvoice.notes);
+								if (localInvoice.invoiceNumber)
+									formData.append('invoiceNumber', localInvoice.invoiceNumber);
 								if (localInvoice.importSource)
 									formData.append('importSource', localInvoice.importSource);
 
@@ -1994,6 +1762,7 @@ export async function processSyncQueue() {
 									amount: Number(localInvoice.amount) || 0,
 									billableItems: localInvoice.billableItems || [],
 									notes: localInvoice.notes || undefined,
+									invoiceNumber: localInvoice.invoiceNumber || undefined,
 									importSource: localInvoice.importSource || undefined
 								};
 								const record = await pb.collection('invoices').create(pbPayload);
@@ -2106,6 +1875,8 @@ export async function processSyncQueue() {
 									if (localInvoice.billableItems)
 										formData.append('billableItems', JSON.stringify(localInvoice.billableItems));
 									if (localInvoice.notes) formData.append('notes', localInvoice.notes);
+									if (localInvoice.invoiceNumber)
+										formData.append('invoiceNumber', localInvoice.invoiceNumber);
 									if (localInvoice.importSource)
 										formData.append('importSource', localInvoice.importSource);
 
@@ -2150,6 +1921,7 @@ export async function processSyncQueue() {
 										amount: Number(localInvoice.amount) || 0,
 										billableItems: localInvoice.billableItems || [],
 										notes: localInvoice.notes || undefined,
+										invoiceNumber: localInvoice.invoiceNumber || undefined,
 										importSource: localInvoice.importSource || undefined
 									};
 									const record = await pb.collection('invoices').create(pbPayload);

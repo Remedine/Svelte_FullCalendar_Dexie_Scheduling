@@ -86,8 +86,12 @@
 			editingOptions = {
 				id: 1,
 				defaultJobDurationHours: 2,
-				taxRate: 6.5,
+				taxRate: 5,
 				invoiceDueDays: 30,
+				businessName: 'Capital City Windows',
+				salesTaxJurisdiction: 'City and Borough of Juneau sales tax',
+				invoiceNumberPrefix: 'CCW',
+				nextInvoiceNumber: 1,
 				crewAssignmentDaysBefore: 1,
 				crewAssignmentHour: 7,
 				calendarDayStartHour: 6,
@@ -483,11 +487,98 @@
 					<input id="opt-tax" type="number" step="0.01" class="input" bind:value={editingOptions.taxRate} />
 					<label for="opt-due" class="label">Invoice Due Days</label>
 					<input id="opt-due" type="number" class="input" bind:value={editingOptions.invoiceDueDays} />
+					<label for="opt-tax-jurisdiction" class="label">Sales Tax Label</label>
+					<input
+						id="opt-tax-jurisdiction"
+						type="text"
+						class="input"
+						bind:value={editingOptions.salesTaxJurisdiction}
+						placeholder="City and Borough of Juneau sales tax"
+					/>
 				</div>
 				<p class="options-page__help">
-					Invoices are generated for owner review first. Use <strong>Send to Client</strong> in the job
-					invoice panel after tweaking the Word doc. Email send is only offered when the client's
-					preferred billing method is <strong>email</strong>.
+					Tax rate and due days are pulled from here when generating invoices. Terms show as
+					<strong>Due within [days] days</strong> (not Net 30). Use <strong>Send to Client</strong> after
+					reviewing the Word doc.
+				</p>
+			</div>
+
+			<div class="form-section">
+				<h3>Business Letterhead</h3>
+				<p class="options-page__help">Shown on generated invoice .docx files.</p>
+				<div class="form-grid">
+					<label for="opt-biz-name" class="label">Business Name</label>
+					<input id="opt-biz-name" type="text" class="input" bind:value={editingOptions.businessName} />
+					<label for="opt-biz-street" class="label">Street Address</label>
+					<input id="opt-biz-street" type="text" class="input" bind:value={editingOptions.businessStreet} />
+					<label for="opt-biz-city" class="label">City</label>
+					<input id="opt-biz-city" type="text" class="input" bind:value={editingOptions.businessCity} />
+					<label for="opt-biz-state" class="label">State</label>
+					<input id="opt-biz-state" type="text" class="input" bind:value={editingOptions.businessState} />
+					<label for="opt-biz-zip" class="label">ZIP</label>
+					<input id="opt-biz-zip" type="text" class="input" bind:value={editingOptions.businessZip} />
+					<label for="opt-biz-phone" class="label">Phone</label>
+					<input id="opt-biz-phone" type="text" class="input" bind:value={editingOptions.businessPhone} />
+					<label for="opt-biz-email" class="label">Billing Email</label>
+					<input id="opt-biz-email" type="email" class="input" bind:value={editingOptions.businessEmail} />
+					<label for="opt-biz-web" class="label">Website</label>
+					<input id="opt-biz-web" type="text" class="input" bind:value={editingOptions.businessWebsite} />
+					<label for="opt-biz-tax-acct" class="label">CBJ Sales Tax Account #</label>
+					<input
+						id="opt-biz-tax-acct"
+						type="text"
+						class="input"
+						bind:value={editingOptions.businessSalesTaxAccount}
+					/>
+				</div>
+			</div>
+
+			<div class="form-section">
+				<h3>Check Mailing Address</h3>
+				<p class="options-page__help">Used for check-billing clients. Leave blank to use street address above.</p>
+				<div class="form-grid">
+					<label for="opt-mail-street" class="label">Mailing Street / PO Box</label>
+					<input
+						id="opt-mail-street"
+						type="text"
+						class="input"
+						bind:value={editingOptions.businessMailingStreet}
+					/>
+					<label for="opt-mail-city" class="label">City</label>
+					<input id="opt-mail-city" type="text" class="input" bind:value={editingOptions.businessMailingCity} />
+					<label for="opt-mail-state" class="label">State</label>
+					<input
+						id="opt-mail-state"
+						type="text"
+						class="input"
+						bind:value={editingOptions.businessMailingState}
+					/>
+					<label for="opt-mail-zip" class="label">ZIP</label>
+					<input id="opt-mail-zip" type="text" class="input" bind:value={editingOptions.businessMailingZip} />
+				</div>
+			</div>
+
+			<div class="form-section">
+				<h3>Invoice Numbering</h3>
+				<div class="form-grid">
+					<label for="opt-inv-prefix" class="label">Prefix</label>
+					<input
+						id="opt-inv-prefix"
+						type="text"
+						class="input"
+						bind:value={editingOptions.invoiceNumberPrefix}
+					/>
+					<label for="opt-inv-next" class="label">Next Number</label>
+					<input
+						id="opt-inv-next"
+						type="number"
+						min="1"
+						class="input"
+						bind:value={editingOptions.nextInvoiceNumber}
+					/>
+				</div>
+				<p class="options-page__help">
+					Format: PREFIX-YEAR-#### (e.g. CCW-2026-0001). Counter resets each calendar year.
 				</p>
 			</div>
 

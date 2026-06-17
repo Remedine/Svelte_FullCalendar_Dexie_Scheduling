@@ -29,7 +29,7 @@ describe('optionsStore', () => {
 		expect(opts).toBeTruthy();
 		expect(opts!.id).toBe('1');
 		expect(opts!.invoiceDueDays).toBe(30);
-		expect(opts!.taxRate).toBe(6.5);
+		expect(opts!.taxRate).toBe(5);
 		expect(optionsStore.data).toBeTruthy();
 	});
 
