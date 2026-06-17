@@ -34,15 +34,24 @@ const HEADING = 22;
 const ENVELOPE = 20; // 10pt — readable through #10 window
 const TIGHT = 30;
 const LOOSE = 60;
+const SECTION = 80;
 
 /** Twips (dxa): 1440 per inch. #10 double-window tri-fold zones. */
 const TWIP = 1440;
 /** Left margin aligned with common 1-1/8" double-window envelope offset. */
 const ENVELOPE_LEFT_MARGIN = Math.round(1.125 * TWIP);
-/** Top panel (~2.5") — return address shows in upper window when tri-folded. */
-const ENVELOPE_RETURN_ROW_H = Math.round(2.5 * TWIP);
-/** Bottom panel (~2.5") — recipient shows in lower window when tri-folded. */
-const ENVELOPE_RECIPIENT_ROW_H = Math.round(2.5 * TWIP);
+/** Printable content width (letter 8.5" minus 1-1/8" left and 1/2" right margins). */
+const CONTENT_WIDTH = Math.round(6.875 * TWIP);
+const HALF_COL = Math.round(CONTENT_WIDTH / 2);
+/** Line-item table columns (fixed dxa for stable print alignment). */
+const COL_DESC = Math.round(CONTENT_WIDTH * 0.55);
+const COL_QTY = Math.round(CONTENT_WIDTH * 0.1);
+const COL_UNIT = Math.round(CONTENT_WIDTH * 0.15);
+const COL_TOTAL = CONTENT_WIDTH - COL_DESC - COL_QTY - COL_UNIT;
+/** Top panel (~2.75") — return address shows in upper window when tri-folded. */
+const ENVELOPE_RETURN_ROW_H = Math.round(2.75 * TWIP);
+/** Bottom panel (~2.75") — recipient shows in lower window when tri-folded. */
+const ENVELOPE_RECIPIENT_ROW_H = Math.round(2.75 * TWIP);
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
 	const raw = optsRate ?? job.taxRate ?? 5;
@@ -196,6 +205,7 @@ export async function generateInvoiceDocx(
 			: '';
 
 	const clientName = client?.name || 'Client';
+	const billTo = getClientBillToAddress(client);
 	const serviceLoc = getClientServiceAddress(client);
 	const returnLines = getBusinessReturnAddressLines(ctx);
 	const recipientLines = getRecipientMailingLines(client, clientName);
@@ -205,10 +215,10 @@ export async function generateInvoiceDocx(
 	const envelopeAddressCell = (lines: string[], boldFirst = false) =>
 		new TableCell({
 			verticalAlign: VerticalAlign.TOP,
-			margins: { top: 60, bottom: 60, left: 0, right: 0 },
+			margins: { top: 100, bottom: 100, left: 0, right: 0 },
 			children: lines.map((line, i) =>
 				new Paragraph({
-					spacing: { after: 50, before: 0 },
+					spacing: { after: 80, before: i === 0 ? 0 : 0 },
 					children: [
 						new TextRun({
 							text: line,
@@ -224,8 +234,13 @@ export async function generateInvoiceDocx(
 		height: { value: heightTwips, rule: HeightRule.EXACT }
 	});
 
-	const cell = (text: string, align?: (typeof AlignmentType)[keyof typeof AlignmentType]) =>
+	const cell = (
+		text: string,
+		align?: (typeof AlignmentType)[keyof typeof AlignmentType],
+		widthTwips?: number
+	) =>
 		new TableCell({
+			...(widthTwips ? { width: { size: widthTwips, type: WidthType.DXA } } : {}),
 			verticalAlign: VerticalAlign.TOP,
 			margins: { top: 40, bottom: 40, left: 60, right: 60 },
 			children: [
@@ -237,18 +252,57 @@ export async function generateInvoiceDocx(
 			]
 		});
 
-	const serviceAt =
-		serviceLoc.street && serviceLoc.csz.trim()
-			? `${serviceLoc.street}, ${serviceLoc.csz.trim()}`
-			: serviceLoc.street || serviceLoc.csz.trim() || '—';
+	const labeledAddressCell = (
+		label: string,
+		lines: string[],
+		widthTwips: number,
+		rightPad = 0
+	) =>
+		new TableCell({
+			width: { size: widthTwips, type: WidthType.DXA },
+			verticalAlign: VerticalAlign.TOP,
+			margins: { top: 0, bottom: 0, left: 0, right: rightPad },
+			children: [
+				new Paragraph({
+					spacing: { after: 40, before: 0 },
+					children: [new TextRun({ text: label, bold: true, size: LABEL })]
+				}),
+				...lines.map((line) =>
+					new Paragraph({
+						spacing: { after: 30, before: 0 },
+						children: [new TextRun({ text: line, size: BODY })]
+					})
+				)
+			]
+		});
+
+	const metaCell = (label: string, value: string, widthTwips: number) =>
+		new TableCell({
+			width: { size: widthTwips, type: WidthType.DXA },
+			verticalAlign: VerticalAlign.TOP,
+			margins: { top: 0, bottom: 0, left: 0, right: 0 },
+			children: [
+				new Paragraph({
+					spacing: { after: 30, before: 0 },
+					children: [
+						new TextRun({ text: `${label}: `, bold: true, size: BODY }),
+						new TextRun({ text: value, size: BODY })
+					]
+				})
+			]
+		});
+
+	const billToLines = [clientName, billTo.street, billTo.csz].filter((l) => l.trim().length > 0);
+	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
+	if (serviceLines.length === 0) serviceLines.push('—');
 
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
 		new TableRow({
 			children: [
-				cell(item.title || `Item ${idx + 1}`),
-				cell(String(item.quantity || 1), AlignmentType.RIGHT),
-				cell(`$${(item.price || 0).toFixed(2)}`, AlignmentType.RIGHT),
-				cell(`$${(item.total || 0).toFixed(2)}`, AlignmentType.RIGHT)
+				cell(item.title || `Item ${idx + 1}`, undefined, COL_DESC),
+				cell(String(item.quantity || 1), AlignmentType.RIGHT, COL_QTY),
+				cell(`$${(item.price || 0).toFixed(2)}`, AlignmentType.RIGHT, COL_UNIT),
+				cell(`$${(item.total || 0).toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
 			]
 		})
 	);
@@ -257,34 +311,66 @@ export async function generateInvoiceDocx(
 	const taxAmount = job.taxAmount ?? 0;
 	const total = job.totalAmount ?? 0;
 
-	// )=- #10 double-window envelope layout: return (top panel), invoice body (middle), recipient (bottom).
+	const noBorders = {
+		top: { style: 'none' as const, size: 0 },
+		bottom: { style: 'none' as const, size: 0 },
+		left: { style: 'none' as const, size: 0 },
+		right: { style: 'none' as const, size: 0 },
+		insideHorizontal: { style: 'none' as const, size: 0 },
+		insideVertical: { style: 'none' as const, size: 0 }
+	};
+
+	// #10 double-window envelope layout: return (top panel), invoice body (middle), recipient (bottom).
 	// Tri-fold bottom-up then top-down so windows align with standard 0.875" x 3.25" (return) and 1" x 4" (recipient) openings.
 	const middleContent: (typeof Paragraph | typeof Table)[] = [
 		new Paragraph({
-			spacing: { after: TIGHT, before: 0 },
+			spacing: { after: LOOSE, before: 0 },
 			children: [new TextRun({ text: 'INVOICE', bold: true, size: HEADING })]
 		}),
+		new Table({
+			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+			borders: noBorders,
+			rows: [
+				new TableRow({
+					children: [
+						metaCell('Invoice #', ctx.invoiceNumber, HALF_COL),
+						metaCell('Date', invoiceDate, HALF_COL)
+					]
+				}),
+				new TableRow({
+					children: [
+						metaCell('Due', dueDateStr, HALF_COL),
+						metaCell('Terms', `${dueDays} days`, HALF_COL)
+					]
+				})
+			]
+		}),
+		new Paragraph({ spacing: { after: SECTION }, text: '' }),
+		new Table({
+			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+			borders: noBorders,
+			rows: [
+				new TableRow({
+					children: [
+						labeledAddressCell('Bill To', billToLines, HALF_COL, 120),
+						labeledAddressCell('Service Location', serviceLines, HALF_COL)
+					]
+				})
+			]
+		}),
+		new Paragraph({ spacing: { after: SECTION }, text: '' }),
 		new Paragraph({
-			spacing: { after: 40, before: 0 },
+			spacing: { after: 30, before: 0 },
 			children: [
-				new TextRun({ text: `#${ctx.invoiceNumber}`, size: BODY }),
-				new TextRun({ text: `  •  Date: ${invoiceDate}`, size: BODY }),
-				new TextRun({ text: `  •  Due: ${dueDateStr}`, size: BODY }),
-				new TextRun({ text: `  •  Terms: ${dueDays} days`, size: BODY })
+				new TextRun({ text: 'Service date: ', bold: true, size: BODY }),
+				new TextRun({ text: `${serviceDate}${serviceEnd}`, size: BODY })
 			]
 		}),
 		new Paragraph({
-			spacing: { after: 40, before: 0 },
+			spacing: { after: SECTION, before: 0 },
 			children: [
-				new TextRun({ text: `Bill To: ${clientName}`, size: BODY }),
-				new TextRun({ text: `  •  Service at: ${serviceAt}`, size: BODY })
-			]
-		}),
-		new Paragraph({
-			spacing: { after: 40, before: 0 },
-			children: [
-				new TextRun({ text: `Service date: ${serviceDate}${serviceEnd}`, size: BODY }),
-				new TextRun({ text: `  •  Job: ${job.title || 'Window cleaning service'}`, size: BODY })
+				new TextRun({ text: 'Job: ', bold: true, size: BODY }),
+				new TextRun({ text: job.title || 'Window cleaning service', size: BODY })
 			]
 		}),
 		...(ctx.businessSalesTaxAccount
@@ -301,39 +387,39 @@ export async function generateInvoiceDocx(
 				]
 			: []),
 		new Table({
-			width: { size: 100, type: WidthType.PERCENTAGE },
+			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
 			rows: [
 				new TableRow({
 					children: [
-						cell('Description'),
-						cell('Qty', AlignmentType.RIGHT),
-						cell('Unit', AlignmentType.RIGHT),
-						cell('Total', AlignmentType.RIGHT)
+						cell('Description', undefined, COL_DESC),
+						cell('Qty', AlignmentType.RIGHT, COL_QTY),
+						cell('Unit', AlignmentType.RIGHT, COL_UNIT),
+						cell('Total', AlignmentType.RIGHT, COL_TOTAL)
 					]
 				}),
 				...billableRows,
 				new TableRow({
 					children: [
-						cell('Subtotal'),
-						cell('', AlignmentType.RIGHT),
-						cell('', AlignmentType.RIGHT),
-						cell(`$${subtotal.toFixed(2)}`, AlignmentType.RIGHT)
+						cell('Subtotal', undefined, COL_DESC),
+						cell('', AlignmentType.RIGHT, COL_QTY),
+						cell('', AlignmentType.RIGHT, COL_UNIT),
+						cell(`$${subtotal.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
 					]
 				}),
 				new TableRow({
 					children: [
-						cell(`${taxLabel} (${taxPct.toFixed(1)}%)`),
-						cell('', AlignmentType.RIGHT),
-						cell('', AlignmentType.RIGHT),
-						cell(`$${taxAmount.toFixed(2)}`, AlignmentType.RIGHT)
+						cell(`${taxLabel} (${taxPct.toFixed(1)}%)`, undefined, COL_DESC),
+						cell('', AlignmentType.RIGHT, COL_QTY),
+						cell('', AlignmentType.RIGHT, COL_UNIT),
+						cell(`$${taxAmount.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
 					]
 				}),
 				new TableRow({
 					children: [
-						cell('TOTAL'),
-						cell('', AlignmentType.RIGHT),
-						cell('', AlignmentType.RIGHT),
-						cell(`$${total.toFixed(2)}`, AlignmentType.RIGHT)
+						cell('TOTAL', undefined, COL_DESC),
+						cell('', AlignmentType.RIGHT, COL_QTY),
+						cell('', AlignmentType.RIGHT, COL_UNIT),
+						cell(`$${total.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
 					]
 				})
 			]
@@ -383,15 +469,6 @@ export async function generateInvoiceDocx(
 			: [])
 	];
 
-	const noBorders = {
-		top: { style: 'none' as const, size: 0 },
-		bottom: { style: 'none' as const, size: 0 },
-		left: { style: 'none' as const, size: 0 },
-		right: { style: 'none' as const, size: 0 },
-		insideHorizontal: { style: 'none' as const, size: 0 },
-		insideVertical: { style: 'none' as const, size: 0 }
-	};
-
 	const doc = new Document({
 		sections: [
 			{
@@ -407,7 +484,7 @@ export async function generateInvoiceDocx(
 				},
 				children: [
 					new Table({
-						width: { size: 100, type: WidthType.PERCENTAGE },
+						width: { size: CONTENT_WIDTH, type: WidthType.DXA },
 						borders: noBorders,
 						rows: [
 							new TableRow({
@@ -418,7 +495,7 @@ export async function generateInvoiceDocx(
 								children: [
 									new TableCell({
 										verticalAlign: VerticalAlign.TOP,
-										margins: { top: 80, bottom: 80, left: 0, right: 0 },
+										margins: { top: 120, bottom: 120, left: 0, right: 0 },
 										children: middleContent
 									})
 								]
