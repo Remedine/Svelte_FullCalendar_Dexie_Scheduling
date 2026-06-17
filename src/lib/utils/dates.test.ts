@@ -6,7 +6,9 @@ import {
 	dateToInputValue,
 	inputValueToDate,
 	toDateString,
-	calculateDueDate
+	calculateDueDate,
+	hour12To24,
+	hour24To12
 } from './dates';
 
 describe('toLocalDateString / getLocalDateString', () => {
@@ -128,5 +130,21 @@ describe('calculateDueDate (pure, used by ensureInvoiceForJob)', () => {
 		const originalTime = base.getTime();
 		calculateDueDate(base, 10);
 		expect(base.getTime()).toBe(originalTime);
+	});
+});
+
+describe('hour24To12 / hour12To24', () => {
+	it('converts midnight and noon', () => {
+		expect(hour24To12(0)).toEqual({ hour12: 12, period: 'AM' });
+		expect(hour24To12(12)).toEqual({ hour12: 12, period: 'PM' });
+		expect(hour12To24(12, 'AM')).toBe(0);
+		expect(hour12To24(12, 'PM')).toBe(12);
+	});
+
+	it('round-trips common morning and afternoon hours', () => {
+		for (const hour24 of [1, 7, 11, 13, 19, 23]) {
+			const { hour12, period } = hour24To12(hour24);
+			expect(hour12To24(hour12, period)).toBe(hour24);
+		}
 	});
 });

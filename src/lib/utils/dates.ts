@@ -111,3 +111,26 @@ export { toLocalDateString as getLocalDateString };
 export function calculateDueDate(base: Date, days: number): Date {
 	return new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
 }
+
+export type Hour12Period = 'AM' | 'PM';
+
+/** Convert 24-hour clock (0–23) to 12-hour display parts. */
+export function hour24To12(hour24: number): { hour12: number; period: Hour12Period } {
+	if (!Number.isInteger(hour24) || hour24 < 0 || hour24 > 23) {
+		return { hour12: 7, period: 'AM' };
+	}
+	const period: Hour12Period = hour24 < 12 ? 'AM' : 'PM';
+	const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+	return { hour12, period };
+}
+
+/** Convert 12-hour clock (1–12 + AM/PM) to 24-hour (0–23). */
+export function hour12To24(hour12: number, period: Hour12Period): number {
+	if (!Number.isInteger(hour12) || hour12 < 1 || hour12 > 12) {
+		return NaN;
+	}
+	if (period === 'AM') {
+		return hour12 === 12 ? 0 : hour12;
+	}
+	return hour12 === 12 ? 12 : hour12 + 12;
+}

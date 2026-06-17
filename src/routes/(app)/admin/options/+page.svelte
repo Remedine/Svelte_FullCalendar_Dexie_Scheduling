@@ -7,6 +7,11 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
+	import {
+		hour12To24,
+		hour24To12,
+		type Hour12Period
+	} from '$lib/utils/dates';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
 	// This avoids duplicate redirects and race conditions on navigation.
@@ -46,6 +51,8 @@
 	] as const;
 
 	let editingOptions = $state<any>({});
+	let crewAssignmentHour12 = $state(7);
+	let crewAssignmentPeriod = $state<Hour12Period>('AM');
 
 	function safeClone(obj: any) {
 		if (!obj) return {};
@@ -60,6 +67,15 @@
 			return { ...obj };
 		}
 	}
+
+	$effect(() => {
+		const hour24 = Number(editingOptions.crewAssignmentHour);
+		if (!Number.isNaN(hour24) && hour24 >= 0 && hour24 <= 23) {
+			const { hour12, period } = hour24To12(hour24);
+			crewAssignmentHour12 = hour12;
+			crewAssignmentPeriod = period;
+		}
+	});
 
 	$effect(() => {
 		if (optionsStore.data) {
@@ -88,13 +104,22 @@
 		}
 
 		const daysBefore = Number(editingOptions.crewAssignmentDaysBefore);
-		const hour = Number(editingOptions.crewAssignmentHour);
+		const hour12 = Number(crewAssignmentHour12);
 		if (Number.isNaN(daysBefore) || daysBefore < 0 || daysBefore > 365) {
 			toast.error('Crew notification days-before must be between 0 and 365.');
 			return;
 		}
-		if (Number.isNaN(hour) || hour < 0 || hour > 23) {
-			toast.error('Crew notification hour must be between 0 and 23.');
+		if (Number.isNaN(hour12) || hour12 < 1 || hour12 > 12) {
+			toast.error('Crew notification time must be between 1 and 12.');
+			return;
+		}
+		if (crewAssignmentPeriod !== 'AM' && crewAssignmentPeriod !== 'PM') {
+			toast.error('Select AM or PM for crew notification time.');
+			return;
+		}
+		const hour = hour12To24(hour12, crewAssignmentPeriod);
+		if (Number.isNaN(hour)) {
+			toast.error('Invalid crew notification time.');
 			return;
 		}
 
@@ -103,6 +128,7 @@
 		try {
 			const updated = {
 				...editingOptions,
+				crewAssignmentHour: hour,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'
 			};
@@ -327,15 +353,25 @@
 						class="input"
 						bind:value={editingOptions.crewAssignmentDaysBefore}
 					/>
-					<label for="opt-crew-hour" class="label">Send at hour (0–23, local)</label>
-					<input
-						id="opt-crew-hour"
-						type="number"
-						min="0"
-						max="23"
-						class="input"
-						bind:value={editingOptions.crewAssignmentHour}
-					/>
+					<label for="opt-crew-hour" class="label">Send at time (AM/PM, local)</label>
+					<div class="options-page__time-row">
+						<input
+							id="opt-crew-hour"
+							type="number"
+							min="1"
+							max="12"
+							class="input options-page__time-hour"
+							bind:value={crewAssignmentHour12}
+						/>
+						<select
+							id="opt-crew-period"
+							class="input options-page__time-period"
+							bind:value={crewAssignmentPeriod}
+						>
+							<option value="AM">AM</option>
+							<option value="PM">PM</option>
+						</select>
+					</div>
 				</div>
 			</div>
 
@@ -585,6 +621,19 @@
 		gap: var(--space-4);
 		align-items: center;
 		max-width: 600px;
+	}
+	.options-page__time-row {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+	.options-page__time-hour {
+		width: 5rem;
+		flex-shrink: 0;
+	}
+	.options-page__time-period {
+		width: auto;
+		min-width: 5.5rem;
 	}
 	.form-section {
 		margin-bottom: var(--space-8);
