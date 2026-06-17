@@ -9,19 +9,25 @@ export const auth = $state({
 
 export async function logout() {
 	// )=- Unified logout: clears central store (used by UI/guards) + localStorage.
-	// Also clears PocketBase authStore for consistency when email login was used.
-	// (Future: can expand to wipe sensitive Dexie data per security TODO.)
+	// Also clears PocketBase authStore and wipes local Dexie data (jobs, clients, invoices, queue).
 	auth.currentUser = null;
 	auth.isAuthenticated = false;
 	localStorage.removeItem('currentUserId');
 
-	// Clear PB side if it was used
 	try {
 		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
 		disconnectJobsRealtime();
 		const { pb } = await import('$lib/db/pb');
 		pb.authStore.clear();
 	} catch {}
+
+	try {
+		const { db } = await import('$lib/db');
+		await db.delete();
+		await db.open();
+	} catch (err) {
+		console.warn('[auth] Failed to clear local Dexie data on logout', err);
+	}
 }
 
 export function setCurrentUser(user: any | null) {

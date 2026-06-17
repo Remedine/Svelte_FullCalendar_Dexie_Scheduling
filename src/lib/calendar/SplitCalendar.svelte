@@ -16,7 +16,10 @@
 	// that was the source of multiple due-date / calendar jump bugs.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
 	import { getLocalDateString, parseLocalDate, toDateString } from '$lib/utils/dates';
-import { getDisplayAreaColor } from '$lib/utils/colors';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
+	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 
 	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
 	// and $effects (which do refetch/update) on every pointer event during drag.
@@ -282,8 +285,19 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 		}
 	});
 
+	// )=- Crew role: auto-scope to assigned jobs only (matches legacy Calendar.svelte behavior).
+	// Admins still use manual crew facet filters. Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	const crewScopedJobs = $derived.by(() => {
+		if (auth.currentUser?.role !== 'crew') return jobs;
+		const crewName = getUserDisplayName(auth.currentUser);
+		if (!crewName) return jobs;
+		return jobs.filter((job: any) => isJobAssignedToCrew(job, crewName));
+	});
+
+	const calendarSlotBounds = $derived(getCalendarSlotBounds(optionsStore.data));
+
 	const filteredJobs = $derived(
-		jobs.filter((job: any) => {
+		crewScopedJobs.filter((job: any) => {
 			const matchesCrew =
 				filters.crew.length === 0 ||
 				job.assignedCrew?.some((c: string) => filters.crew.includes(c));
@@ -292,6 +306,15 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 			return matchesCrew && matchesArea && matchesStatus;
 		})
 	);
+
+	// )=- Apply configurable business hours from admin options when they change.
+	$effect(() => {
+		const { slotMinTime, slotMaxTime } = calendarSlotBounds;
+		if (dayApi) {
+			dayApi.setOption('slotMinTime', slotMinTime);
+			dayApi.setOption('slotMaxTime', slotMaxTime);
+		}
+	});
 
 	// )=- Local date functions were extracted to $lib/utils/dates (imported above).
 	// getJobColor remains local because it depends on the optionsStore (not a pure date util).
@@ -523,8 +546,8 @@ import { getDisplayAreaColor } from '$lib/utils/colors';
 				headerToolbar: false,
 				height: isMobile ? '100%' : 'auto',
 				allDaySlot: true,
-				slotMinTime: '06:00:00',
-				slotMaxTime: '22:00:00',
+				slotMinTime: calendarSlotBounds.slotMinTime,
+				slotMaxTime: calendarSlotBounds.slotMaxTime,
 				nowIndicator: true,
 				expandRows: false,
 				editable: true,

@@ -90,6 +90,8 @@
 				invoiceDueDays: 30,
 				crewAssignmentDaysBefore: 1,
 				crewAssignmentHour: 7,
+				calendarDayStartHour: 6,
+				calendarDayEndHour: 22,
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -120,6 +122,17 @@
 		const hour = hour12To24(hour12, crewAssignmentPeriod);
 		if (Number.isNaN(hour)) {
 			toast.error('Invalid crew notification time.');
+			return;
+		}
+
+		const calStart = Number(editingOptions.calendarDayStartHour);
+		const calEnd = Number(editingOptions.calendarDayEndHour);
+		if (Number.isNaN(calStart) || calStart < 0 || calStart > 22) {
+			toast.error('Calendar start hour must be between 0 and 22.');
+			return;
+		}
+		if (Number.isNaN(calEnd) || calEnd < 1 || calEnd > 24 || calEnd <= calStart) {
+			toast.error('Calendar end hour must be after start hour (1–24).');
 			return;
 		}
 
@@ -334,6 +347,33 @@
 				<button type="button" class="options-page__btn options-page__btn--add" onclick={addNewArea}>
 					+ Add New Area
 				</button>
+			</div>
+
+			<div class="form-section">
+				<h3>Calendar Business Hours</h3>
+				<p class="options-page__help">
+					Controls the visible time range on the schedule day/week views (local time).
+				</p>
+				<div class="form-grid">
+					<label for="opt-cal-start" class="label">Day starts (hour, 0–23)</label>
+					<input
+						id="opt-cal-start"
+						type="number"
+						min="0"
+						max="22"
+						class="input"
+						bind:value={editingOptions.calendarDayStartHour}
+					/>
+					<label for="opt-cal-end" class="label">Day ends (hour, 1–24)</label>
+					<input
+						id="opt-cal-end"
+						type="number"
+						min="1"
+						max="24"
+						class="input"
+						bind:value={editingOptions.calendarDayEndHour}
+					/>
+				</div>
 			</div>
 
 			<div class="form-section">

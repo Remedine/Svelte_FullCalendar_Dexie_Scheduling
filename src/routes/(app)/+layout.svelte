@@ -75,10 +75,13 @@
 			return;
 		}
 
-		// Role-based access: non-admins (crew) can only access calendar views and their own profile.
-		// )=- Updated to allow crew self-service profile management for password + photo (PIN login removed).
+		// Role-based access: crew can use schedule, their assigned jobs list, and profile.
 		if (auth.currentUser.role !== 'admin') {
-			if (!currentPath.startsWith('/calendar') && currentPath !== '/profile') {
+			const allowed =
+				currentPath.startsWith('/calendar') ||
+				currentPath === '/profile' ||
+				currentPath.startsWith('/jobs');
+			if (!allowed) {
 				goto('/calendar', { replaceState: true });
 			}
 		}
@@ -122,9 +125,11 @@
 				<a href="/clients" class="top-nav__link" class:active={currentPath.startsWith('/clients')}>
 					👥 Clients
 				</a>
-				<a href="/jobs" class="top-nav__link" class:active={currentPath.startsWith('/jobs')}>
-					📋 Jobs
-				</a>
+			{/if}
+			<a href="/jobs" class="top-nav__link" class:active={currentPath.startsWith('/jobs')}>
+				📋 {auth.currentUser?.role === 'admin' ? 'Jobs' : 'My Jobs'}
+			</a>
+			{#if auth.currentUser?.role === 'admin'}
 				<a
 					href="/admin/crew"
 					class="top-nav__link"
@@ -208,6 +213,17 @@
 			<span class="bottom-nav__label">Schedule</span>
 		</a>
 
+		<a
+			href="/jobs"
+			class="bottom-nav__tab"
+			class:bottom-nav__tab--active={currentPath.startsWith('/jobs')}
+			role="tab"
+			aria-selected={currentPath.startsWith('/jobs')}
+		>
+			<span class="bottom-nav__icon">📋</span>
+			<span class="bottom-nav__label">{auth.currentUser?.role === 'admin' ? 'Jobs' : 'My Jobs'}</span>
+		</a>
+
 		{#if auth.currentUser?.role === 'admin'}
 			<a
 				href="/clients"
@@ -218,16 +234,6 @@
 			>
 				<span class="bottom-nav__icon">👥</span>
 				<span class="bottom-nav__label">Clients</span>
-			</a>
-			<a
-				href="/jobs"
-				class="bottom-nav__tab"
-				class:bottom-nav__tab--active={currentPath.startsWith('/jobs')}
-				role="tab"
-				aria-selected={currentPath.startsWith('/jobs')}
-			>
-				<span class="bottom-nav__icon">📋</span>
-				<span class="bottom-nav__label">Jobs</span>
 			</a>
 			<a
 				href="/admin/crew"

@@ -14,6 +14,8 @@
 	import { getJobsForRange, updateJobDates } from '$lib/db/index';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
+	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 	import { db } from '$lib/db';
 	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -51,8 +53,11 @@
 		initCalendar(calendarEl);
 	});
 
+	const calendarSlotBounds = $derived(getCalendarSlotBounds(optionsStore.data));
+
 	async function initCalendar(el: HTMLDivElement) {
 		await optionsStore.load?.();
+		const bounds = getCalendarSlotBounds(optionsStore.data);
 
 		calendarInstance = new Calendar(el, {
 			plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin],
@@ -62,6 +67,8 @@
 			height: '100%',
 			expandRows: true,
 			nowIndicator: true,
+			slotMinTime: bounds.slotMinTime,
+			slotMaxTime: bounds.slotMaxTime,
 			// Mobile hold-to-drag support (see SplitCalendar for details + rationale).
 			eventLongPressDelay: 280,
 			selectLongPressDelay: 280,
@@ -106,7 +113,8 @@
 				let jobs = await getJobsForRange(fetchInfo.start, fetchInfo.end);
 
 				if (auth.currentUser?.role === 'crew') {
-					jobs = jobs.filter((j: any) => j.assignedCrew?.includes(auth.currentUser!.name));
+					const crewName = getUserDisplayName(auth.currentUser);
+					jobs = jobs.filter((j: any) => isJobAssignedToCrew(j, crewName));
 				}
 
 				successCallback(

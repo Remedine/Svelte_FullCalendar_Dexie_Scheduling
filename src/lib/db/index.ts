@@ -158,6 +158,10 @@ export interface AppOptions {
 	crewAssignmentDaysBefore?: number;
 	/** Hour of day (0–23, local) to send crew assignment emails. */
 	crewAssignmentHour?: number;
+	/** Calendar day view starts at this hour (0–23, local). */
+	calendarDayStartHour?: number;
+	/** Calendar day view ends at this hour (1–24, local; e.g. 22 = 10 PM). */
+	calendarDayEndHour?: number;
 	lastUpdated: Date;
 	updatedBy: string;
 }

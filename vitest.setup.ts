@@ -1,14 +1,19 @@
+import { vi } from 'vitest';
+
+// )=- Mock SvelteKit env modules before any app code imports pb.ts (which throws without PUBLIC_POCKETBASE_URL).
+// Reference: TESTING_PLAN.md Phase 0 + Remedine/Svelte_FullCalendar_Dexie_Scheduling
+vi.mock('$env/static/public', () => ({
+	PUBLIC_POCKETBASE_URL: 'http://127.0.0.1:8090',
+	PUBLIC_PB_URL: 'http://127.0.0.1:8090'
+}));
+
+vi.mock('$env/static/private', () => ({
+	INTERNAL_SECRET: 'test-internal-secret'
+}));
+
 import 'fake-indexeddb/auto';
 import { db } from '$lib/db';
 import { beforeEach, afterEach } from 'vitest';
-
-// )=- Global test setup for Phase 0+ of the testing plan.
-// - fake-indexeddb/auto polyfills IndexedDB + IDBKeyRange so Dexie works in Node/happy-dom.
-// - Every test gets a completely fresh 'CapitalCityWindows' database (delete + open).
-//   This guarantees isolation for tests that exercise createJob, getJobsForRange,
-//   invoice helpers, sync queue logic, etc.
-// - We use beforeEach/afterEach so even tests that don't touch DB are safe.
-// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
 
 beforeEach(async () => {
 	try {

@@ -15,6 +15,7 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
+	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
 
 	// )=- Phase 5 overhaul of /jobs page per JOBS_AND_INVOICES_SPEC.md.
 	// Rich filters (quick presets, date range, facets, broad search, has-invoice), pagination, enriched cards,
@@ -38,6 +39,8 @@
 	let dateFrom = $state('');
 	let dateTo = $state('');
 	let selectedAreas = $state<string[]>([]);
+	let selectedCrew = $state<string[]>([]);
+	let showOverdueOnly = $state(false);
 	let minAmount = $state<number | null>(null);
 	let maxAmount = $state<number | null>(null);
 	let invoiceFilter = $state<'all' | 'has' | 'none'>('all'); // now a segmented control inside Financial group
@@ -166,6 +169,14 @@
 	const filteredAndSorted = $derived.by(() => {
 		let result = [...jobs];
 
+		// )=- Crew users only see jobs they are assigned to (matches calendar crew view).
+		if (auth.currentUser?.role === 'crew') {
+			const crewName = getUserDisplayName(auth.currentUser);
+			if (crewName) {
+				result = result.filter((j) => isJobAssignedToCrew(j, crewName));
+			}
+		}
+
 		const term = searchTerm.toLowerCase().trim();
 		if (term) {
 			result = result.filter((j) => {
@@ -231,6 +242,18 @@
 			result = result.filter((j) => selectedAreas.includes(j.areaOfTown || ''));
 		}
 
+		// Crew multi-select facet (admin only in UI; filter still safe if state set)
+		if (selectedCrew.length > 0) {
+			result = result.filter((j) =>
+				(j.assignedCrew || []).some((c) => selectedCrew.includes((c || '').trim()))
+			);
+		}
+
+		// Overdue invoices quick preset (JOBS_AND_INVOICES_SPEC.md)
+		if (showOverdueOnly) {
+			result = result.filter((j) => j.id && invoiceStatus[j.id]?.isOverdue);
+		}
+
 		// Amount range
 		// )=- Non-null guards + ! casts to satisfy TS (pre-existing pnpm noise on minAmount/maxAmount state was number|null). UI sets/clears them; filter only applies when present.
 		if (minAmount != null)
@@ -291,14 +314,30 @@
 		page = 1;
 	}
 
+	function toggleCrew(crewName: string) {
+		if (selectedCrew.includes(crewName)) {
+			selectedCrew = selectedCrew.filter((c) => c !== crewName);
+		} else {
+			selectedCrew = [...selectedCrew, crewName];
+		}
+		page = 1;
+	}
+
+	function toggleOverdueOnly() {
+		showOverdueOnly = !showOverdueOnly;
+		page = 1;
+	}
+
 	function resetFilters() {
 		searchTerm = '';
 		quickTimeFilter = 'all';
 		quickDateWindow = 'all';
 		showCancelled = false;
+		showOverdueOnly = false;
 		dateFrom = '';
 		dateTo = '';
 		selectedAreas = [];
+		selectedCrew = [];
 		minAmount = null;
 		maxAmount = null;
 		invoiceFilter = 'all';
@@ -319,12 +358,32 @@
 	// Filtering still uses the area id (stored on jobs).
 	// This was the root cause of "areas filter pulling in the area id and not the corresponding area label or color".
 	const areaOptions = $derived(optionsStore.data?.areasOfTown ?? []);
+
+	// )=- Crew facet names: active users + any names already on jobs (legacy imports).
+	const crewFacetOptions = $derived.by(() => {
+		const names = new Set<string>();
+		for (const u of users) {
+			if (u.active !== false) {
+				const n = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
+				if (n) names.add(n);
+			}
+		}
+		for (const j of jobs) {
+			for (const c of j.assignedCrew || []) {
+				const t = (c || '').trim();
+				if (t) names.add(t);
+			}
+		}
+		return [...names].sort((a, b) => a.localeCompare(b));
+	});
+
+	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 </script>
 
 <div class="job-page">
 	<header class="job-page__header">
 		<div>
-			<h1 class="job-page__title">All Jobs</h1>
+			<h1 class="job-page__title">{isAdmin ? 'All Jobs' : 'My Jobs'}</h1>
 			<p class="job-page__subtitle">
 				{paginatedJobs.length} shown • {filteredAndSorted.length} matching
 				{#if auth.currentUser?.role === 'crew'}
@@ -375,6 +434,14 @@
 				{showCancelled ? 'Hide cancelled' : 'Show cancelled'}
 			</button>
 
+			<button
+				class="job-page__quick-pill job-page__quick-pill--overdue"
+				class:active={showOverdueOnly}
+				onclick={toggleOverdueOnly}
+			>
+				{showOverdueOnly ? 'Overdue only' : 'Overdue'}
+			</button>
+
 			<button class="job-page__btn" onclick={resetFilters}>Reset</button>
 
 			<!-- "More Filters" trigger - can sit next to reset or wrap to own line on small screens -->
@@ -408,6 +475,23 @@
 						{/each}
 					</div>
 				</div>
+
+				{#if isAdmin}
+					<div class="job-page__filter-group job-page__filter-group--inline">
+						<div class="job-page__filter-group-label">Crew</div>
+						<div class="job-page__facet">
+							{#each crewFacetOptions as crewName (crewName)}
+								<button
+									class="crew-chip"
+									class:active={selectedCrew.includes(crewName)}
+									onclick={() => toggleCrew(crewName)}
+								>
+									{crewName}
+								</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
 
 				<!-- Date filters. Label + inputs on same line. -->
 				<div class="job-page__filter-group job-page__filter-group--inline">
@@ -512,7 +596,7 @@
 									{/if}
 								</span>
 							{/each}
-							<span class="job-page__crew-names">{job.assignedCrew.join(', ')}</span>
+							<span class="job-page__crew-names">{(job.assignedCrew || []).join(', ')}</span>
 						</div>
 						{#if area}
 							<span class="job-page__area" style="color: {area.color};">{area.label}</span>
@@ -614,6 +698,12 @@
 		border-color: var(--color-danger);
 		color: var(--color-danger-emphasis);
 		background: var(--color-danger-soft);
+	}
+
+	.job-page__quick-pill--overdue.active {
+		border-color: var(--color-warning);
+		color: var(--color-warning-emphasis, #b45309);
+		background: var(--color-warning-soft, rgba(245, 158, 11, 0.15));
 	}
 
 	/* The More Filters trigger (text + indicator). Placed at end of quick row (or wraps). */
@@ -745,6 +835,23 @@
 		color: var(--color-text);
 	}
 	.area-chip.active {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
+	}
+
+	.crew-chip {
+		padding: var(--space-1) var(--space-2);
+		margin-right: var(--space-1);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		background: var(--color-surface);
+		color: var(--color-text);
+	}
+
+	.crew-chip.active {
 		background: var(--color-primary);
 		color: white;
 		border-color: var(--color-primary);
