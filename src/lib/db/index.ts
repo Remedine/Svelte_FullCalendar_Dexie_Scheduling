@@ -4,7 +4,7 @@ import Dexie, { type EntityTable } from 'dexie';
 import { pb, pullJobsFromServer } from '$lib/db/pb';
 // )=- Import pure date helper extracted in Phase 2 so due date logic is testable and not duplicated.
 // Reference: TESTING_PLAN.md + JOBS_AND_INVOICES_SPEC.md
-import { calculateDueDate } from '$lib/utils/dates';
+import { getInvoiceDueDateForJob } from '$lib/utils/dates';
 // )=- bcryptjs import removed (was only for PIN hashing in login/create/setInitialPin flows). PIN login deleted; password hashing is handled by PocketBase on the server side for email auth.
 
 // Dynamic import to break circular dependency with auth.svelte.ts
@@ -950,10 +950,8 @@ export async function generateInvoiceDocx(
 	const businessName = opts.businessName || 'Capital City Windows';
 	const invoiceNumber = (job.pbId || job.id || 'draft').slice(0, 12).toUpperCase();
 	const serviceDate = new Date(job.start).toLocaleDateString();
-	const dueDate = job.end
-		? new Date(new Date(job.end).getTime() + (opts.invoiceDueDays ?? 30) * 86400000)
-		: null;
-	const dueDateStr = dueDate ? dueDate.toLocaleDateString() : '—';
+	const dueDate = getInvoiceDueDateForJob(job, opts.invoiceDueDays ?? 30);
+	const dueDateStr = dueDate.toLocaleDateString();
 	const clientName = client?.name || 'Client';
 	const clientAddress = client
 		? [
@@ -1241,9 +1239,7 @@ export async function ensureInvoiceForJob(
 
 	const optionsRecord = await db.options.get('1');
 	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
-	// )=- Now uses the extracted pure calculateDueDate (Phase 2 improvement for testability).
-	// The math itself is covered by dedicated unit tests in dates.test.ts.
-	const dueDate = calculateDueDate(job.end ? new Date(job.end) : new Date(), dueDays);
+	const dueDate = getInvoiceDueDateForJob(job, dueDays);
 
 	const invoiceData: Partial<Invoice> = {
 		jobId: job.id,

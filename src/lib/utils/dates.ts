@@ -112,6 +112,15 @@ export function calculateDueDate(base: Date, days: number): Date {
 	return new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+/** Default invoice due date: job end (or today when unset) + invoiceDueDays from options. */
+export function getInvoiceDueDateForJob(
+	job: { end?: Date | string | null },
+	invoiceDueDays: number = 30
+): Date {
+	const base = job.end ? new Date(job.end) : new Date();
+	return calculateDueDate(base, invoiceDueDays);
+}
+
 export type Hour12Period = 'AM' | 'PM';
 
 /** Convert 24-hour clock (0–23) to 12-hour display parts. */

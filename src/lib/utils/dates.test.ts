@@ -7,6 +7,7 @@ import {
 	inputValueToDate,
 	toDateString,
 	calculateDueDate,
+	getInvoiceDueDateForJob,
 	hour12To24,
 	hour24To12
 } from './dates';
@@ -130,6 +131,21 @@ describe('calculateDueDate (pure, used by ensureInvoiceForJob)', () => {
 		const originalTime = base.getTime();
 		calculateDueDate(base, 10);
 		expect(base.getTime()).toBe(originalTime);
+	});
+});
+
+describe('getInvoiceDueDateForJob', () => {
+	it('uses job.end + invoiceDueDays when end is set', () => {
+		const job = { end: new Date('2026-08-20T10:00:00') };
+		const due = getInvoiceDueDateForJob(job, 45);
+		expect(due.toISOString().slice(0, 10)).toBe('2026-10-04');
+	});
+
+	it('falls back to today when job has no end', () => {
+		const today = new Date();
+		const due = getInvoiceDueDateForJob({}, 15);
+		const expected = calculateDueDate(today, 15);
+		expect(due.toISOString().slice(0, 10)).toBe(expected.toISOString().slice(0, 10));
 	});
 });
 

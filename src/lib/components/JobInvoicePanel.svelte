@@ -17,7 +17,7 @@
 	import { saveAs } from 'file-saver';
 	import { pb } from '$lib/db/pb';
 	import { clientPrefersEmailBilling } from '$lib/notifications/crewSchedule';
-	import { dateToInputValue, inputValueToDate } from '$lib/utils/dates';
+	import { dateToInputValue, getInvoiceDueDateForJob, inputValueToDate } from '$lib/utils/dates';
 	import { toast } from '$lib/stores/toast.svelte';
 
 	let {
@@ -130,11 +130,15 @@
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
 
+			const dueDays = optionsStore.data?.invoiceDueDays ?? 30;
+			const dueDate = getInvoiceDueDateForJob(job, dueDays);
+
 			const newInvoiceId = await createInvoice(
 				{
 					jobId: job.id,
 					clientId: job.clientId,
 					status: job.status === 'completed' ? 'generated' : 'draft',
+					dueDate,
 					amount: job.totalAmount,
 					billableItems: job.billableItems,
 					notes: job.notes,
@@ -240,7 +244,14 @@
 			});
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
-			await updateInvoice(invoice.id!, { updatedAt: new Date() }, { primary: { blob, filename } });
+
+			const dueDays = optionsStore.data?.invoiceDueDays ?? 30;
+			const dueDate = getInvoiceDueDateForJob(job, dueDays);
+			await updateInvoice(
+				invoice.id!,
+				{ dueDate, updatedAt: new Date() },
+				{ primary: { blob, filename } }
+			);
 			const fresh = await db.invoices.get(invoice.id!);
 			if (fresh) {
 				invoice = fresh;
