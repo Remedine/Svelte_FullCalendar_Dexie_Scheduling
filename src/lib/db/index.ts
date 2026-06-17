@@ -78,6 +78,12 @@ export interface Client {
 	serviceAddressCity: string;
 	serviceAddressState: string;
 	serviceAddressZip: string;
+	/** When true, invoices use billingAddress* instead of service address for Bill To. */
+	useBillingAddress?: boolean;
+	billingAddressStreet?: string;
+	billingAddressCity?: string;
+	billingAddressState?: string;
+	billingAddressZip?: string;
 	areaOfTown: string;
 	preferredBillingMethod: 'email' | 'check' | 'invoice';
 	phone: string;

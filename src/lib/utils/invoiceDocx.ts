@@ -43,6 +43,48 @@ function formatCityStateZip(city?: string, state?: string, zip?: string): string
 	return [city, state].filter(Boolean).join(', ') + (zip ? ` ${zip}` : '');
 }
 
+/** Bill To address: billing fields when useBillingAddress, else service address. */
+export function getClientBillToAddress(client: Client | null | undefined): {
+	street: string;
+	csz: string;
+} {
+	if (!client) return { street: '', csz: '' };
+	if (client.useBillingAddress) {
+		return {
+			street: client.billingAddressStreet?.trim() || '',
+			csz: formatCityStateZip(
+				client.billingAddressCity,
+				client.billingAddressState,
+				client.billingAddressZip
+			)
+		};
+	}
+	return {
+		street: client.serviceAddressStreet?.trim() || '',
+		csz: formatCityStateZip(
+			client.serviceAddressCity,
+			client.serviceAddressState,
+			client.serviceAddressZip
+		)
+	};
+}
+
+/** Service location always uses the service address (tax situs). */
+export function getClientServiceAddress(client: Client | null | undefined): {
+	street: string;
+	csz: string;
+} {
+	if (!client) return { street: '', csz: '' };
+	return {
+		street: client.serviceAddressStreet?.trim() || '',
+		csz: formatCityStateZip(
+			client.serviceAddressCity,
+			client.serviceAddressState,
+			client.serviceAddressZip
+		)
+	};
+}
+
 function formatMailingLines(info: InvoiceDocxBusinessInfo): string[] {
 	const street = info.businessMailingStreet?.trim() || info.businessStreet?.trim();
 	const city = info.businessMailingCity?.trim() || info.businessCity?.trim();
@@ -124,14 +166,8 @@ export async function generateInvoiceDocx(
 			: '';
 
 	const clientName = client?.name || 'Client';
-	const serviceStreet = client?.serviceAddressStreet || '';
-	const serviceCsz = client
-		? formatCityStateZip(
-				client.serviceAddressCity,
-				client.serviceAddressState,
-				client.serviceAddressZip
-			)
-		: '';
+	const billTo = getClientBillToAddress(client);
+	const serviceLoc = getClientServiceAddress(client);
 	const clientContact = [client?.phone, client?.email].filter(Boolean).join(' • ');
 
 	const businessLines: string[] = [businessName];
@@ -189,8 +225,8 @@ export async function generateInvoiceDocx(
 	];
 
 	const billToLines = ['Bill To', clientName];
-	if (serviceStreet) billToLines.push(serviceStreet);
-	if (serviceCsz.trim()) billToLines.push(serviceCsz);
+	if (billTo.street) billToLines.push(billTo.street);
+	if (billTo.csz.trim()) billToLines.push(billTo.csz);
 	if (clientContact) billToLines.push(clientContact);
 
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
@@ -249,13 +285,9 @@ export async function generateInvoiceDocx(
 								children: [
 									headerCell(billToLines),
 									headerCell(
-										serviceStreet
-											? [
-													'Service Location',
-													serviceStreet,
-													serviceCsz.trim() || '—'
-												]
-											: ['Service Location', 'Same as bill to']
+										serviceLoc.street
+											? ['Service Location', serviceLoc.street, serviceLoc.csz.trim() || '—']
+											: ['Service Location', '—']
 									)
 								]
 							})

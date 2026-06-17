@@ -17,6 +17,11 @@
 		serviceAddressCity: z.string().optional(),
 		serviceAddressState: z.string().length(2, 'State must be 2 letters').optional(),
 		serviceAddressZip: z.string().optional(),
+		useBillingAddress: z.boolean().optional(),
+		billingAddressStreet: z.string().optional(),
+		billingAddressCity: z.string().optional(),
+		billingAddressState: z.string().length(2, 'State must be 2 letters').optional().or(z.literal('')),
+		billingAddressZip: z.string().optional(),
 		areaOfTown: z.string().min(1, 'Area of Town is required'),
 		preferredBillingMethod: z.enum(['email', 'check', 'invoice'] as const),
 		notes: z.string().optional()
@@ -34,8 +39,13 @@
 		name: '',
 		serviceAddressStreet: '',
 		serviceAddressCity: '',
-		serviceAddressState: 'WA',
+		serviceAddressState: 'AK',
 		serviceAddressZip: '',
+		useBillingAddress: false,
+		billingAddressStreet: '',
+		billingAddressCity: '',
+		billingAddressState: 'AK',
+		billingAddressZip: '',
 		areaOfTown: '',
 		preferredBillingMethod: 'email',
 		phone: '',
@@ -80,7 +90,10 @@
 
 		if (client?.id) {
 			// Editing existing client
-			formData = { ...client };
+			formData = {
+				...client,
+				useBillingAddress: !!client.useBillingAddress
+			};
 			hasInitializedNewForm = false;
 		} else if (!hasInitializedNewForm && areaOptions.length > 0) {
 			// New client + options ready → set first area as default once
@@ -88,8 +101,13 @@
 				name: '',
 				serviceAddressStreet: '',
 				serviceAddressCity: '',
-				serviceAddressState: 'WA',
+				serviceAddressState: 'AK',
 				serviceAddressZip: '',
+				useBillingAddress: false,
+				billingAddressStreet: '',
+				billingAddressCity: '',
+				billingAddressState: 'AK',
+				billingAddressZip: '',
 				areaOfTown: areaOptions[0]?.id || '',
 				preferredBillingMethod: 'email',
 				phone: '',
@@ -123,9 +141,25 @@
 			return;
 		}
 
+		if (formData.useBillingAddress) {
+			if (!formData.billingAddressStreet?.trim()) errors.billingAddressStreet = 'Street is required';
+			if (!formData.billingAddressCity?.trim()) errors.billingAddressCity = 'City is required';
+			if (!formData.billingAddressState?.trim() || formData.billingAddressState.length !== 2) {
+				errors.billingAddressState = 'State must be 2 letters';
+			}
+			if (!formData.billingAddressZip?.trim()) errors.billingAddressZip = 'ZIP is required';
+			if (Object.keys(errors).length) return;
+		}
+
 		try {
+			const useBilling = !!formData.useBillingAddress;
 			const clientPayload = {
 				...result.data,
+				useBillingAddress: useBilling,
+				billingAddressStreet: useBilling ? formData.billingAddressStreet?.trim() || '' : '',
+				billingAddressCity: useBilling ? formData.billingAddressCity?.trim() || '' : '',
+				billingAddressState: useBilling ? formData.billingAddressState?.trim() || '' : '',
+				billingAddressZip: useBilling ? formData.billingAddressZip?.trim() || '' : '',
 				createdAt: client?.createdAt || new Date(),
 				updatedAt: new Date()
 			} as Client;
@@ -190,6 +224,9 @@
 					{#if errors.phone}<small class="error">{errors.phone}</small>{/if}
 				</div>
 
+				<div class="client-form-modal__section-title">Service Address</div>
+				<p class="client-form-modal__help">Where work is performed. Used as Bill To on invoices unless billing address is set.</p>
+
 				<div class="client-form-modal__field">
 					<label class="client-form-modal__label label">
 						Street Address
@@ -221,6 +258,62 @@
 						</label>
 					</div>
 				</div>
+
+				<div class="client-form-modal__field client-form-modal__checkbox-field">
+					<label class="client-form-modal__checkbox-label">
+						<input type="checkbox" bind:checked={formData.useBillingAddress} />
+						Billing Address (separate from service address)
+					</label>
+				</div>
+
+				{#if formData.useBillingAddress}
+					<div class="client-form-modal__billing-block">
+						<div class="client-form-modal__field">
+							<label class="client-form-modal__label label">
+								Billing Street
+								<input
+									bind:value={formData.billingAddressStreet}
+									class="client-form-modal__input input"
+								/>
+							</label>
+							{#if errors.billingAddressStreet}<small class="error">{errors.billingAddressStreet}</small>{/if}
+						</div>
+
+						<div class="client-form-modal__address-row">
+							<div class="client-form-modal__field">
+								<label class="client-form-modal__label label">
+									City
+									<input
+										bind:value={formData.billingAddressCity}
+										class="client-form-modal__input input"
+									/>
+								</label>
+								{#if errors.billingAddressCity}<small class="error">{errors.billingAddressCity}</small>{/if}
+							</div>
+							<div class="client-form-modal__field">
+								<label class="client-form-modal__label label">
+									State
+									<input
+										bind:value={formData.billingAddressState}
+										maxlength="2"
+										class="client-form-modal__input input"
+									/>
+								</label>
+								{#if errors.billingAddressState}<small class="error">{errors.billingAddressState}</small>{/if}
+							</div>
+							<div class="client-form-modal__field">
+								<label class="client-form-modal__label label">
+									ZIP
+									<input
+										bind:value={formData.billingAddressZip}
+										class="client-form-modal__input input"
+									/>
+								</label>
+								{#if errors.billingAddressZip}<small class="error">{errors.billingAddressZip}</small>{/if}
+							</div>
+						</div>
+					</div>
+				{/if}
 
 				<!-- Area with Colored Left Border -->
 				<div class="client-form-modal__field">
@@ -314,10 +407,47 @@
 		gap: var(--space-2);
 	}
 
+	.client-form-modal__section-title {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+
+	.client-form-modal__help {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		line-height: 1.4;
+	}
+
 	.client-form-modal__address-row {
 		display: grid;
 		grid-template-columns: 2fr 1fr 1fr;
 		gap: var(--space-4);
+	}
+
+	.client-form-modal__checkbox-field {
+		margin-top: var(--space-1);
+	}
+
+	.client-form-modal__checkbox-label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+	}
+
+	.client-form-modal__billing-block {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+		padding: var(--space-3);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-surface-alt);
 	}
 
 	.client-form-modal__label {
