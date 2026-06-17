@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
 	buildPaymentInstructions,
+	getBusinessReturnAddressLines,
 	getClientBillToAddress,
-	getClientServiceAddress
+	getClientServiceAddress,
+	getRecipientMailingLines
 } from '$lib/utils/invoiceDocx';
 import type { Client } from '$lib/db';
 
@@ -28,6 +30,33 @@ describe('buildPaymentInstructions', () => {
 		const client = { preferredBillingMethod: 'email' } as Client;
 		const lines = buildPaymentInstructions(client, business);
 		expect(lines.some((l) => l.includes('billing@ccw.example'))).toBe(true);
+	});
+});
+
+describe('envelope address blocks', () => {
+	it('return address uses mailing address from options', () => {
+		const lines = getBusinessReturnAddressLines({
+			businessName: 'Capital City Windows',
+			businessMailingStreet: 'PO Box 100',
+			businessMailingCity: 'Juneau',
+			businessMailingState: 'AK',
+			businessMailingZip: '99801'
+		});
+		expect(lines[0]).toBe('Capital City Windows');
+		expect(lines[1]).toBe('PO Box 100');
+		expect(lines[2]).toContain('Juneau');
+	});
+
+	it('recipient mailing uses bill-to address lines only', () => {
+		const client = {
+			useBillingAddress: true,
+			billingAddressStreet: 'PO Box 200',
+			billingAddressCity: 'Anchorage',
+			billingAddressState: 'AK',
+			billingAddressZip: '99501'
+		} as Client;
+		const lines = getRecipientMailingLines(client, 'Jane Homeowner');
+		expect(lines).toEqual(['Jane Homeowner', 'PO Box 200', 'Anchorage, AK 99501']);
 	});
 });
 

@@ -31,8 +31,18 @@ export interface InvoiceDocxContext extends InvoiceDocxBusinessInfo {
 const BODY = 18; // 9pt — compact for one-page layout
 const LABEL = 18;
 const HEADING = 22;
+const ENVELOPE = 20; // 10pt — readable through #10 window
 const TIGHT = 30;
 const LOOSE = 60;
+
+/** Twips (dxa): 1440 per inch. #10 double-window tri-fold zones. */
+const TWIP = 1440;
+/** Left margin aligned with common 1-1/8" double-window envelope offset. */
+const ENVELOPE_LEFT_MARGIN = Math.round(1.125 * TWIP);
+/** Top panel (~2.5") — return address shows in upper window when tri-folded. */
+const ENVELOPE_RETURN_ROW_H = Math.round(2.5 * TWIP);
+/** Bottom panel (~2.5") — recipient shows in lower window when tri-folded. */
+const ENVELOPE_RECIPIENT_ROW_H = Math.round(2.5 * TWIP);
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
 	const raw = optsRate ?? job.taxRate ?? 5;
@@ -83,6 +93,25 @@ export function getClientServiceAddress(client: Client | null | undefined): {
 			client.serviceAddressZip
 		)
 	};
+}
+
+/** Return address for envelope window (mailing / remit address from options). */
+export function getBusinessReturnAddressLines(info: InvoiceDocxBusinessInfo): string[] {
+	const name = info.businessName || 'Capital City Windows';
+	const mail = formatMailingLines(info);
+	return [name, ...mail].filter((l) => l.trim().length > 0);
+}
+
+/** Recipient block for envelope window (billing or service address per client setting). */
+export function getRecipientMailingLines(
+	client: Client | null | undefined,
+	clientName: string
+): string[] {
+	const billTo = getClientBillToAddress(client);
+	const lines = [clientName];
+	if (billTo.street) lines.push(billTo.street);
+	if (billTo.csz.trim()) lines.push(billTo.csz.trim());
+	return lines;
 }
 
 function formatMailingLines(info: InvoiceDocxBusinessInfo): string[] {
@@ -148,7 +177,8 @@ export async function generateInvoiceDocx(
 		TextRun,
 		AlignmentType,
 		WidthType,
-		VerticalAlign
+		VerticalAlign,
+		HeightRule
 	} = await importDocx();
 
 	const businessName = ctx.businessName || 'Capital City Windows';
@@ -166,21 +196,33 @@ export async function generateInvoiceDocx(
 			: '';
 
 	const clientName = client?.name || 'Client';
-	const billTo = getClientBillToAddress(client);
 	const serviceLoc = getClientServiceAddress(client);
-	const clientContact = [client?.phone, client?.email].filter(Boolean).join(' • ');
-
-	const businessLines: string[] = [businessName];
-	if (ctx.businessStreet) businessLines.push(ctx.businessStreet);
-	const bizCsz = formatCityStateZip(ctx.businessCity, ctx.businessState, ctx.businessZip);
-	if (bizCsz.trim()) businessLines.push(bizCsz);
-	if (ctx.businessPhone) businessLines.push(ctx.businessPhone);
-	if (ctx.businessEmail) businessLines.push(ctx.businessEmail);
-	if (ctx.businessWebsite) businessLines.push(ctx.businessWebsite);
-	if (ctx.businessSalesTaxAccount)
-		businessLines.push(`CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`);
+	const returnLines = getBusinessReturnAddressLines(ctx);
+	const recipientLines = getRecipientMailingLines(client, clientName);
 
 	const paymentLines = buildPaymentInstructions(client, ctx);
+
+	const envelopeAddressCell = (lines: string[], boldFirst = false) =>
+		new TableCell({
+			verticalAlign: VerticalAlign.TOP,
+			margins: { top: 60, bottom: 60, left: 0, right: 0 },
+			children: lines.map((line, i) =>
+				new Paragraph({
+					spacing: { after: 50, before: 0 },
+					children: [
+						new TextRun({
+							text: line,
+							size: ENVELOPE,
+							bold: boldFirst && i === 0
+						})
+					]
+				})
+			)
+		});
+
+	const exactRow = (heightTwips: number) => ({
+		height: { value: heightTwips, rule: HeightRule.EXACT }
+	});
 
 	const cell = (text: string, align?: (typeof AlignmentType)[keyof typeof AlignmentType]) =>
 		new TableCell({
@@ -195,39 +237,10 @@ export async function generateInvoiceDocx(
 			]
 		});
 
-	const headerCell = (lines: string[], boldFirst = false) =>
-		new TableCell({
-			verticalAlign: VerticalAlign.TOP,
-			width: { size: 50, type: WidthType.PERCENTAGE },
-			margins: { top: 40, bottom: 40, left: 60, right: 80 },
-			children: lines.map((line, i) =>
-				new Paragraph({
-					spacing: { after: 20, before: 0 },
-					children: [
-						new TextRun({
-							text: line,
-							size: i === 0 && boldFirst ? HEADING : BODY,
-							bold: i === 0 && boldFirst
-						})
-					]
-				})
-			)
-		});
-
-	const metaLines = [
-		'INVOICE',
-		`Invoice #: ${ctx.invoiceNumber}`,
-		`Invoice date: ${invoiceDate}`,
-		`Due date: ${dueDateStr}`,
-		`Terms: Due within ${dueDays} days`,
-		`Service date: ${serviceDate}${serviceEnd}`,
-		`Job: ${job.title || 'Window cleaning service'}`
-	];
-
-	const billToLines = ['Bill To', clientName];
-	if (billTo.street) billToLines.push(billTo.street);
-	if (billTo.csz.trim()) billToLines.push(billTo.csz);
-	if (clientContact) billToLines.push(clientContact);
+	const serviceAt =
+		serviceLoc.street && serviceLoc.csz.trim()
+			? `${serviceLoc.street}, ${serviceLoc.csz.trim()}`
+			: serviceLoc.street || serviceLoc.csz.trim() || '—';
 
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
 		new TableRow({
@@ -244,141 +257,178 @@ export async function generateInvoiceDocx(
 	const taxAmount = job.taxAmount ?? 0;
 	const total = job.totalAmount ?? 0;
 
+	// )=- #10 double-window envelope layout: return (top panel), invoice body (middle), recipient (bottom).
+	// Tri-fold bottom-up then top-down so windows align with standard 0.875" x 3.25" (return) and 1" x 4" (recipient) openings.
+	const middleContent: (typeof Paragraph | typeof Table)[] = [
+		new Paragraph({
+			spacing: { after: TIGHT, before: 0 },
+			children: [new TextRun({ text: 'INVOICE', bold: true, size: HEADING })]
+		}),
+		new Paragraph({
+			spacing: { after: 40, before: 0 },
+			children: [
+				new TextRun({ text: `#${ctx.invoiceNumber}`, size: BODY }),
+				new TextRun({ text: `  •  Date: ${invoiceDate}`, size: BODY }),
+				new TextRun({ text: `  •  Due: ${dueDateStr}`, size: BODY }),
+				new TextRun({ text: `  •  Terms: ${dueDays} days`, size: BODY })
+			]
+		}),
+		new Paragraph({
+			spacing: { after: 40, before: 0 },
+			children: [
+				new TextRun({ text: `Bill To: ${clientName}`, size: BODY }),
+				new TextRun({ text: `  •  Service at: ${serviceAt}`, size: BODY })
+			]
+		}),
+		new Paragraph({
+			spacing: { after: 40, before: 0 },
+			children: [
+				new TextRun({ text: `Service date: ${serviceDate}${serviceEnd}`, size: BODY }),
+				new TextRun({ text: `  •  Job: ${job.title || 'Window cleaning service'}`, size: BODY })
+			]
+		}),
+		...(ctx.businessSalesTaxAccount
+			? [
+					new Paragraph({
+						spacing: { after: TIGHT, before: 0 },
+						children: [
+							new TextRun({
+								text: `CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`,
+								size: BODY
+							})
+						]
+					})
+				]
+			: []),
+		new Table({
+			width: { size: 100, type: WidthType.PERCENTAGE },
+			rows: [
+				new TableRow({
+					children: [
+						cell('Description'),
+						cell('Qty', AlignmentType.RIGHT),
+						cell('Unit', AlignmentType.RIGHT),
+						cell('Total', AlignmentType.RIGHT)
+					]
+				}),
+				...billableRows,
+				new TableRow({
+					children: [
+						cell('Subtotal'),
+						cell('', AlignmentType.RIGHT),
+						cell('', AlignmentType.RIGHT),
+						cell(`$${subtotal.toFixed(2)}`, AlignmentType.RIGHT)
+					]
+				}),
+				new TableRow({
+					children: [
+						cell(`${taxLabel} (${taxPct.toFixed(1)}%)`),
+						cell('', AlignmentType.RIGHT),
+						cell('', AlignmentType.RIGHT),
+						cell(`$${taxAmount.toFixed(2)}`, AlignmentType.RIGHT)
+					]
+				}),
+				new TableRow({
+					children: [
+						cell('TOTAL'),
+						cell('', AlignmentType.RIGHT),
+						cell('', AlignmentType.RIGHT),
+						cell(`$${total.toFixed(2)}`, AlignmentType.RIGHT)
+					]
+				})
+			]
+		}),
+		new Paragraph({ spacing: { after: TIGHT }, text: '' }),
+		new Paragraph({
+			spacing: { after: TIGHT },
+			children: [
+				new TextRun({
+					text: `Amount due by ${dueDateStr}: $${total.toFixed(2)}`,
+					bold: true,
+					size: HEADING
+				})
+			]
+		}),
+		new Paragraph({
+			spacing: { after: 20 },
+			children: [new TextRun({ text: 'Payment', bold: true, size: LABEL })]
+		}),
+		...paymentLines.map(
+			(line) =>
+				new Paragraph({
+					spacing: { after: 20, before: 0 },
+					children: [new TextRun({ text: line, size: BODY })]
+				})
+		),
+		new Paragraph({
+			spacing: { after: TIGHT, before: 0 },
+			children: [
+				new TextRun({
+					text: `Thank you for choosing ${businessName}!`,
+					size: BODY
+				})
+			]
+		}),
+		...(ctx.invoiceNotes?.trim()
+			? [
+					new Paragraph({
+						spacing: { after: 20, before: TIGHT },
+						children: [new TextRun({ text: 'Invoice Notes', bold: true, size: LABEL })]
+					}),
+					new Paragraph({
+						spacing: { after: TIGHT, before: 0 },
+						children: [new TextRun({ text: ctx.invoiceNotes.trim(), size: BODY })]
+					})
+				]
+			: [])
+	];
+
+	const noBorders = {
+		top: { style: 'none' as const, size: 0 },
+		bottom: { style: 'none' as const, size: 0 },
+		left: { style: 'none' as const, size: 0 },
+		right: { style: 'none' as const, size: 0 },
+		insideHorizontal: { style: 'none' as const, size: 0 },
+		insideVertical: { style: 'none' as const, size: 0 }
+	};
+
 	const doc = new Document({
 		sections: [
 			{
 				properties: {
 					page: {
-						margin: { top: 720, right: 720, bottom: 720, left: 720 }
+						margin: {
+							top: 180,
+							right: 720,
+							bottom: 180,
+							left: ENVELOPE_LEFT_MARGIN
+						}
 					}
 				},
 				children: [
 					new Table({
 						width: { size: 100, type: WidthType.PERCENTAGE },
-						borders: {
-							top: { style: 'none', size: 0 },
-							bottom: { style: 'none', size: 0 },
-							left: { style: 'none', size: 0 },
-							right: { style: 'none', size: 0 },
-							insideHorizontal: { style: 'none', size: 0 },
-							insideVertical: { style: 'none', size: 0 }
-						},
+						borders: noBorders,
 						rows: [
 							new TableRow({
-								children: [headerCell(businessLines, true), headerCell(metaLines, true)]
-							})
-						]
-					}),
-					new Paragraph({ spacing: { after: TIGHT }, text: '' }),
-					new Table({
-						width: { size: 100, type: WidthType.PERCENTAGE },
-						borders: {
-							top: { style: 'none', size: 0 },
-							bottom: { style: 'none', size: 0 },
-							left: { style: 'none', size: 0 },
-							right: { style: 'none', size: 0 },
-							insideHorizontal: { style: 'none', size: 0 },
-							insideVertical: { style: 'none', size: 0 }
-						},
-						rows: [
-							new TableRow({
-								children: [
-									headerCell(billToLines),
-									headerCell(
-										serviceLoc.street
-											? ['Service Location', serviceLoc.street, serviceLoc.csz.trim() || '—']
-											: ['Service Location', '—']
-									)
-								]
-							})
-						]
-					}),
-					new Paragraph({ spacing: { after: LOOSE }, text: '' }),
-					new Paragraph({
-						spacing: { after: TIGHT },
-						children: [new TextRun({ text: 'Services', bold: true, size: LABEL })]
-					}),
-					new Table({
-						width: { size: 100, type: WidthType.PERCENTAGE },
-						rows: [
-							new TableRow({
-								children: [
-									cell('Description'),
-									cell('Qty', AlignmentType.RIGHT),
-									cell('Unit', AlignmentType.RIGHT),
-									cell('Total', AlignmentType.RIGHT)
-								]
-							}),
-							...billableRows,
-							new TableRow({
-								children: [
-									cell('Subtotal'),
-									cell('', AlignmentType.RIGHT),
-									cell('', AlignmentType.RIGHT),
-									cell(`$${subtotal.toFixed(2)}`, AlignmentType.RIGHT)
-								]
+								...exactRow(ENVELOPE_RETURN_ROW_H),
+								children: [envelopeAddressCell(returnLines, true)]
 							}),
 							new TableRow({
 								children: [
-									cell(`${taxLabel} (${taxPct.toFixed(1)}%)`),
-									cell('', AlignmentType.RIGHT),
-									cell('', AlignmentType.RIGHT),
-									cell(`$${taxAmount.toFixed(2)}`, AlignmentType.RIGHT)
+									new TableCell({
+										verticalAlign: VerticalAlign.TOP,
+										margins: { top: 80, bottom: 80, left: 0, right: 0 },
+										children: middleContent
+									})
 								]
 							}),
 							new TableRow({
-								children: [
-									cell('TOTAL'),
-									cell('', AlignmentType.RIGHT),
-									cell('', AlignmentType.RIGHT),
-									cell(`$${total.toFixed(2)}`, AlignmentType.RIGHT)
-								]
+								...exactRow(ENVELOPE_RECIPIENT_ROW_H),
+								children: [envelopeAddressCell(recipientLines)]
 							})
 						]
-					}),
-					new Paragraph({ spacing: { after: TIGHT }, text: '' }),
-					new Paragraph({
-						spacing: { after: TIGHT },
-						children: [
-							new TextRun({
-								text: `Amount due by ${dueDateStr}: $${total.toFixed(2)}`,
-								bold: true,
-								size: HEADING
-							})
-						]
-					}),
-					new Paragraph({
-						spacing: { after: 20 },
-						children: [new TextRun({ text: 'Payment', bold: true, size: LABEL })]
-					}),
-					...paymentLines.map(
-						(line) =>
-							new Paragraph({
-								spacing: { after: 20, before: 0 },
-								children: [new TextRun({ text: line, size: BODY })]
-							})
-					),
-					new Paragraph({
-						spacing: { after: TIGHT, before: 0 },
-						children: [
-							new TextRun({
-								text: `Thank you for choosing ${businessName}!`,
-								size: BODY
-							})
-						]
-					}),
-					...(ctx.invoiceNotes?.trim()
-						? [
-								new Paragraph({
-									spacing: { after: 20, before: LOOSE },
-									children: [new TextRun({ text: 'Invoice Notes', bold: true, size: LABEL })]
-								}),
-								new Paragraph({
-									spacing: { after: TIGHT, before: 0 },
-									children: [new TextRun({ text: ctx.invoiceNotes.trim(), size: BODY })]
-								})
-							]
-						: [])
+					})
 				]
 			}
 		]
