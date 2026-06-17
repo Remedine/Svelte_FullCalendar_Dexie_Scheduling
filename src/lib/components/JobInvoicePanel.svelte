@@ -9,7 +9,8 @@
 		updateInvoice,
 		generateInvoiceDocx,
 		deleteInvoice,
-		removeInvoiceSupportingDocuments
+		removeInvoiceSupportingDocuments,
+		addSupportingDocumentsToJob
 	} from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
@@ -337,7 +338,7 @@
 
 	async function handleAddSupporting(e: Event) {
 		const input = e.target as HTMLInputElement;
-		if (!input.files?.length || !invoice?.id) return;
+		if (!input.files?.length || !job?.id) return;
 
 		isUploading = true;
 		const newFiles = Array.from(input.files).map((file) => ({
@@ -347,15 +348,16 @@
 		}));
 
 		try {
-			await updateInvoice(invoice.id, { updatedAt: new Date() }, { supporting: newFiles });
-			const fresh = await db.invoices.get(invoice.id);
+			const invoiceId = await addSupportingDocumentsToJob(job, newFiles);
+			const fresh = await db.invoices.get(invoiceId);
 			if (fresh) {
 				invoice = fresh;
 				onStatusChange(fresh);
 			}
+			toast.success('Supporting documents added');
 		} catch (err) {
 			console.error('Failed to add supporting documents', err);
-			alert('Failed to add supporting documents. See console.');
+			toast.error('Failed to add supporting documents');
 		} finally {
 			isUploading = false;
 			input.value = '';
@@ -511,6 +513,22 @@
 		<p class="job-invoice-panel__hint">
 			Downloads an editable .docx for review. Tweak in Word, re-upload if needed, then use
 			<strong>Send to Client</strong> when ready (email clients only).
+		</p>
+
+		<div class="job-invoice-panel__file-row">
+			<label class="job-invoice-panel__upload-label job-invoice-panel__upload-label--supporting">
+				<input
+					type="file"
+					multiple
+					accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword"
+					onchange={handleAddSupporting}
+					disabled={isUploading || !job}
+				/>
+				{isUploading ? 'Uploading…' : '+ Add supporting docs'}
+			</label>
+		</div>
+		<p class="job-invoice-panel__hint">
+			Attach photos, PDFs, or other files anytime — no invoice required.
 		</p>
 	{/if}
 </div>

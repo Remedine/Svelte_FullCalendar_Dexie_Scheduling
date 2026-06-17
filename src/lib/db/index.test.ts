@@ -19,6 +19,7 @@ import {
 	createInvoice,
 	deleteInvoice,
 	removeInvoiceSupportingDocuments,
+	addSupportingDocumentsToJob,
 	generateInvoiceDocx,
 	cleanupDuplicateUsers,
 	cleanupDuplicateJobs,
@@ -777,6 +778,43 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 		const queue = await db.syncQueue.where({ type: 'delete', collection: 'invoices' }).toArray();
 		expect(queue.length).toBe(1);
 		expect(queue[0].recordId).toBe('pb-inv-del');
+	});
+
+	it('addSupportingDocumentsToJob creates draft invoice when none exists', async () => {
+		const jobId = 'job-no-inv';
+		await db.jobs.add({
+			id: jobId,
+			clientId: 'c1',
+			title: 'Window install',
+			status: 'scheduled',
+			start: new Date(),
+			end: new Date(),
+			totalAmount: 500,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as Job);
+		await db.options.put({
+			id: '1',
+			taxRate: 0.08,
+			invoiceDueDays: 30,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		});
+
+		const blob = new Blob(['pdf'], { type: 'application/pdf' });
+		const invoiceId = await addSupportingDocumentsToJob(
+			(await db.jobs.get(jobId))!,
+			[{ blob, filename: 'receipt.pdf', type: 'application/pdf' }]
+		);
+
+		const inv = await db.invoices.get(invoiceId);
+		expect(inv).toBeDefined();
+		expect(inv!.status).toBe('draft');
+		expect(inv!.jobId).toBe(jobId);
+		expect(inv!.supportingDocuments?.map((d) => d.filename)).toEqual(['receipt.pdf']);
+
+		const queue = await db.syncQueue.where({ recordId: invoiceId, type: 'create' }).toArray();
+		expect(queue.length).toBe(1);
 	});
 
 	it('removeInvoiceSupportingDocuments updates metadata and queues file delete', async () => {

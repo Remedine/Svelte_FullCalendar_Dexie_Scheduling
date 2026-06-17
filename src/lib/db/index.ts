@@ -846,6 +846,17 @@ export async function removeInvoiceSupportingDocuments(
 	});
 }
 
+/** Attach supporting documents to a job, creating a draft invoice shell when none exists yet. */
+export async function addSupportingDocumentsToJob(
+	job: Job,
+	files: Array<{ blob: Blob; filename: string; type?: string }>
+): Promise<string> {
+	if (!files.length) throw new Error('No files provided');
+	if (!job.id) throw new Error('Job has no id');
+
+	return ensureInvoiceForJob(job, 'draft', { supporting: files });
+}
+
 // )=- PocketBase file removal via FormData (`field-` prefix for multi-file fields).
 function appendInvoiceFileDeletesToFormData(
 	formData: FormData,
@@ -1210,13 +1221,20 @@ export async function generateInvoiceDocx(
 // Does NOT generate the .docx here — that will live in the UI layer / dedicated helper (Phase 4).
 export async function ensureInvoiceForJob(
 	job: Job,
-	status: Invoice['status'] = 'generated'
+	status: Invoice['status'] = 'generated',
+	files?: {
+		primary?: { blob: Blob; filename: string };
+		supporting?: Array<{ blob: Blob; filename: string; type?: string }>;
+	}
 ): Promise<string> {
 	const existing = await getInvoiceForJob(job.id!);
 	if (existing) {
 		// If we are "completing" a job that only had a draft, bump the status
 		if (existing.status === 'draft' && status === 'generated') {
 			await updateInvoice(existing.id!, { status: 'generated', updatedAt: new Date() });
+		}
+		if (files?.supporting?.length || files?.primary) {
+			await updateInvoice(existing.id!, { updatedAt: new Date() }, files);
 		}
 		return existing.id!;
 	}
@@ -1225,7 +1243,7 @@ export async function ensureInvoiceForJob(
 	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
 	// )=- Now uses the extracted pure calculateDueDate (Phase 2 improvement for testability).
 	// The math itself is covered by dedicated unit tests in dates.test.ts.
-	const dueDate = calculateDueDate(new Date(job.end), dueDays);
+	const dueDate = calculateDueDate(job.end ? new Date(job.end) : new Date(), dueDays);
 
 	const invoiceData: Partial<Invoice> = {
 		jobId: job.id,
@@ -1238,7 +1256,7 @@ export async function ensureInvoiceForJob(
 		importSource: job.importSource
 	};
 
-	return await createInvoice(invoiceData);
+	return await createInvoice(invoiceData, files);
 }
 
 // ==================== CLIENT FUNCTIONS ====================
