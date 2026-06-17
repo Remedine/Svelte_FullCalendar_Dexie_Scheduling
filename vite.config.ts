@@ -12,19 +12,25 @@ export default defineConfig({
 				name: 'Capital City Windows Scheduler',
 				short_name: 'CCW Scheduler',
 				description: 'Window Cleaning CRM & Scheduler',
-				theme_color: '#1e3a8a',
-				background_color: '#f8fafc',
-				display: 'standalone'
-				// )=- PWA icons intentionally omitted for initial staging deploy.
-				// Add 192x192 and 512x512 PNG icons to /static and re-enable before full production launch.
-				// Current favicon.svg is used for browser tab; proper PNGs improve home-screen install experience.
-				// icons: [
-				// 	{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-				// 	{ src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' }
-				// ]
+				theme_color: '#002b5c',
+				background_color: '#002b5c',
+				display: 'standalone',
+				// )=- PWA install icons generated from Capital City Windows brand logo (user-provided PNG).
+				// 192/512 required for Chrome/Android install prompts; maskable variant uses safe-zone padding.
+				// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+				icons: [
+					{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+					{ src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+					{
+						src: '/pwa-512x512.png',
+						sizes: '512x512',
+						type: 'image/png',
+						purpose: 'maskable'
+					}
+				]
 			},
-			// )=- Workbox will still generate sw.js and precache the app shell for offline use (Dexie + PWA).
-			includeAssets: ['favicon.svg']
+			// )=- Precache favicon + PWA icons so install/offline shell has branded assets.
+			includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png']
 		}),
 		{
 			// Add crossorigin="anonymous" (and ensure proper as= for common cases) to generated preload/modulepreload links.
