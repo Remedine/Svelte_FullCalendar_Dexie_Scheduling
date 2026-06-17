@@ -108,6 +108,7 @@ vite.config.js.timestamp-*
 !public/pwa-*.png   # Keep PWA icons (legacy path)
 !static/pwa-*.png
 !static/apple-touch-icon.png
+!static/favicon-*.png
 
 # Credentials / Secrets
 *.pem

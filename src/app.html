@@ -4,14 +4,11 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
-		<!-- )=- Favicon: serve the SVG from static/ (copied from lib/assets). This stops the browser's default /favicon.ico 404 noise.
-		     Modern browsers support SVG favicons. Added before %sveltekit.head% so it's early.
-		     If you want a .ico fallback for very old browsers, drop a favicon.ico in static/ too.
-		     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
-		<!-- )=- PWA / iOS home-screen icons from Capital City Windows brand logo. -->
+		<!-- )=- Favicon: Capital City Windows brand icon (generated from PWA assets). -->
+		<link rel="icon" href="%sveltekit.assets%/favicon.ico" sizes="32x32" />
+		<link rel="icon" href="%sveltekit.assets%/favicon-32x32.png" type="image/png" sizes="32x32" />
+		<link rel="icon" href="%sveltekit.assets%/favicon-16x16.png" type="image/png" sizes="16x16" />
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
-		<link rel="icon" href="%sveltekit.assets%/pwa-192x192.png" type="image/png" sizes="192x192" />
 		<!-- %sveltekit.head% removed because ssr=false globally (see +layout.server.ts and (app)/+layout.js).
 		     All <svelte:head> content (favicons etc.) is injected client-side by the root layout.
 		     Leaving the placeholder was causing the literal string to appear in the DOM on some loads. -->

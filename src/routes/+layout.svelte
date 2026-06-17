@@ -1,7 +1,6 @@
 <!-- src/routes/+layout.svelte -->
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import favicon from '$lib/assets/favicon.svg';
 	import Toast from '$lib/components/Toast.svelte';
 	import PreloadFix from '$lib/components/PreloadFix.svelte';
 
@@ -16,11 +15,10 @@
 
 <svelte:head>
 	<title>Capital City Windows</title>
-	<!-- )=- Primary SVG favicon. Modern browsers use this.
-	     The /favicon.ico 404 (and similar LastPass extension errors on inputs) are expected legacy/extension noise and harmless.
-	     If you want to fully silence the .ico 404, add a favicon.ico to /static (1x1 transparent png renamed works). -->
-	<link rel="icon" href={favicon} type="image/svg+xml" />
-	<link rel="shortcut icon" href={favicon} />
+	<!-- )=- Brand favicon (Capital City Windows logo). Matches static/ + app.html. -->
+	<link rel="icon" href="/favicon.ico" sizes="32x32" />
+	<link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+	<link rel="shortcut icon" href="/favicon.ico" />
 </svelte:head>
 
 {#if browser}
