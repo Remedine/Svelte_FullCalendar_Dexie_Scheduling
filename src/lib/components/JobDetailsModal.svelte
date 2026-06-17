@@ -190,25 +190,6 @@
 		closeModal();
 	}
 
-	// )=- Download a supporting document when the invoice has been synced (pbId present).
-	// Mirrors downloadPrimary in the panel. Uses pb.files.getURL.
-	// When !pbId the UI already shows "not available offline" (Phase 7 messaging).
-	// )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 4/7 + Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	function downloadSupporting(doc: { filename: string; type?: string }) {
-		if (!invoice?.pbId || !doc.filename) return;
-		const record = {
-			id: invoice.pbId,
-			collectionName: 'invoices'
-		};
-		const url = pb.files.getURL(record, doc.filename);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = doc.filename;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-	}
-
 	// Quick inline status change (spec allows light inline edits)
 	async function quickUpdateJobStatus(newStatus: Job['status']) {
 		if (!job?.id) return;
@@ -443,10 +424,8 @@
 						bind:invoice
 						onStatusChange={(newInv) => {
 							// )=- Pure state lift for the header badges (status, overdue, due date) and the "Mark Complete" flow.
-							// All actual persistence (status changes, regenerate, paidAt edit, supporting add) now lives inside
-							// JobInvoicePanel so we never double-queue updateInvoice calls (which was causing the repeated
-							// "Invoice updated in PocketBase" + "Synced update" spam in the logs after every status or regen action).
-							// The previous always-on update here was firing after the panel's own updateInvoice for files/status/paid.
+							// All actual persistence (status changes, regenerate, paidAt edit, supporting add/delete, invoice delete)
+							// now lives inside JobInvoicePanel so we never double-queue updateInvoice calls.
 							// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 							invoice = newInv;
 						}}
@@ -464,39 +443,6 @@
 						</p>
 					{/if}
 				</section>
-
-				<!-- )=- Supporting documents (per spec Phase 4/10 for legacy + uploads + Phase 7 offline messaging).
-				     - When pbId present: show filenames + small "Download" buttons using pb.files.getURL (same pattern as primary in panel).
-				     - When no pbId (offline or not yet synced to server): show clear "Not available offline" message + note.
-				     Files are never cached as blobs in Dexie for invoices (only metadata). This fulfills "Offline file messaging".
-				     )=- Reference: JOBS_AND_INVOICES_SPEC.md + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-				{#if invoice?.supportingDocuments?.length}
-					<section class="job-details-modal__section">
-						<h3 class="job-details-modal__section-title">Supporting Documents</h3>
-						<ul class="job-details-modal__docs">
-							{#each invoice.supportingDocuments as doc}
-								<li>
-									{doc.filename}
-									{doc.type ? `(${doc.type})` : ''}
-									{#if invoice.pbId}
-										<button
-											class="job-details-modal__small-btn"
-											onclick={() => downloadSupporting(doc)}>Download</button
-										>
-									{:else}
-										<span class="job-details-modal__not-available">not available offline</span>
-									{/if}
-								</li>
-							{/each}
-						</ul>
-						{#if !invoice.pbId}
-							<p class="job-details-modal__offline-note">
-								Supporting documents are stored on the server and are not available while offline or
-								before the first successful sync.
-							</p>
-						{/if}
-					</section>
-				{/if}
 
 				<!-- Footer Actions -->
 				<div class="job-details-modal__footer sticky-footer">

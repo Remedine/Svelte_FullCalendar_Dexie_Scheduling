@@ -719,6 +719,10 @@ export async function updateInvoice(
 	files?: {
 		primary?: { blob: Blob; filename: string };
 		supporting?: Array<{ blob: Blob; filename: string; type?: string }>;
+	},
+	fileDeletes?: {
+		primary?: boolean;
+		supporting?: string[];
 	}
 ) {
 	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
@@ -750,6 +754,17 @@ export async function updateInvoice(
 		safeUpdates.supportingDocuments = [...prev, ...added];
 	}
 
+	if (fileDeletes?.primary) {
+		safeUpdates.primaryInvoiceFile = undefined;
+	}
+	if (fileDeletes?.supporting?.length) {
+		const current = await db.invoices.get(invoiceId);
+		const removeSet = new Set(fileDeletes.supporting);
+		safeUpdates.supportingDocuments = (current?.supportingDocuments || []).filter(
+			(d) => !removeSet.has(d.filename)
+		);
+	}
+
 	await db.invoices.update(invoiceId, safeUpdates);
 
 	// )=- Include _files (blobs) only in queue data for the sync step. Dexie record keeps only metadata.
@@ -767,7 +782,8 @@ export async function updateInvoice(
 
 	let queueData = {
 		...safeUpdates,
-		...(files && { _files: files })
+		...(files && { _files: files }),
+		...(fileDeletes && { _fileDeletes: fileDeletes })
 	};
 
 	if (!hasPbId && current) {
@@ -775,7 +791,8 @@ export async function updateInvoice(
 		queueData = {
 			...current,
 			...safeUpdates,
-			...(files && { _files: files })
+			...(files && { _files: files }),
+			...(fileDeletes && { _fileDeletes: fileDeletes })
 		};
 	}
 
@@ -788,6 +805,59 @@ export async function updateInvoice(
 
 	if (navigator.onLine) await processSyncQueue();
 	console.log(`✅ Invoice ${invoiceId} updated locally (optimistic)`);
+}
+
+/** Delete an invoice locally and queue PocketBase delete (pbId preferred). */
+export async function deleteInvoice(invoiceId: string): Promise<void> {
+	const inv = await db.invoices.get(invoiceId);
+	if (!inv) return;
+
+	const idToDelete = inv.pbId || invoiceId;
+
+	const pending = await db.syncQueue
+		.where('recordId')
+		.equals(invoiceId)
+		.and((q) => q.collection === 'invoices')
+		.toArray();
+	for (const q of pending) {
+		await db.syncQueue.delete(q.id!);
+	}
+
+	await db.invoices.delete(invoiceId);
+
+	await addToSyncQueue({
+		type: 'delete',
+		collection: 'invoices',
+		recordId: idToDelete
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+	console.log(`✅ Invoice ${invoiceId} deleted locally (optimistic)`);
+}
+
+/** Remove one or more supporting documents from an invoice (metadata + PB files). */
+export async function removeInvoiceSupportingDocuments(
+	invoiceId: string,
+	filenames: string[]
+): Promise<void> {
+	if (!filenames.length) return;
+	await updateInvoice(invoiceId, { updatedAt: new Date() }, undefined, {
+		supporting: filenames
+	});
+}
+
+// )=- PocketBase file removal via FormData (`field-` prefix for multi-file fields).
+function appendInvoiceFileDeletesToFormData(
+	formData: FormData,
+	fileDeletes?: { primary?: boolean; supporting?: string[] }
+) {
+	if (!fileDeletes) return;
+	if (fileDeletes.primary) {
+		formData.append('primaryInvoiceFile', '');
+	}
+	for (const fn of fileDeletes.supporting || []) {
+		formData.append('supportingDocuments-', fn);
+	}
 }
 
 // )=- Shared helper for overdue computation (used in jobs cards, clients related jobs, modal, facets).
@@ -1691,11 +1761,11 @@ export async function processSyncQueue() {
 						// instead so we don't create duplicate records on PB. Use the files from this item if present.
 						if (localAtProcess?.pbId) {
 							const realId = localAtProcess.pbId;
-							const hasFiles = !!data._files;
+							const hasFiles = !!data._files || !!data._fileDeletes;
 							if (hasFiles) {
 								const formData = new FormData();
 								Object.keys(data).forEach((key) => {
-									if (key === '_files') return;
+									if (key === '_files' || key === '_fileDeletes') return;
 									const val = data[key];
 									if (val == null) return;
 									if (val instanceof Date) formData.append(key, val.toISOString());
@@ -1724,6 +1794,7 @@ export async function processSyncQueue() {
 										);
 									}
 								}
+								appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
 								await pb.collection('invoices').update(realId, formData);
 								console.log(
 									`✅ Invoice (with files) updated in PocketBase (create item promoted to update): ${realId}`
@@ -1735,7 +1806,7 @@ export async function processSyncQueue() {
 								);
 							}
 						} else {
-							const hasFiles = !!data._files;
+							const hasFiles = !!data._files || !!data._fileDeletes;
 
 							if (hasFiles) {
 								// Use FormData for reliable multi-file + scalar upload
@@ -1781,6 +1852,7 @@ export async function processSyncQueue() {
 										formData.append('supportingDocuments', file);
 									}
 								}
+								appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
 
 								const record = await pb.collection('invoices').create(formData);
 								await db.invoices.update(item.recordId, { pbId: record.id });
@@ -1814,7 +1886,7 @@ export async function processSyncQueue() {
 					try {
 						const localInvoice = await db.invoices.get(item.recordId);
 						const data = item.data;
-						const hasFiles = !!data._files;
+						const hasFiles = !!data._files || !!data._fileDeletes;
 
 						if (!localInvoice) {
 							// Local record disappeared between queuing and processing — drop the item.
@@ -1884,6 +1956,7 @@ export async function processSyncQueue() {
 										formData.append('supportingDocuments', file);
 									}
 								}
+								appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
 
 								const record = await pb.collection('invoices').create(formData);
 								await db.invoices.update(item.recordId, { pbId: record.id });
@@ -1926,7 +1999,7 @@ export async function processSyncQueue() {
 
 									// Only append fields that are being updated
 									Object.keys(data).forEach((key) => {
-										if (key === '_files') return;
+										if (key === '_files' || key === '_fileDeletes') return;
 										const val = data[key];
 										if (val == null) return;
 										if (val instanceof Date) {
@@ -1938,7 +2011,7 @@ export async function processSyncQueue() {
 										}
 									});
 
-									if (data._files.primary) {
+									if (data._files?.primary) {
 										const f = data._files.primary;
 										const file = new File([f.blob], f.filename, {
 											type:
@@ -1947,7 +2020,7 @@ export async function processSyncQueue() {
 										});
 										formData.append('primaryInvoiceFile', file);
 									}
-									if (data._files.supporting?.length) {
+									if (data._files?.supporting?.length) {
 										for (const s of data._files.supporting) {
 											const file = new File([s.blob], s.filename, {
 												type: s.type || s.blob.type || 'application/octet-stream'
@@ -1955,9 +2028,15 @@ export async function processSyncQueue() {
 											formData.append('supportingDocuments', file);
 										}
 									}
+									appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
 
 									await pb.collection('invoices').update(realId, formData);
 									console.log(`✅ Invoice (with files) updated in PocketBase: ${realId}`);
+								} else if (data._fileDeletes) {
+									const formData = new FormData();
+									appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
+									await pb.collection('invoices').update(realId, formData);
+									console.log(`✅ Invoice files removed in PocketBase: ${realId}`);
 								} else {
 									await pb.collection('invoices').update(realId, data);
 									console.log(`✅ Invoice updated in PocketBase: ${realId}`);
@@ -2033,6 +2112,7 @@ export async function processSyncQueue() {
 											formData.append('supportingDocuments', file);
 										}
 									}
+									appendInvoiceFileDeletesToFormData(formData, data._fileDeletes);
 
 									const record = await pb.collection('invoices').create(formData);
 									await db.invoices.update(item.recordId, { pbId: record.id });
@@ -2078,10 +2158,12 @@ export async function processSyncQueue() {
 						}
 					}
 				} else if (item.type === 'delete') {
+					if (!item.recordId) {
+						await db.syncQueue.delete(item.id!);
+						continue;
+					}
 					try {
-						const invoice = await db.invoices.get(item.recordId);
-						const realId = invoice?.pbId || invoice?.id || item.recordId;
-						await pb.collection('invoices').delete(realId);
+						await pb.collection('invoices').delete(item.recordId);
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);

@@ -7,8 +7,11 @@
 		type Client,
 		createInvoice,
 		updateInvoice,
-		generateInvoiceDocx
+		generateInvoiceDocx,
+		deleteInvoice,
+		removeInvoiceSupportingDocuments
 	} from '$lib/db';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { saveAs } from 'file-saver';
 	import { pb } from '$lib/db/pb';
@@ -19,8 +22,10 @@
 	let {
 		job = $bindable<Job | null>(null),
 		invoice = $bindable<Invoice | null>(null),
-		onStatusChange = (newInvoice: Invoice) => {}
+		onStatusChange = (newInvoice: Invoice | null) => {}
 	} = $props();
+
+	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 
 	let isGenerating = $state(false);
 	let isUploading = $state(false);
@@ -282,6 +287,54 @@
 		}
 	}
 
+	function downloadSupportingDoc(doc: { filename: string }) {
+		if (!invoice?.pbId || !doc.filename) return;
+		const url = pb.files.getURL(
+			{ id: invoice.pbId, collectionName: 'invoices' },
+			doc.filename
+		);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = doc.filename;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+	}
+
+	async function handleDeleteSupportingDoc(doc: { filename: string }) {
+		if (!invoice?.id || !isAdmin) return;
+		const msg = `Delete supporting document "${doc.filename}"? This cannot be undone.`;
+		if (!confirm(msg)) return;
+		try {
+			await removeInvoiceSupportingDocuments(invoice.id, [doc.filename]);
+			const fresh = await db.invoices.get(invoice.id);
+			if (fresh) {
+				invoice = fresh;
+				onStatusChange(fresh);
+			}
+			toast.success('Supporting document removed');
+		} catch (err) {
+			console.error('Failed to delete supporting document', err);
+			toast.error('Failed to delete supporting document');
+		}
+	}
+
+	async function handleDeleteInvoice() {
+		if (!invoice?.id || !isAdmin) return;
+		const label = invoice.primaryInvoiceFile?.filename || 'this invoice';
+		const msg = `Delete invoice (${label})? This removes the invoice record and all attached files. This cannot be undone.`;
+		if (!confirm(msg)) return;
+		try {
+			await deleteInvoice(invoice.id);
+			invoice = null;
+			onStatusChange(null);
+			toast.success('Invoice deleted');
+		} catch (err) {
+			console.error('Failed to delete invoice', err);
+			toast.error('Failed to delete invoice');
+		}
+	}
+
 	async function handleAddSupporting(e: Event) {
 		const input = e.target as HTMLInputElement;
 		if (!input.files?.length || !invoice?.id) return;
@@ -405,6 +458,48 @@
 				{isUploading ? 'Uploading…' : '+ Add supporting docs'}
 			</label>
 		</div>
+
+		{#if invoice.supportingDocuments?.length}
+			<ul class="job-invoice-panel__supporting-list">
+				{#each invoice.supportingDocuments as doc (doc.filename)}
+					<li class="job-invoice-panel__supporting-item">
+						<span class="job-invoice-panel__supporting-name" title={doc.filename}>
+							{doc.filename}
+						</span>
+						<div class="job-invoice-panel__supporting-actions">
+							{#if invoice.pbId}
+								<button
+									type="button"
+									class="job-invoice-panel__small-btn"
+									onclick={() => downloadSupportingDoc(doc)}>Open</button
+								>
+							{:else}
+								<span class="job-invoice-panel__sync-hint">pending sync</span>
+							{/if}
+							{#if isAdmin}
+								<button
+									type="button"
+									class="job-invoice-panel__small-btn job-invoice-panel__small-btn--danger"
+									onclick={() => handleDeleteSupportingDoc(doc)}>Delete</button
+								>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+
+		{#if isAdmin}
+			<div class="job-invoice-panel__danger-row">
+				<button
+					type="button"
+					class="job-invoice-panel__small-btn job-invoice-panel__small-btn--danger"
+					onclick={handleDeleteInvoice}
+				>
+					Delete invoice
+				</button>
+			</div>
+		{/if}
 	{:else}
 		<button
 			class="job-invoice-panel__generate-btn"
@@ -589,5 +684,58 @@
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 		margin: var(--space-1) 0 0;
+	}
+
+	.job-invoice-panel__supporting-list {
+		list-style: none;
+		margin: var(--space-2) 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.job-invoice-panel__supporting-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+		font-size: var(--font-size-xs);
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+	}
+
+	.job-invoice-panel__supporting-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: monospace;
+		color: var(--color-text-muted);
+	}
+
+	.job-invoice-panel__supporting-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		flex-shrink: 0;
+	}
+
+	.job-invoice-panel__small-btn--danger {
+		border-color: var(--color-danger);
+		color: var(--color-danger-emphasis, var(--color-danger));
+	}
+
+	.job-invoice-panel__small-btn--danger:hover {
+		background: var(--color-danger-soft);
+	}
+
+	.job-invoice-panel__danger-row {
+		margin-top: var(--space-3);
+		padding-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
 	}
 </style>

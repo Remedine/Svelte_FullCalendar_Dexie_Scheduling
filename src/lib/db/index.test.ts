@@ -17,6 +17,8 @@ import {
 	cancelJob,
 	createClient,
 	createInvoice,
+	deleteInvoice,
+	removeInvoiceSupportingDocuments,
 	generateInvoiceDocx,
 	cleanupDuplicateUsers,
 	cleanupDuplicateJobs,
@@ -753,6 +755,56 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 
 		const queue = await db.syncQueue.where({ recordId: invoiceId, type: 'create' }).toArray();
 		expect(queue.length).toBe(1);
+	});
+
+	it('deleteInvoice removes local record and queues delete with pbId', async () => {
+		const invoiceId = 'inv-del-1';
+		await db.invoices.add({
+			id: invoiceId,
+			pbId: 'pb-inv-del',
+			jobId: 'j1',
+			clientId: 'c1',
+			status: 'draft',
+			dueDate: new Date(),
+			amount: 100,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as Invoice);
+
+		await deleteInvoice(invoiceId);
+
+		expect(await db.invoices.get(invoiceId)).toBeUndefined();
+		const queue = await db.syncQueue.where({ type: 'delete', collection: 'invoices' }).toArray();
+		expect(queue.length).toBe(1);
+		expect(queue[0].recordId).toBe('pb-inv-del');
+	});
+
+	it('removeInvoiceSupportingDocuments updates metadata and queues file delete', async () => {
+		const invoiceId = 'inv-sup-del';
+		await db.invoices.add({
+			id: invoiceId,
+			pbId: 'pb-inv-sup',
+			jobId: 'j1',
+			clientId: 'c1',
+			status: 'sent',
+			dueDate: new Date(),
+			amount: 200,
+			supportingDocuments: [
+				{ filename: 'scan-a.pdf', type: 'application/pdf' },
+				{ filename: 'photo.jpg', type: 'image/jpeg' }
+			],
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as Invoice);
+
+		await removeInvoiceSupportingDocuments(invoiceId, ['scan-a.pdf']);
+
+		const inv = await db.invoices.get(invoiceId);
+		expect(inv!.supportingDocuments?.map((d) => d.filename)).toEqual(['photo.jpg']);
+
+		const queue = await db.syncQueue.where({ recordId: invoiceId, type: 'update' }).toArray();
+		expect(queue.length).toBe(1);
+		expect(queue[0].data._fileDeletes.supporting).toEqual(['scan-a.pdf']);
 	});
 });
 
