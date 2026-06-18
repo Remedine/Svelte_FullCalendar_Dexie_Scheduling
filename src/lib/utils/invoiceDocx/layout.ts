@@ -25,6 +25,7 @@ export const MARGIN_TOP = 0;
 export const MARGIN_BOTTOM = 0;
 
 /** Return address zone: 0.5" from sheet top. Recipient zone: 2.5" from sheet top for standard #10 double-window. */
+// )=- fix: changed recipient start from 2.3125" to 2.5" to better align return + mailing addresses for #10 double window envelope (Remedine/Svelte_FullCalendar_Dexie_Scheduling)
 export const ENVELOPE_RETURN_OFFSET = Math.round(0.5 * TWIP);
 export const ENVELOPE_MAIL_TO_TOP = Math.round(2.5 * TWIP);
 /** Window fits ~4.5" of address lines. */
