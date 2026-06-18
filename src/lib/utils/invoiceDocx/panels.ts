@@ -139,7 +139,7 @@ export function buildTopFoldTable(
 						spacingAfter: 40
 					}),
 					...input.serviceLines.map((line) =>
-						b.para([b.run(line)], { align: AlignmentType.CENTER, spacingAfter: 40 })
+						b.para([b.run(line)], { align: AlignmentType.CENTER, spacingAfter: 20 })
 					),
 					...(ctx.businessPhone?.trim() ? [contactLine('Phone', ctx.businessPhone.trim())] : []),
 					...(ctx.businessEmail?.trim() ? [contactLine('Email', ctx.businessEmail.trim())] : []),
@@ -305,7 +305,9 @@ export function buildPageTable(
 	return b.makeTable([CONTENT_WIDTH], [
 		new b.TableRow({
 			...b.exactRow(TOP_ADDRESS_PANEL_HEIGHT),
-			children: [b.makeCell(CONTENT_WIDTH, [topFoldTable])]
+			children: [b.makeCell(CONTENT_WIDTH, [topFoldTable], {
+				margins: { top: 0, bottom: 0, left: 0, right: 0 }
+			})]
 		}),
 		new b.TableRow({
 			children: [

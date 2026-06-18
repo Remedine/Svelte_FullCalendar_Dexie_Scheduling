@@ -142,7 +142,8 @@ export function createInvoiceDocxBuilder(docx: DocxModule) {
 	) =>
 		lines.map((line, i) =>
 			para([run(line, { bold: opts?.boldFirst && i === 0, size: FONT_ENVELOPE })], {
-				spacingAfter: i === lines.length - 1 ? 0 : 40,
+				// Tight spacing for envelope windows (less than normal body)
+				spacingAfter: i === lines.length - 1 ? 0 : 20,
 				spacingBefore: i === 0 ? (opts?.firstSpacingBefore ?? 0) : 0
 			})
 		);
