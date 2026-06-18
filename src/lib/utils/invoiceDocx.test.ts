@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	buildPaymentInstructions,
+	envelopeMailToSpacingBefore,
 	getBusinessReturnAddressLines,
 	getClientBillToAddress,
 	getClientServiceAddress,
@@ -30,6 +31,13 @@ describe('buildPaymentInstructions', () => {
 		const client = { preferredBillingMethod: 'email' } as Client;
 		const lines = buildPaymentInstructions(client, business);
 		expect(lines.some((l) => l.includes('billing@ccw.example'))).toBe(true);
+	});
+});
+
+describe('envelope window spacing', () => {
+	it('positions mail-to block near 2.25" for typical return address', () => {
+		expect(envelopeMailToSpacingBefore(3)).toBeGreaterThan(600);
+		expect(envelopeMailToSpacingBefore(5)).toBeGreaterThanOrEqual(120);
 	});
 });
 
