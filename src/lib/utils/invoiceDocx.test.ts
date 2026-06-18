@@ -46,8 +46,8 @@ describe('buildPaymentInstructions', () => {
 });
 
 describe('envelope window spacing', () => {
-	it('places recipient block at 2.3125" for #10 lower window', () => {
-		expect(envelopeRecipientTopInches()).toBeCloseTo(2.3125, 3);
+	it('places recipient block at 2.5" for #10 lower window', () => {
+		expect(envelopeRecipientTopInches()).toBeCloseTo(2.5, 3);
 	});
 });
 

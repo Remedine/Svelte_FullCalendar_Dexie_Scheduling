@@ -15,7 +15,8 @@ export const PAGE_HEIGHT = Math.round(11 * TWIP);
 
 /**
  * #10 double-window envelope (tri-fold: bottom third up, top third down).
- * Return + recipient live in the top 11/3" panel (first fold section).
+ * Return + recipient live in the top 1/3" panel (first fold section).
+ * Positions tuned for standard #10 double window so addresses align in windows.
  * @see https://www.postalmethods.com/envelope-information/
  */
 export const ENVELOPE_LEFT_MARGIN = Math.round(0.875 * TWIP);
@@ -23,9 +24,9 @@ export const MARGIN_RIGHT = 720; // 0.5"
 export const MARGIN_TOP = 0;
 export const MARGIN_BOTTOM = 0;
 
-/** Return address zone: 0.5" from sheet top. Recipient zone: 2.3125" (2⁵⁄₁₆") from sheet top. */
+/** Return address zone: 0.5" from sheet top. Recipient zone: 2.5" from sheet top for standard #10 double-window. */
 export const ENVELOPE_RETURN_OFFSET = Math.round(0.5 * TWIP);
-export const ENVELOPE_MAIL_TO_TOP = Math.round(2.3125 * TWIP);
+export const ENVELOPE_MAIL_TO_TOP = Math.round(2.5 * TWIP);
 /** Window fits ~4.5" of address lines. */
 export const ENVELOPE_WINDOW_WIDTH = Math.round(4.5 * TWIP);
 
