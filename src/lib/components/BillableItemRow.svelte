@@ -141,17 +141,8 @@
 		</button>
 	</div>
 
-	<!-- Line 2: amount input | Per Qty/Per Hour toggle | symbol | price input | total (styled similar to options page) -->
+	<!-- Line 2: type → qty/hours × $rate = total (reads as "2 hrs × $150/hr = $300") -->
 	<div class="billable-item-row__details-line">
-		<div class="billable-item-row__amount">
-			<input
-				type="number"
-				bind:value={item.quantity}
-				min="1"
-				class="billable-item-row__input billable-item-row__input--qty input"
-			/>
-		</div>
-
 		<div class="billable-item-row__type-toggle">
 			<button
 				type="button"
@@ -169,20 +160,44 @@
 			</button>
 		</div>
 
-		<div class="billable-item-row__price">
-			<span class="billable-item-row__currency">{unit === 'hour' ? '$' : '#'}</span>
-			<input
-				type="number"
-				bind:value={item.price}
-				placeholder="0.00"
-				class="billable-item-row__input billable-item-row__input--price input"
-				bind:this={priceInputEl}
-				step="0.01"
-			/>
-		</div>
+		<div class="billable-item-row__calc">
+			<label class="billable-item-row__field">
+				<span class="billable-item-row__label">{unit === 'hour' ? 'Hours' : 'Qty'}</span>
+				<input
+					type="number"
+					bind:value={item.quantity}
+					min={unit === 'hour' ? 0.25 : 1}
+					step={unit === 'hour' ? 0.25 : 1}
+					class="billable-item-row__input billable-item-row__input--qty input"
+					aria-label={unit === 'hour' ? 'Hours' : 'Quantity'}
+				/>
+			</label>
 
-		<div class="billable-item-row__total">
-			<strong>${(item.total || 0).toFixed(2)}</strong>
+			<span class="billable-item-row__times" aria-hidden="true">×</span>
+
+			<label class="billable-item-row__field billable-item-row__field--rate">
+				<span class="billable-item-row__label">{unit === 'hour' ? 'Rate / hr' : 'Rate / ea'}</span>
+				<span class="billable-item-row__price-input">
+					<span class="billable-item-row__currency">$</span>
+					<input
+						type="number"
+						bind:value={item.price}
+						placeholder="0.00"
+						class="billable-item-row__input billable-item-row__input--price input"
+						bind:this={priceInputEl}
+						step="0.01"
+						min="0"
+						aria-label={unit === 'hour' ? 'Rate per hour' : 'Rate each'}
+					/>
+				</span>
+			</label>
+
+			<span class="billable-item-row__equals" aria-hidden="true">=</span>
+
+			<div class="billable-item-row__total">
+				<span class="billable-item-row__label">Total</span>
+				<strong class="billable-item-row__total-value">${(item.total || 0).toFixed(2)}</strong>
+			</div>
 		</div>
 	</div>
 </div>
@@ -239,23 +254,14 @@
 		background: var(--color-danger-soft);
 	}
 
-	/* Details line: amount | toggle | symbol | price | total  (flex, similar to options type + price row) */
+	/* Details: billing type, then "qty × rate = total" */
 	.billable-item-row__details-line {
 		display: flex;
-		align-items: center;
-		gap: var(--space-2);
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: var(--space-3);
 	}
 
-	.billable-item-row__amount {
-		flex-shrink: 0;
-	}
-
-	.billable-item-row__amount input {
-		width: 60px;
-		text-align: right;
-	}
-
-	/* Per Qty / Per Hour toggle styled similar to options .billable-item__type-toggle */
 	.billable-item-row__type-toggle {
 		display: flex;
 		border: 1px solid var(--color-border);
@@ -279,20 +285,67 @@
 		color: white;
 	}
 
-	.billable-item-row__price {
+	.billable-item-row__calc {
+		display: flex;
+		flex: 1;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: var(--space-2);
+		min-width: 0;
+	}
+
+	.billable-item-row__field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		flex-shrink: 0;
+	}
+
+	.billable-item-row__field--rate {
+		min-width: 7rem;
+	}
+
+	.billable-item-row__label {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
+		line-height: 1.2;
+	}
+
+	.billable-item-row__price-input {
 		display: flex;
 		align-items: center;
 		gap: 2px;
+	}
+
+	.billable-item-row__currency {
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		flex-shrink: 0;
+	}
+
+	.billable-item-row__times,
+	.billable-item-row__equals {
+		color: var(--color-text-muted);
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-medium);
+		padding-bottom: var(--space-2);
 		flex-shrink: 0;
 	}
 
 	.billable-item-row__total {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
 		margin-left: auto;
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text);
-		font-size: var(--font-size-xl);
-		white-space: nowrap;
+		align-items: flex-end;
 		flex-shrink: 0;
+	}
+
+	.billable-item-row__total-value {
+		font-size: var(--font-size-xl);
+		color: var(--color-text);
+		white-space: nowrap;
 	}
 
 	.billable-item-row__input {
@@ -303,11 +356,10 @@
 
 	.billable-item-row__input--price,
 	.billable-item-row__input--qty {
-		max-width: 96px;
+		width: 5.5rem;
+		max-width: 100%;
 		text-align: right;
 	}
-
-	/* (currency now inline in .billable-item-row__price; no absolute positioning needed) */
 
 	.billable-item-row__suggestions {
 		position: absolute;
@@ -335,18 +387,20 @@
 		background: var(--color-surface-alt);
 	}
 
-	/* Mobile */
+	/* Mobile: stack calc row */
 	@container billable-row (max-width: 520px) {
-		.billable-item-row__grid {
-			grid-template-columns: 1fr;
+		.billable-item-row__details-line {
+			flex-direction: column;
+			align-items: stretch;
 		}
 
-		.billable-item-row__remove {
-			justify-self: end;
+		.billable-item-row__calc {
+			width: 100%;
 		}
 
 		.billable-item-row__total {
-			text-align: right;
+			margin-left: 0;
+			align-items: flex-start;
 		}
 	}
 
