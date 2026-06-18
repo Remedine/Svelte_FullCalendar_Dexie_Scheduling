@@ -340,52 +340,103 @@ export function openJobDetailsModal(
 ## 14. Planned Feature — Automated Data Backup
 
 **Status:** Planned (not in scope for Phases 0–7).  
-**Goal:** Protect all business-critical app data with scheduled exports, configurable delivery, and tiered retention so storage stays manageable without losing long-term recovery points.
+**Goal:** Protect all business-critical app data with scheduled exports, configurable delivery, and calendar-based retention so storage stays manageable without losing long-term recovery points.
 
-### 14.1 Schedule & delivery
+### 14.1 What to back up (decided)
+
+| Component | Source | Notes |
+|-----------|--------|-------|
+| PocketBase records | Server (`data.db` / API export) | All collections and record data. |
+| Uploaded files | Server `pb_data/storage/` (or S3 — see §14.3) | Invoice `.docx`, photos, supporting docs, etc. |
+| Offline sync queue | Dexie `syncQueue` on admin device | Exported as **`sync_queue.json`** and bundled with the backup. |
+
+**Important:** The sync queue today lives **only in the browser** (Dexie). Scheduled server-side jobs cannot capture it unless we (a) upload a queue snapshot from the admin PWA during/after backup, or (b) add a server-side queue mirror later. **“Backup now”** from the Options → Backups tab should always include the current device’s `sync_queue.json`.
+
+### 14.2 Schedule, timezone & delivery
 
 | Requirement | Detail |
 |-------------|--------|
-| Frequency | **Daily** automated backup (time/timezone TBD — see open items). |
-| Delivery options | Admin-configurable **one or more** of: **Google Drive**, **email**, **direct download** (on-demand manual export may also use the same archive builder). |
-| Filename format | `YYYY-MM-DD_{Business Name from Options}_Backup` + extension (e.g. `.zip` — format TBD). Business name read from Options `businessName`; sanitize for filesystem (spaces/special characters). |
+| Frequency | **Daily** automated backup. |
+| Timezone | **`America/Anchorage`** — defines calendar date in filenames and retention anchor days. |
+| Delivery options | Admin-configurable **one or more** of: **Google Drive**, **email**, **direct download**. |
+| Filename format | `YYYY-MM-DD_{Business Name from Options}_Backup` + extension. Read `businessName` from Options; sanitize for filesystem. |
+| Manual backup | **“Backup now”** button on **Options → Backups** tab (same archive builder as scheduled job). |
+| Failure alerting | Email address(es) configured on **Options → Backups** tab when a scheduled backup fails. |
 
-### 14.2 Retention policy (tiered thinning)
+### 14.3 Archive format — PocketBase native vs split (exploration)
 
-Backups age out through four tiers. A scheduled **retention job** deletes or skips uploads that no longer qualify.
+**PocketBase native backup (`pb.backups.create`)**
+
+- Produces a `.zip` that is a **full snapshot of `pb_data`** at backup time.
+- **Includes uploaded files** when storage is on the **local filesystem** (`pb_data/storage/`).
+- **Does not include S3-backed files** (PocketBase limitation — S3 vendors are expected to provide their own versioning/backup).
+- **Restore:** Upload/restore via PocketBase admin or API — **portable** to another PB instance.
+- **Downside:** Every backup is a **full** archive; large storage → large daily zips. PocketBase has discussed but not shipped a built-in “exclude storage” flag.
+
+**Recommended hybrid (feasible, matches “small daily + files on change”)**
+
+| Artifact | Contents | When |
+|----------|----------|------|
+| `{date}_{business}_records.zip` | PocketBase **records-only** snapshot: either native backup with storage stripped by custom packer, **or** nightly `data.db` + migrations/types (server must quiesce writes briefly), **or** JSON export of all collections via API | **Daily** |
+| `{date}_{business}_files.zip` (optional) | **Incremental** upload of files changed since last manifest (path + mtime/size manifest on server) | **Daily**, only if files changed |
+| `sync_queue.json` | Dexie offline queue from admin PWA | **Daily** (uploaded with backup job) + always on manual backup |
+| `{date}_{business}_full.zip` | Full native PB backup (records + all files) | **Retention anchor days** and before major migrations |
+
+**Incremental files — feasibility**
+
+- PocketBase does not emit per-file backup events; implement a **cron manifest scan**: compare `storage/` against last backup manifest → zip only new/changed paths.
+- Deleted files: manifest records deletions so restore can reconcile orphans.
+- On retention anchor days (1st, 8th, …), run a **full file snapshot** so incremental chains have a known base.
+- If storage moves to **S3**, shift file backup to S3 lifecycle/versioning; keep PB record exports on schedule.
+
+**Portable human-readable export (optional admin toggle)**
+
+- Offer **JSON** and/or **CSV** export of collections (PocketBase admin supports bulk JSON export per collection; CSV useful for spreadsheets / non-PB tools).
+- These are **not** a substitute for disaster restore — document as “data portability / analysis” alongside the restore-capable archive.
+- Restore path: custom import scripts or manual PB import (out of scope for v1 unless we add a guided restore).
+
+**v1 recommendation:** Implement **split archives** (records + incremental files + `sync_queue.json`) for daily runs; **full native zip** on calendar anchor days; optional JSON/CSV download on “Backup now” for portability.
+
+### 14.4 Retention policy (calendar anchors — decided)
+
+Retention uses **fixed calendar dates** in Alaska time (not “last Sunday of week” etc.).
 
 | Backup age | What to keep |
 |------------|----------------|
-| **0–30 days** | **All daily backups** (up to ~30 files). |
-| **31–90 days** (older than 30 days, through 30 days + 2 months) | **One backup per calendar week** only (thin excess dailies). |
-| **91–365 days** (after 3 months, before 1 year) | **One backup per calendar month** only. |
-| **> 1 year** | **One backup per calendar quarter** only (4 per year). |
+| **0–30 days** | **All daily backups.** |
+| **31–90 days** | Dailies on **1st, 8th, 15th, 22nd, and 29th** of each month only. **February:** use **last day of month** in place of missing 29th (and 30th/31st anchors as applicable). |
+| **91 days – 1 year** | **1st of every month** only. |
+| **1 – 7 years** | **Jan 1, Apr 1, Jul 1, Oct 1** (quarterly) only. |
+| **> 7 years** | **Jan 1** (yearly) only — prune older quarterly snapshots. |
 
-**Example timeline**
+A scheduled **retention job** deletes backups on Google Drive / server backup store that fail the rules above. **Email copies:** TBD whether to prune (product default: do not auto-delete from mailboxes; rely on mailbox retention).
+
+**Example (Alaska dates)**
 
 ```
-Day 1–30:     2026-06-17_Capital City Windows_Backup, … every day
-Day 31–90:    keep e.g. one Sunday (or last-day-of-week) per week; delete other dailies in that window
-Day 91–365:   keep e.g. last backup of each month
-After year 1: keep e.g. Mar 31 / Jun 30 / Sep 30 / Dec 31 quarter snapshots (rule TBD)
+Jun 1–30 2026:  keep every daily
+Jul–Sep 2026:   keep Jul 1,8,15,22,29, Aug 1,8,…, Sep 29,30 (Feb rule on short months)
+Oct 2026–2027:  keep 1st of each month
+2028–2033:      keep Jan 1, Apr 1, Jul 1, Oct 1
+2034+:          keep Jan 1 only
 ```
 
-### 14.3 Scope & implementation notes (TBD)
+### 14.5 Admin UI — Options → Backups tab
 
-- **Data included:** Likely full PocketBase export (collections + files) ± Dexie/local state — exact scope to confirm.
-- **Where it runs:** Server-side cron (recommended for reliability) vs. admin PWA trigger — TBD.
-- **Google Drive / email:** OAuth or service-account setup, recipient list, and size limits for email attachments — TBD.
-- **Retention enforcement:** Applies to copies on Google Drive and any server-side backup store; email/daily download may be fire-and-forget unless a mailbox retention policy is added.
-- **Admin UI:** Options page section for enable/disable, destination(s), retention preview, manual “Backup now”, and last-success timestamp.
+- Enable/disable scheduled backup
+- Destination(s): Google Drive, email, direct download
+- Alert email(s) for failures
+- **Backup now** (manual)
+- Optional: JSON/CSV export toggles
+- Last successful backup timestamp + size + destination
+- Retention preview (“would keep N backups / prune M”)
 
-### 14.4 Open items (need product decisions)
+### 14.6 Open items (remaining)
 
-1. **Canonical backup per period** — For weekly / monthly / quarterly tiers, keep the **last** backup in the period, the **first**, or the backup **closest to period end**?
-2. **Archive format** — Single `.zip` (JSON + file blobs)? PocketBase native backup? SQLite dump?
-3. **Timezone** — Which TZ defines “daily” and the `YYYY-MM-DD` in the filename (business local vs. UTC)?
-4. **Maximum retention** — Keep quarterly backups forever, or cap at N years?
-5. **Direct download** — Scheduled delivery only, or also an on-demand “Export now” button for admins?
-6. **Failure alerting** — Email admin if a scheduled backup fails?
+1. **Email retention** — Auto-prune emailed backups or leave to mailbox policy? (Default proposal: no server-side email pruning.)
+2. **Sync queue on unattended daily job** — Require admin PWA open once daily, or add server queue mirror for 100% automated coverage?
+3. **S3 storage** — If/when files move off local disk, document parallel S3 backup strategy.
+4. **Exact backup time of day** (e.g. 02:00 Alaska) — pick during implementation.
 
 ---
 
