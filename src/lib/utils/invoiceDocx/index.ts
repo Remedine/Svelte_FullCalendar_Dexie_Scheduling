@@ -41,7 +41,10 @@ export {
 	getRecipientMailingLines
 } from './addresses';
 
-export { envelopeRecipientTopInches } from './layout';
+export {
+	envelopeRecipientTopInches,
+	TOP_ADDRESS_PANEL_HEIGHT
+} from './layout';
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
 	const raw = optsRate ?? job.taxRate ?? 5;

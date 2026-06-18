@@ -12,6 +12,7 @@ import {
 	FONT_TOTAL,
 	INVOICE_COL,
 	PANEL_HEIGHT,
+	TOP_ADDRESS_PANEL_HEIGHT,
 	TIGHT,
 	COL_DESC,
 	COL_QTY,
@@ -55,6 +56,8 @@ function envelopeReturnCell(b: InvoiceDocxBuilder, lines: string[], preview: boo
 }
 
 function envelopeRecipientCell(b: InvoiceDocxBuilder, lines: string[], preview: boolean) {
+	// )=- Small top breathing room inside the lower window zone (recipient starts cleanly at 2.5").
+	const RECIPIENT_INNER_BEFORE = 80; // ~0.055"
 	return b.makeCell(
 		ENVELOPE_WINDOW_WIDTH,
 		[
@@ -65,7 +68,7 @@ function envelopeRecipientCell(b: InvoiceDocxBuilder, lines: string[], preview: 
 						})
 					]
 				: []),
-			...b.addressLines(lines)
+			...b.addressLines(lines, { firstSpacingBefore: RECIPIENT_INNER_BEFORE })
 		],
 		preview ? { borders: b.previewWindowBorders('0066CC'), shading: 'F0F8FF' } : undefined
 	);
@@ -297,9 +300,11 @@ export function buildPageTable(
 	topFoldTable: ReturnType<InvoiceDocxBuilder['makeTable']>,
 	bodyChildren: (ReturnType<InvoiceDocxBuilder['para']> | ReturnType<InvoiceDocxBuilder['makeTable']>)[]
 ) {
+	// )=- Use a dedicated taller top panel so addresses stay at their window positions
+	//     while line items / totals start ~4.25" down (below the fold for #10 double window).
 	return b.makeTable([CONTENT_WIDTH], [
 		new b.TableRow({
-			...b.exactRow(PANEL_HEIGHT),
+			...b.exactRow(TOP_ADDRESS_PANEL_HEIGHT),
 			children: [b.makeCell(CONTENT_WIDTH, [topFoldTable])]
 		}),
 		new b.TableRow({

@@ -14,19 +14,20 @@ export const PAGE_WIDTH = Math.round(8.5 * TWIP);
 export const PAGE_HEIGHT = Math.round(11 * TWIP);
 
 /**
- * #10 double-window envelope (tri-fold: bottom third up, top third down).
- * Return + recipient live in the top 1/3" panel (first fold section).
- * Positions tuned for standard #10 double window so addresses align in windows.
- * @see https://www.postalmethods.com/envelope-information/
+ * #10 double-window envelope (tri-fold letter fold).
+ * - Return address: ~0.6" from top (upper window)
+ * - Recipient: 2.5" from top (lower window)
+ * - Main invoice body starts after TOP_ADDRESS_PANEL_HEIGHT (~4.25") so it stays below the windows/fold.
+ * See docs/invoice-double-window-pattern.md for the canonical reference pattern + prompt.
  */
 export const ENVELOPE_LEFT_MARGIN = Math.round(0.875 * TWIP);
 export const MARGIN_RIGHT = 720; // 0.5"
 export const MARGIN_TOP = 0;
 export const MARGIN_BOTTOM = 0;
 
-/** Return address zone: 0.5" from sheet top. Recipient zone: 2.5" from sheet top for standard #10 double-window. */
-// )=- fix: changed recipient start from 2.3125" to 2.5" to better align return + mailing addresses for #10 double window envelope (Remedine/Svelte_FullCalendar_Dexie_Scheduling)
-export const ENVELOPE_RETURN_OFFSET = Math.round(0.5 * TWIP);
+/** Return address zone: 0.5–0.75" from sheet top. Recipient zone: 2.5" from sheet top for standard #10 double-window. */
+// )=- Tuned to the double-window pattern (return 0.5–0.75", recipient 2.5", body content after ~4.25"). Matches common recommendations and the HTML reference pattern in docs/invoice-double-window-pattern.md
+export const ENVELOPE_RETURN_OFFSET = Math.round(0.6 * TWIP);
 export const ENVELOPE_MAIL_TO_TOP = Math.round(2.5 * TWIP);
 /** Window fits ~4.5" of address lines. */
 export const ENVELOPE_WINDOW_WIDTH = Math.round(4.5 * TWIP);
@@ -41,6 +42,14 @@ export const COL_TOTAL = CONTENT_WIDTH - COL_DESC - COL_QTY - COL_UNIT;
 
 export const USABLE_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
 export const PANEL_HEIGHT = Math.floor(USABLE_HEIGHT / 3);
+
+/**
+ * Height of the top "address + header info" panel.
+ * Addresses live inside (return ~0.5", recipient at 2.5").
+ * Main body (line items) starts after this panel → ~4.25" total from top.
+ * This keeps everything below the fold / windows for #10 double-window tri-fold.
+ */
+export const TOP_ADDRESS_PANEL_HEIGHT = Math.round(4.25 * TWIP);
 
 export const DEFAULT_SIGNATORY = {
 	name: 'Brick A. Engstrom',
