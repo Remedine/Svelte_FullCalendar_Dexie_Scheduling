@@ -5,11 +5,19 @@ import { pb } from '$lib/db/pb';
 export const optionsStore = $state({
 	data: null as any,
 	isLoading: false,
+	pendingLoad: null as Promise<void> | null,
 	pendingPull: null as Promise<boolean> | null,
 
 	async load() {
-		if (this.isLoading) return; // prevent multiple simultaneous calls
+		if (this.pendingLoad) return this.pendingLoad;
 
+		this.pendingLoad = this._doLoad().finally(() => {
+			this.pendingLoad = null;
+		});
+		return this.pendingLoad;
+	},
+
+	async _doLoad() {
 		try {
 			this.isLoading = true;
 

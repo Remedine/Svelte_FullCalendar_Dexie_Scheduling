@@ -138,6 +138,14 @@
 	}
 
 	$effect(() => {
+		const { slotMinTime, slotMaxTime } = calendarSlotBounds;
+		if (calendarInstance) {
+			calendarInstance.setOption('slotMinTime', slotMinTime);
+			calendarInstance.setOption('slotMaxTime', slotMaxTime);
+		}
+	});
+
+	$effect(() => {
 		return () => calendarInstance?.destroy();
 	});
 </script>

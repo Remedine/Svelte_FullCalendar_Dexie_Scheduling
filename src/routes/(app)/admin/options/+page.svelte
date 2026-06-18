@@ -145,6 +145,8 @@
 		try {
 			const updated = {
 				...editingOptions,
+				calendarDayStartHour: calStart,
+				calendarDayEndHour: calEnd,
 				crewAssignmentHour: hour,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'

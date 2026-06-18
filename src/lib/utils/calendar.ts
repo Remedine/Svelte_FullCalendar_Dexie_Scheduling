@@ -2,8 +2,11 @@
 // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 
 export function hourToFcSlotTime(hour: number): string {
-	const h = Math.max(0, Math.min(23, Math.floor(hour)));
-	return `${String(h).padStart(2, '0')}:00:00`;
+	const h = Math.floor(hour);
+	// FullCalendar treats 24:00:00 as end-of-day (exclusive upper bound through midnight).
+	if (h >= 24) return '24:00:00';
+	const clamped = Math.max(0, Math.min(23, h));
+	return `${String(clamped).padStart(2, '0')}:00:00`;
 }
 
 export function getCalendarSlotBounds(
@@ -15,6 +18,6 @@ export function getCalendarSlotBounds(
 	const safeEnd = Math.max(safeStart + 1, Math.min(24, Number.isFinite(end) ? end : 22));
 	return {
 		slotMinTime: hourToFcSlotTime(safeStart),
-		slotMaxTime: hourToFcSlotTime(safeEnd > 23 ? 23 : safeEnd)
+		slotMaxTime: hourToFcSlotTime(safeEnd)
 	};
 }
