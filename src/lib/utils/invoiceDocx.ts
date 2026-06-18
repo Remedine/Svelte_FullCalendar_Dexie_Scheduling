@@ -182,8 +182,8 @@ type Alignment = (typeof import('docx'))['AlignmentType'][keyof (typeof import('
 
 /**
  * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
- * Top third: return + mail-to (left) with invoice header + service location (right).
- * Middle/bottom thirds: compact details, line items, and payment.
+ * Top third: return + mail-to / service location (left) with invoice header + dates (right).
+ * Middle third: line items; bottom third: payment and totals.
  */
 export async function generateInvoiceDocx(
 	job: Job,
@@ -265,6 +265,12 @@ export async function generateInvoiceDocx(
 			spacingAfter?: number;
 			spacingBefore?: number;
 			shading?: { fill: string; type: (typeof ShadingType)[keyof typeof ShadingType] };
+			border?: {
+				top?: typeof lineBorder;
+				bottom?: typeof lineBorder;
+				left?: typeof lineBorder;
+				right?: typeof lineBorder;
+			};
 		}
 	) =>
 		new Paragraph({
@@ -274,6 +280,7 @@ export async function generateInvoiceDocx(
 				before: opts?.spacingBefore ?? 0
 			},
 			...(opts?.shading ? { shading: opts.shading } : {}),
+			...(opts?.border ? { border: opts.border } : {}),
 			children
 		});
 
@@ -346,7 +353,50 @@ export async function generateInvoiceDocx(
 	const contactLine = (label: string, value: string) =>
 		para([run(`${label}: ${value}`)], { align: AlignmentType.RIGHT, spacingAfter: 40 });
 
-	/** Top tri-fold panel: envelope windows (left) + invoice header / service location (right). */
+	const invoiceBoxBorder = {
+		top: lineBorder,
+		bottom: lineBorder,
+		left: lineBorder,
+		right: lineBorder
+	};
+
+	/** Invoice metadata under the document title (no "Details" heading). */
+	const invoiceMetaBlock = [
+		para([run(`Invoice# ${ctx.invoiceNumber}`, { bold: true })], {
+			align: AlignmentType.RIGHT,
+			spacingAfter: 20,
+			border: invoiceBoxBorder
+		}),
+		para([run(`Service date: ${serviceDate}${serviceEnd}`)], {
+			align: AlignmentType.RIGHT,
+			spacingAfter: 40
+		}),
+		para([run(`Invoice date: ${invoiceDate}`)], {
+			align: AlignmentType.RIGHT,
+			spacingAfter: 40
+		}),
+		para(
+			[
+				run('Due date: ', { bold: true }),
+				run(dueDateStr, { bold: true })
+			],
+			{
+				align: AlignmentType.RIGHT,
+				spacingAfter: 40,
+				shading: { fill: 'FFF3CD', type: ShadingType.CLEAR }
+			}
+		),
+		...(ctx.businessSalesTaxAccount
+			? [
+					para([run(`CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`)], {
+						align: AlignmentType.RIGHT,
+						spacingAfter: 40
+					})
+				]
+			: [])
+	];
+
+	/** Top tri-fold panel: envelope windows (left) + invoice header / dates (right). */
 	const topFoldTable = makeTable(
 		[HALF_COL, HALF_COL],
 		[
@@ -360,17 +410,9 @@ export async function generateInvoiceDocx(
 						[
 							para([run('Invoice', { bold: true, size: FONT_TITLE })], {
 								align: AlignmentType.RIGHT,
-								spacingAfter: 80
+								spacingAfter: 60
 							}),
-							...(ctx.businessPhone?.trim()
-								? [contactLine('Phone', ctx.businessPhone.trim())]
-								: []),
-							...(ctx.businessEmail?.trim()
-								? [contactLine('Email', ctx.businessEmail.trim())]
-								: []),
-							...(ctx.businessWebsite?.trim()
-								? [contactLine('Website', ctx.businessWebsite.trim())]
-								: [])
+							...invoiceMetaBlock
 						],
 						{ margins: { top: 0, bottom: 0, left: 0, right: 0 } }
 					)
@@ -382,17 +424,29 @@ export async function generateInvoiceDocx(
 						HALF_COL,
 						[
 							para([run('Mail to:', { bold: true, size: FONT_ENVELOPE })], { spacingAfter: 60 }),
-							...addressLines(recipientLines)
+							...addressLines(recipientLines),
+							para([run('Service location', { bold: true, size: FONT_LABEL })], {
+								spacingAfter: 40,
+								spacingBefore: 40
+							}),
+							...serviceLines.map((line) => para([run(line)], { spacingAfter: 40 }))
 						],
-						{ margins: { top: 120, bottom: 0, left: 0, right: 160 } }
+						{ margins: { top: 40, bottom: 0, left: 0, right: 160 } }
 					),
 					makeCell(
 						HALF_COL,
 						[
-							para([run('Service location', { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
-							...serviceLines.map((line) => para([run(line)], { spacingAfter: 40 }))
+							...(ctx.businessPhone?.trim()
+								? [contactLine('Phone', ctx.businessPhone.trim())]
+								: []),
+							...(ctx.businessEmail?.trim()
+								? [contactLine('Email', ctx.businessEmail.trim())]
+								: []),
+							...(ctx.businessWebsite?.trim()
+								? [contactLine('Website', ctx.businessWebsite.trim())]
+								: [])
 						],
-						{ margins: { top: 120, bottom: 0, left: 0, right: 0 } }
+						{ margins: { top: 40, bottom: 0, left: 0, right: 0 } }
 					)
 				]
 			})
@@ -402,32 +456,6 @@ export async function generateInvoiceDocx(
 	const exactRow = (heightTwips: number) => ({
 		height: { value: heightTwips, rule: HeightRule.EXACT }
 	});
-
-	const detailsBlock = [
-		para([run('Details', { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
-		para(
-			[
-				run(`Invoice# ${ctx.invoiceNumber}`, { bold: true }),
-				run('     '),
-				run(`Invoice date: ${invoiceDate}`)
-			],
-			{ spacingAfter: 40 }
-		),
-		para(
-			[
-				run('Due date: ', { bold: true }),
-				run(dueDateStr, { bold: true })
-			],
-			{
-				spacingAfter: 40,
-				shading: { fill: 'FFF3CD', type: ShadingType.CLEAR }
-			}
-		),
-		para([run(`Service date: ${serviceDate}${serviceEnd}`)], { spacingAfter: 40 }),
-		...(ctx.businessSalesTaxAccount
-			? [para([run(`CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`)], { spacingAfter: 40 })]
-			: [])
-	];
 
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
 		new TableRow({
@@ -548,10 +576,10 @@ export async function generateInvoiceDocx(
 		]
 	);
 
-	// Full-sheet tri-fold: top third = envelope + header; middle = compact details; bottom = line items.
-	const middlePanel = [...detailsBlock];
+	// Full-sheet tri-fold: top third = envelope + header + dates; middle = line items; bottom = payment.
+	const middlePanel = [lineItemsTable];
 
-	const bottomPanel = [lineItemsTable, spacer(), footerTable];
+	const bottomPanel = [spacer(TIGHT), footerTable];
 
 	const pageTable = makeTable(
 		[CONTENT_WIDTH],
