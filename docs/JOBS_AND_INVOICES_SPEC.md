@@ -319,6 +319,7 @@ export function openJobDetailsModal(
 
 **Phase 8 — Future / Nice-to-Haves (out of scope for first pass)**
 - Bulk actions, CSV export, QuickBooks connector, full server-side filtering, version history for .docx, etc.
+- **Automated data backup** — see §14.
 
 ## 12. Risks & Open Items (to watch during build)
 
@@ -335,6 +336,56 @@ export function openJobDetailsModal(
 - Existing patterns: `JobFormModal.svelte` (module export + `openJobModal`), `UserJobsModal.svelte`, client enrichment in `clients/+page.svelte`, sync queue in `src/lib/db/index.ts`.
 - Current Job & Client shapes, `BillableItemRow.svelte`, options store (`invoiceDueDays`).
 - Repo: Remedine/Svelte_FullCalendar_Dexie_Scheduling.
+
+## 14. Planned Feature — Automated Data Backup
+
+**Status:** Planned (not in scope for Phases 0–7).  
+**Goal:** Protect all business-critical app data with scheduled exports, configurable delivery, and tiered retention so storage stays manageable without losing long-term recovery points.
+
+### 14.1 Schedule & delivery
+
+| Requirement | Detail |
+|-------------|--------|
+| Frequency | **Daily** automated backup (time/timezone TBD — see open items). |
+| Delivery options | Admin-configurable **one or more** of: **Google Drive**, **email**, **direct download** (on-demand manual export may also use the same archive builder). |
+| Filename format | `YYYY-MM-DD_{Business Name from Options}_Backup` + extension (e.g. `.zip` — format TBD). Business name read from Options `businessName`; sanitize for filesystem (spaces/special characters). |
+
+### 14.2 Retention policy (tiered thinning)
+
+Backups age out through four tiers. A scheduled **retention job** deletes or skips uploads that no longer qualify.
+
+| Backup age | What to keep |
+|------------|----------------|
+| **0–30 days** | **All daily backups** (up to ~30 files). |
+| **31–90 days** (older than 30 days, through 30 days + 2 months) | **One backup per calendar week** only (thin excess dailies). |
+| **91–365 days** (after 3 months, before 1 year) | **One backup per calendar month** only. |
+| **> 1 year** | **One backup per calendar quarter** only (4 per year). |
+
+**Example timeline**
+
+```
+Day 1–30:     2026-06-17_Capital City Windows_Backup, … every day
+Day 31–90:    keep e.g. one Sunday (or last-day-of-week) per week; delete other dailies in that window
+Day 91–365:   keep e.g. last backup of each month
+After year 1: keep e.g. Mar 31 / Jun 30 / Sep 30 / Dec 31 quarter snapshots (rule TBD)
+```
+
+### 14.3 Scope & implementation notes (TBD)
+
+- **Data included:** Likely full PocketBase export (collections + files) ± Dexie/local state — exact scope to confirm.
+- **Where it runs:** Server-side cron (recommended for reliability) vs. admin PWA trigger — TBD.
+- **Google Drive / email:** OAuth or service-account setup, recipient list, and size limits for email attachments — TBD.
+- **Retention enforcement:** Applies to copies on Google Drive and any server-side backup store; email/daily download may be fire-and-forget unless a mailbox retention policy is added.
+- **Admin UI:** Options page section for enable/disable, destination(s), retention preview, manual “Backup now”, and last-success timestamp.
+
+### 14.4 Open items (need product decisions)
+
+1. **Canonical backup per period** — For weekly / monthly / quarterly tiers, keep the **last** backup in the period, the **first**, or the backup **closest to period end**?
+2. **Archive format** — Single `.zip` (JSON + file blobs)? PocketBase native backup? SQLite dump?
+3. **Timezone** — Which TZ defines “daily” and the `YYYY-MM-DD` in the filename (business local vs. UTC)?
+4. **Maximum retention** — Keep quarterly backups forever, or cap at N years?
+5. **Direct download** — Scheduled delivery only, or also an on-demand “Export now” button for admins?
+6. **Failure alerting** — Email admin if a scheduled backup fails?
 
 ---
 
