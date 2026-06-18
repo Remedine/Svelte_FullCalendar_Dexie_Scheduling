@@ -1,0 +1,6 @@
+packages:
+  - '.'
+
+# GHSA-pxg6-pf52-xh8x: @sveltejs/kit pins cookie@^0.6.0; force patched release.
+overrides:
+  cookie: ^0.7.2
