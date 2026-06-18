@@ -28,30 +28,38 @@ export interface InvoiceDocxContext extends InvoiceDocxBusinessInfo {
 	invoiceNotes?: string;
 }
 
-const BODY = 18; // 9pt — compact for one-page layout
-const LABEL = 18;
-const HEADING = 22;
-const ENVELOPE = 20; // 10pt — readable through #10 window
-const TIGHT = 30;
-const LOOSE = 60;
-const SECTION = 80;
+const FONT = 'Arial';
+const FONT_BODY = 20; // 10pt — matches contractor template
+const FONT_LABEL = 20;
+const FONT_TITLE = 68; // 34pt "Invoice" heading
+const FONT_TOTAL = 32; // 16pt total line
+const FONT_ENVELOPE = 20;
+const COLOR_MUTED = '2B2C2F';
+const TIGHT = 60;
+const SECTION = 120;
+const LOOSE = 200;
 
-/** Twips (dxa): 1440 per inch. #10 double-window tri-fold zones. */
+/** Twips (dxa): 1440 per inch. */
 const TWIP = 1440;
+const PAGE_WIDTH = Math.round(8.5 * TWIP);
+const PAGE_HEIGHT = Math.round(11 * TWIP);
 /** Left margin aligned with common 1-1/8" double-window envelope offset. */
 const ENVELOPE_LEFT_MARGIN = Math.round(1.125 * TWIP);
-/** Printable content width (letter 8.5" minus 1-1/8" left and 1/2" right margins). */
-const CONTENT_WIDTH = Math.round(6.875 * TWIP);
+const MARGIN_RIGHT = 720; // 0.5"
+const MARGIN_TOP = 360;
+const MARGIN_BOTTOM = 360;
+/** Printable content width (letter minus envelope left + right margins). */
+const CONTENT_WIDTH = PAGE_WIDTH - ENVELOPE_LEFT_MARGIN - MARGIN_RIGHT;
 const HALF_COL = Math.round(CONTENT_WIDTH / 2);
-/** Line-item table columns (fixed dxa for stable print alignment). */
-const COL_DESC = Math.round(CONTENT_WIDTH * 0.55);
-const COL_QTY = Math.round(CONTENT_WIDTH * 0.1);
-const COL_UNIT = Math.round(CONTENT_WIDTH * 0.15);
+/** Line-item table columns (fixed dxa — required for Google Docs). */
+const COL_DESC = Math.round(CONTENT_WIDTH * 0.52);
+const COL_QTY = Math.round(CONTENT_WIDTH * 0.12);
+const COL_UNIT = Math.round(CONTENT_WIDTH * 0.16);
 const COL_TOTAL = CONTENT_WIDTH - COL_DESC - COL_QTY - COL_UNIT;
-/** Top panel (~2.75") — return address shows in upper window when tri-folded. */
-const ENVELOPE_RETURN_ROW_H = Math.round(2.75 * TWIP);
-/** Bottom panel (~2.75") — recipient shows in lower window when tri-folded. */
-const ENVELOPE_RECIPIENT_ROW_H = Math.round(2.75 * TWIP);
+const COL_PAYMENT = Math.round(CONTENT_WIDTH * 0.58);
+const COL_TOTALS = CONTENT_WIDTH - COL_PAYMENT;
+/** #10 tri-fold envelope zones (~2.75" top and bottom). */
+const ENVELOPE_ZONE = Math.round(2.75 * TWIP);
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
 	const raw = optsRate ?? job.taxRate ?? 5;
@@ -135,6 +143,15 @@ function formatMailingLines(info: InvoiceDocxBusinessInfo): string[] {
 	return lines;
 }
 
+function formatBusinessAddressLines(info: InvoiceDocxBusinessInfo): string[] {
+	const street = info.businessStreet?.trim();
+	const csz = formatCityStateZip(info.businessCity, info.businessState, info.businessZip);
+	const lines: string[] = [];
+	if (street) lines.push(street);
+	if (csz.trim()) lines.push(csz.trim());
+	return lines;
+}
+
 /** Payment instructions tailored to client preferred billing method. */
 export function buildPaymentInstructions(
 	client: Client | null | undefined,
@@ -167,9 +184,12 @@ async function importDocx() {
 	return import('docx');
 }
 
+type DocxModule = Awaited<ReturnType<typeof importDocx>>;
+type Alignment = (typeof import('docx'))['AlignmentType'][keyof (typeof import('docx'))['AlignmentType']];
+
 /**
- * Generate a compact one-page invoice .docx (fits ~5–8 line items + boilerplate).
- * Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md
+ * Generate a compact one-page invoice .docx styled like the QuickBooks contractor template.
+ * Uses flat paragraphs + DXA-width tables for Google Docs compatibility.
  */
 export async function generateInvoiceDocx(
 	job: Job,
@@ -187,7 +207,8 @@ export async function generateInvoiceDocx(
 		AlignmentType,
 		WidthType,
 		VerticalAlign,
-		HeightRule
+		BorderStyle,
+		ShadingType
 	} = await importDocx();
 
 	const businessName = ctx.businessName || 'Capital City Windows';
@@ -209,100 +230,201 @@ export async function generateInvoiceDocx(
 	const serviceLoc = getClientServiceAddress(client);
 	const returnLines = getBusinessReturnAddressLines(ctx);
 	const recipientLines = getRecipientMailingLines(client, clientName);
-
+	const businessAddressLines = formatBusinessAddressLines(ctx);
 	const paymentLines = buildPaymentInstructions(client, ctx);
 
-	const envelopeAddressCell = (lines: string[], boldFirst = false) =>
-		new TableCell({
-			verticalAlign: VerticalAlign.TOP,
-			margins: { top: 100, bottom: 100, left: 0, right: 0 },
-			children: lines.map((line, i) =>
-				new Paragraph({
-					spacing: { after: 80, before: i === 0 ? 0 : 0 },
-					children: [
-						new TextRun({
-							text: line,
-							size: ENVELOPE,
-							bold: boldFirst && i === 0
-						})
-					]
-				})
-			)
-		});
+	const noBorders = {
+		top: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+		bottom: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+		left: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+		right: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+		insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'auto' },
+		insideVertical: { style: BorderStyle.NONE, size: 0, color: 'auto' }
+	};
 
-	const exactRow = (heightTwips: number) => ({
-		height: { value: heightTwips, rule: HeightRule.EXACT }
-	});
+	const lineBorder = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
+	const lineBorders = {
+		top: lineBorder,
+		bottom: lineBorder,
+		left: lineBorder,
+		right: lineBorder,
+		insideHorizontal: lineBorder,
+		insideVertical: lineBorder
+	};
+	type CellBorders = NonNullable<Parameters<DocxModule['TableCell']>[0]>['borders'];
 
-	const cell = (
+	const run = (
 		text: string,
-		align?: (typeof AlignmentType)[keyof typeof AlignmentType],
-		widthTwips?: number
+		opts?: { bold?: boolean; size?: number; color?: string }
 	) =>
-		new TableCell({
-			...(widthTwips ? { width: { size: widthTwips, type: WidthType.DXA } } : {}),
-			verticalAlign: VerticalAlign.TOP,
-			margins: { top: 40, bottom: 40, left: 60, right: 60 },
-			children: [
-				new Paragraph({
-					alignment: align,
-					spacing: { after: 20, before: 0 },
-					children: [new TextRun({ text, size: BODY })]
-				})
-			]
+		new TextRun({
+			text,
+			font: FONT,
+			bold: opts?.bold,
+			size: opts?.size ?? FONT_BODY,
+			color: opts?.color
 		});
 
-	const labeledAddressCell = (
-		label: string,
-		lines: string[],
+	const para = (
+		children: InstanceType<DocxModule['TextRun']>[],
+		opts?: { align?: Alignment; spacingAfter?: number; spacingBefore?: number }
+	) =>
+		new Paragraph({
+			alignment: opts?.align,
+			spacing: {
+				after: opts?.spacingAfter ?? 40,
+				before: opts?.spacingBefore ?? 0
+			},
+			children
+		});
+
+	const spacer = (after = SECTION) => new Paragraph({ spacing: { after }, text: '' });
+
+	const makeTable = (
+		columnWidths: number[],
+		rows: InstanceType<DocxModule['TableRow']>[],
+		borders = noBorders
+	) =>
+		new Table({
+			width: { size: columnWidths.reduce((sum, w) => sum + w, 0), type: WidthType.DXA },
+			columnWidths,
+			borders,
+			rows
+		});
+
+	const makeCell = (
 		widthTwips: number,
-		rightPad = 0
+		children: (InstanceType<DocxModule['Paragraph']> | InstanceType<DocxModule['Table']>)[],
+		opts?: {
+			align?: Alignment;
+			borders?: CellBorders;
+			shading?: string;
+			margins?: { top?: number; bottom?: number; left?: number; right?: number };
+		}
 	) =>
 		new TableCell({
 			width: { size: widthTwips, type: WidthType.DXA },
 			verticalAlign: VerticalAlign.TOP,
-			margins: { top: 0, bottom: 0, left: 0, right: rightPad },
-			children: [
-				new Paragraph({
-					spacing: { after: 40, before: 0 },
-					children: [new TextRun({ text: label, bold: true, size: LABEL })]
-				}),
-				...lines.map((line) =>
-					new Paragraph({
-						spacing: { after: 30, before: 0 },
-						children: [new TextRun({ text: line, size: BODY })]
-					})
-				)
-			]
+			...(opts?.borders ? { borders: opts.borders } : {}),
+			...(opts?.shading
+				? { shading: { fill: opts.shading, type: ShadingType.CLEAR } }
+				: {}),
+			margins: {
+				top: opts?.margins?.top ?? 80,
+				bottom: opts?.margins?.bottom ?? 80,
+				left: opts?.margins?.left ?? 120,
+				right: opts?.margins?.right ?? 120
+			},
+			children
 		});
 
-	const metaCell = (label: string, value: string, widthTwips: number) =>
-		new TableCell({
-			width: { size: widthTwips, type: WidthType.DXA },
-			verticalAlign: VerticalAlign.TOP,
-			margins: { top: 0, bottom: 0, left: 0, right: 0 },
-			children: [
-				new Paragraph({
-					spacing: { after: 30, before: 0 },
-					children: [
-						new TextRun({ text: `${label}: `, bold: true, size: BODY }),
-						new TextRun({ text: value, size: BODY })
-					]
+	const textCell = (
+		text: string,
+		widthTwips: number,
+		opts?: { align?: Alignment; bold?: boolean; shading?: string; borders?: CellBorders }
+	) =>
+		makeCell(
+			widthTwips,
+			[
+				para([run(text, { bold: opts?.bold })], {
+					align: opts?.align,
+					spacingAfter: 20
 				})
-			]
-		});
+			],
+			opts
+		);
+
+	const labeledBlock = (label: string, lines: string[], widthTwips: number, rightPad = 0) =>
+		makeCell(
+			widthTwips,
+			[
+				para([run(label, { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
+				...lines.map((line) => para([run(line)], { spacingAfter: 40 }))
+			],
+			{ margins: { top: 0, bottom: 0, left: 0, right: rightPad } }
+		);
+
+	const envelopeBlock = (lines: string[], boldFirst = false) =>
+		lines.map((line, i) =>
+			para([run(line, { bold: boldFirst && i === 0, size: FONT_ENVELOPE })], {
+				spacingAfter: 80
+			})
+		);
 
 	const billToLines = [clientName, billTo.street, billTo.csz].filter((l) => l.trim().length > 0);
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
 	if (serviceLines.length === 0) serviceLines.push('—');
 
+	const companyLines = [
+		para([run(businessName, { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
+		...businessAddressLines.map((line) => para([run(line)], { spacingAfter: 40 }))
+	];
+
+	const contactLine = (label: string, value: string) =>
+		para([run(`${label}: ${value}`)], { align: AlignmentType.RIGHT, spacingAfter: 40 });
+
+	const headerTable = makeTable(
+		[HALF_COL, HALF_COL],
+		[
+			new TableRow({
+				children: [
+					makeCell(HALF_COL, companyLines, { margins: { top: 0, bottom: 0, left: 0, right: 160 } }),
+					makeCell(
+						HALF_COL,
+						[
+							para([run('Invoice', { bold: true, size: FONT_TITLE })], {
+								align: AlignmentType.RIGHT,
+								spacingAfter: 80
+							}),
+							...(ctx.businessPhone?.trim()
+								? [contactLine('Phone', ctx.businessPhone.trim())]
+								: []),
+							...(ctx.businessEmail?.trim()
+								? [contactLine('Email', ctx.businessEmail.trim())]
+								: []),
+							...(ctx.businessWebsite?.trim()
+								? [contactLine('Website', ctx.businessWebsite.trim())]
+								: [])
+						],
+						{ margins: { top: 0, bottom: 0, left: 0, right: 0 } }
+					)
+				]
+			})
+		]
+	);
+
+	const addressTable = makeTable(
+		[HALF_COL, HALF_COL],
+		[
+			new TableRow({
+				children: [
+					labeledBlock('Bill to', billToLines, HALF_COL, 160),
+					labeledBlock('Service location', serviceLines, HALF_COL)
+				]
+			})
+		]
+	);
+
+	const detailsBlock = [
+		para([run('Details', { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
+		para([run(`Invoice# ${ctx.invoiceNumber}`)], { spacingAfter: 40 }),
+		para([run(`Invoice date: ${invoiceDate}`)], { spacingAfter: 40 }),
+		para([run(`Terms: Net ${dueDays}`)], { spacingAfter: 40 }),
+		para([run(`Due date: ${dueDateStr}`)], { spacingAfter: 40 }),
+		para([run(`Service date: ${serviceDate}${serviceEnd}`)], { spacingAfter: 40 }),
+		para([run(`Job: ${job.title || 'Window cleaning service'}`)], { spacingAfter: 40 }),
+		...(ctx.businessSalesTaxAccount
+			? [para([run(`CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`)], { spacingAfter: 40 })]
+			: [])
+	];
+
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
 		new TableRow({
 			children: [
-				cell(item.title || `Item ${idx + 1}`, undefined, COL_DESC),
-				cell(String(item.quantity || 1), AlignmentType.RIGHT, COL_QTY),
-				cell(`$${(item.price || 0).toFixed(2)}`, AlignmentType.RIGHT, COL_UNIT),
-				cell(`$${(item.total || 0).toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
+				textCell(item.title || `Item ${idx + 1}`, COL_DESC),
+				textCell(String(item.quantity || 1), COL_QTY, { align: AlignmentType.RIGHT }),
+				textCell(`$${(item.price || 0).toFixed(2)}`, COL_UNIT, { align: AlignmentType.RIGHT }),
+				textCell(`$${(item.total || 0).toFixed(2)}`, COL_TOTAL, { align: AlignmentType.RIGHT })
 			]
 		})
 	);
@@ -311,202 +433,146 @@ export async function generateInvoiceDocx(
 	const taxAmount = job.taxAmount ?? 0;
 	const total = job.totalAmount ?? 0;
 
-	const noBorders = {
-		top: { style: 'none' as const, size: 0 },
-		bottom: { style: 'none' as const, size: 0 },
-		left: { style: 'none' as const, size: 0 },
-		right: { style: 'none' as const, size: 0 },
-		insideHorizontal: { style: 'none' as const, size: 0 },
-		insideVertical: { style: 'none' as const, size: 0 }
-	};
-
-	// #10 double-window envelope layout: return (top panel), invoice body (middle), recipient (bottom).
-	// Tri-fold bottom-up then top-down so windows align with standard 0.875" x 3.25" (return) and 1" x 4" (recipient) openings.
-	const middleContent: (typeof Paragraph | typeof Table)[] = [
-		new Paragraph({
-			spacing: { after: LOOSE, before: 0 },
-			children: [new TextRun({ text: 'INVOICE', bold: true, size: HEADING })]
-		}),
-		new Table({
-			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-			borders: noBorders,
-			rows: [
-				new TableRow({
-					children: [
-						metaCell('Invoice #', ctx.invoiceNumber, HALF_COL),
-						metaCell('Date', invoiceDate, HALF_COL)
-					]
-				}),
-				new TableRow({
-					children: [
-						metaCell('Due', dueDateStr, HALF_COL),
-						metaCell('Terms', `${dueDays} days`, HALF_COL)
-					]
-				})
-			]
-		}),
-		new Paragraph({ spacing: { after: SECTION }, text: '' }),
-		new Table({
-			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-			borders: noBorders,
-			rows: [
-				new TableRow({
-					children: [
-						labeledAddressCell('Bill To', billToLines, HALF_COL, 120),
-						labeledAddressCell('Service Location', serviceLines, HALF_COL)
-					]
-				})
-			]
-		}),
-		new Paragraph({ spacing: { after: SECTION }, text: '' }),
-		new Paragraph({
-			spacing: { after: 30, before: 0 },
-			children: [
-				new TextRun({ text: 'Service date: ', bold: true, size: BODY }),
-				new TextRun({ text: `${serviceDate}${serviceEnd}`, size: BODY })
-			]
-		}),
-		new Paragraph({
-			spacing: { after: SECTION, before: 0 },
-			children: [
-				new TextRun({ text: 'Job: ', bold: true, size: BODY }),
-				new TextRun({ text: job.title || 'Window cleaning service', size: BODY })
-			]
-		}),
-		...(ctx.businessSalesTaxAccount
-			? [
-					new Paragraph({
-						spacing: { after: TIGHT, before: 0 },
-						children: [
-							new TextRun({
-								text: `CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`,
-								size: BODY
-							})
-						]
+	const lineItemsTable = makeTable(
+		[COL_DESC, COL_QTY, COL_UNIT, COL_TOTAL],
+		[
+			new TableRow({
+				children: [
+					textCell('Description', COL_DESC, { bold: true, shading: 'F3F3F3', borders: lineBorders }),
+					textCell('Qty', COL_QTY, {
+						align: AlignmentType.RIGHT,
+						bold: true,
+						shading: 'F3F3F3',
+						borders: lineBorders
+					}),
+					textCell('Rate', COL_UNIT, {
+						align: AlignmentType.RIGHT,
+						bold: true,
+						shading: 'F3F3F3',
+						borders: lineBorders
+					}),
+					textCell('Amount', COL_TOTAL, {
+						align: AlignmentType.RIGHT,
+						bold: true,
+						shading: 'F3F3F3',
+						borders: lineBorders
 					})
 				]
-			: []),
-		new Table({
-			width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-			rows: [
-				new TableRow({
-					children: [
-						cell('Description', undefined, COL_DESC),
-						cell('Qty', AlignmentType.RIGHT, COL_QTY),
-						cell('Unit', AlignmentType.RIGHT, COL_UNIT),
-						cell('Total', AlignmentType.RIGHT, COL_TOTAL)
-					]
-				}),
-				...billableRows,
-				new TableRow({
-					children: [
-						cell('Subtotal', undefined, COL_DESC),
-						cell('', AlignmentType.RIGHT, COL_QTY),
-						cell('', AlignmentType.RIGHT, COL_UNIT),
-						cell(`$${subtotal.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
-					]
-				}),
-				new TableRow({
-					children: [
-						cell(`${taxLabel} (${taxPct.toFixed(1)}%)`, undefined, COL_DESC),
-						cell('', AlignmentType.RIGHT, COL_QTY),
-						cell('', AlignmentType.RIGHT, COL_UNIT),
-						cell(`$${taxAmount.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
-					]
-				}),
-				new TableRow({
-					children: [
-						cell('TOTAL', undefined, COL_DESC),
-						cell('', AlignmentType.RIGHT, COL_QTY),
-						cell('', AlignmentType.RIGHT, COL_UNIT),
-						cell(`$${total.toFixed(2)}`, AlignmentType.RIGHT, COL_TOTAL)
-					]
-				})
-			]
+			}),
+			...billableRows,
+			new TableRow({
+				children: [
+					textCell('Subtotal', COL_DESC, { borders: lineBorders }),
+					textCell('', COL_QTY, { borders: lineBorders }),
+					textCell('', COL_UNIT, { borders: lineBorders }),
+					textCell(`$${subtotal.toFixed(2)}`, COL_TOTAL, {
+						align: AlignmentType.RIGHT,
+						borders: lineBorders
+					})
+				]
+			}),
+			new TableRow({
+				children: [
+					textCell(`${taxLabel} (${taxPct.toFixed(1)}%)`, COL_DESC, { borders: lineBorders }),
+					textCell('', COL_QTY, { borders: lineBorders }),
+					textCell('', COL_UNIT, { borders: lineBorders }),
+					textCell(`$${taxAmount.toFixed(2)}`, COL_TOTAL, {
+						align: AlignmentType.RIGHT,
+						borders: lineBorders
+					})
+				]
+			})
+		],
+		lineBorders
+	);
+
+	const paymentBlock = [
+		para([run('Payment', { bold: true, size: FONT_LABEL, color: COLOR_MUTED })], {
+			spacingAfter: 60
 		}),
-		new Paragraph({ spacing: { after: TIGHT }, text: '' }),
-		new Paragraph({
-			spacing: { after: TIGHT },
-			children: [
-				new TextRun({
-					text: `Amount due by ${dueDateStr}: $${total.toFixed(2)}`,
-					bold: true,
-					size: HEADING
-				})
-			]
-		}),
-		new Paragraph({
-			spacing: { after: 20 },
-			children: [new TextRun({ text: 'Payment', bold: true, size: LABEL })]
-		}),
-		...paymentLines.map(
-			(line) =>
-				new Paragraph({
-					spacing: { after: 20, before: 0 },
-					children: [new TextRun({ text: line, size: BODY })]
-				})
+		...paymentLines.map((line) =>
+			para([run(line, { color: COLOR_MUTED })], { spacingAfter: 40 })
 		),
-		new Paragraph({
-			spacing: { after: TIGHT, before: 0 },
-			children: [
-				new TextRun({
-					text: `Thank you for choosing ${businessName}!`,
-					size: BODY
-				})
-			]
+		para([run(`Thank you for choosing ${businessName}!`, { color: COLOR_MUTED })], {
+			spacingAfter: 40,
+			spacingBefore: TIGHT
 		}),
 		...(ctx.invoiceNotes?.trim()
 			? [
-					new Paragraph({
-						spacing: { after: 20, before: TIGHT },
-						children: [new TextRun({ text: 'Invoice Notes', bold: true, size: LABEL })]
+					para([run('Invoice notes', { bold: true, size: FONT_LABEL, color: COLOR_MUTED })], {
+						spacingAfter: 40,
+						spacingBefore: TIGHT
 					}),
-					new Paragraph({
-						spacing: { after: TIGHT, before: 0 },
-						children: [new TextRun({ text: ctx.invoiceNotes.trim(), size: BODY })]
-					})
+					para([run(ctx.invoiceNotes.trim(), { color: COLOR_MUTED })], { spacingAfter: 40 })
 				]
 			: [])
 	];
 
+	const totalsBlock = [
+		para(
+			[
+				run('Total        ', { bold: true, size: FONT_TOTAL, color: COLOR_MUTED }),
+				run(`$${total.toFixed(2)}`, { bold: true, size: FONT_TOTAL, color: COLOR_MUTED })
+			],
+			{ align: AlignmentType.RIGHT, spacingBefore: LOOSE }
+		),
+		para(
+			[run(`Amount due by ${dueDateStr}`, { bold: true, color: COLOR_MUTED })],
+			{ align: AlignmentType.RIGHT, spacingAfter: 20 }
+		)
+	];
+
+	const footerTable = makeTable(
+		[COL_PAYMENT, COL_TOTALS],
+		[
+			new TableRow({
+				children: [
+					makeCell(COL_PAYMENT, paymentBlock, { margins: { top: 0, bottom: 0, left: 0, right: 160 } }),
+					makeCell(COL_TOTALS, totalsBlock, { margins: { top: 0, bottom: 0, left: 0, right: 0 } })
+				]
+			})
+		]
+	);
+
+	// Flat document: envelope zones use paragraph spacing (no nested tables — Google Docs friendly).
+	const children = [
+		...envelopeBlock(returnLines, true),
+		spacer(Math.max(ENVELOPE_ZONE - returnLines.length * 320, SECTION)),
+		headerTable,
+		spacer(),
+		addressTable,
+		spacer(),
+		...detailsBlock,
+		spacer(),
+		lineItemsTable,
+		spacer(),
+		footerTable,
+		spacer(Math.max(ENVELOPE_ZONE - recipientLines.length * 320, SECTION)),
+		...envelopeBlock(recipientLines)
+	];
+
 	const doc = new Document({
+		styles: {
+			default: {
+				document: {
+					run: { font: FONT, size: FONT_BODY }
+				}
+			}
+		},
 		sections: [
 			{
 				properties: {
 					page: {
+						size: { width: PAGE_WIDTH, height: PAGE_HEIGHT },
 						margin: {
-							top: 180,
-							right: 720,
-							bottom: 180,
+							top: MARGIN_TOP,
+							right: MARGIN_RIGHT,
+							bottom: MARGIN_BOTTOM,
 							left: ENVELOPE_LEFT_MARGIN
 						}
 					}
 				},
-				children: [
-					new Table({
-						width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-						borders: noBorders,
-						rows: [
-							new TableRow({
-								...exactRow(ENVELOPE_RETURN_ROW_H),
-								children: [envelopeAddressCell(returnLines, true)]
-							}),
-							new TableRow({
-								children: [
-									new TableCell({
-										verticalAlign: VerticalAlign.TOP,
-										margins: { top: 120, bottom: 120, left: 0, right: 0 },
-										children: middleContent
-									})
-								]
-							}),
-							new TableRow({
-								...exactRow(ENVELOPE_RECIPIENT_ROW_H),
-								children: [envelopeAddressCell(recipientLines)]
-							})
-						]
-					})
-				]
+				children
 			}
 		]
 	});
