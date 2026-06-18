@@ -508,7 +508,10 @@ export async function generateInvoiceDocx(
 		...paymentLines.map((line) =>
 			para([run(line, { color: COLOR_MUTED })], { spacingAfter: 40 })
 		),
-		para([run(`Thank you for choosing ${businessName}!`, { color: COLOR_MUTED })], {
+		para([run(`Thank you very much for your business 
+			
+			Brick A. Engstrom
+			907.723.4617`, { color: COLOR_MUTED })], {
 			spacingAfter: 40,
 			spacingBefore: TIGHT
 		}),
