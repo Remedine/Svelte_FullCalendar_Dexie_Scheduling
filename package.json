@@ -6,6 +6,11 @@
 	"engines": {
 		"node": ">=20"
 	},
+	"pnpm": {
+		"overrides": {
+			"cookie": "^0.7.2"
+		}
+	},
 	"scripts": {
 		"dev": "vite dev --force",
 		"build": "echo \"BUILD TIME: PUBLIC_POCKETBASE_URL=$PUBLIC_POCKETBASE_URL PUBLIC_PB_URL=$PUBLIC_PB_URL\" && vite build",
