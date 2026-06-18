@@ -33,6 +33,9 @@
 	let isGenerating = $state(false);
 	let isUploading = $state(false);
 	let isSending = $state(false);
+	/** Dev-only: overlay #10 window guides on generated .docx top panel. */
+	let envelopePreview = $state(false);
+	const isDev = import.meta.env.DEV;
 
 	let client = $state<Client | null>(null);
 
@@ -149,7 +152,12 @@
 			const c = job.clientId ? await db.clients.get(job.clientId) : null;
 
 			const invoiceNumber = await allocateInvoiceNumber();
-			const blob = await generateInvoiceDocx(job, c, docxContext(invoiceNumber));
+			const blob = await generateInvoiceDocx(
+				job,
+				c,
+				docxContext(invoiceNumber),
+				isDev && envelopePreview ? { envelopePreview: true } : undefined
+			);
 
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
@@ -269,7 +277,8 @@
 			const blob = await generateInvoiceDocx(
 				job,
 				c,
-				docxContext(invoiceNumber, invoice.notes)
+				docxContext(invoiceNumber, invoice.notes),
+				isDev && envelopePreview ? { envelopePreview: true } : undefined
 			);
 			const filename = `${(job.title || 'invoice').replace(/[^a-z0-9]/gi, '_')}.docx`;
 			saveAs(blob, filename);
@@ -414,6 +423,12 @@
 				{invoice.status}
 			</span>
 			{#if invoice}
+				{#if isDev}
+					<label class="job-invoice-panel__dev-preview job-invoice-panel__dev-preview--inline">
+						<input type="checkbox" bind:checked={envelopePreview} />
+						Envelope preview
+					</label>
+				{/if}
 				<button
 					class="job-invoice-panel__small-btn"
 					onclick={handleRegenerate}
@@ -559,6 +574,12 @@
 			</div>
 		{/if}
 	{:else}
+		{#if isDev}
+			<label class="job-invoice-panel__dev-preview">
+				<input type="checkbox" bind:checked={envelopePreview} />
+				Envelope window preview (#10 tri-fold guides)
+			</label>
+		{/if}
 		<button
 			class="job-invoice-panel__generate-btn"
 			onclick={handleGenerateDraft}
@@ -789,6 +810,21 @@
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 		margin: var(--space-1) 0 0;
+	}
+
+	.job-invoice-panel__dev-preview {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		margin: 0 0 var(--space-2);
+		cursor: pointer;
+	}
+
+	.job-invoice-panel__dev-preview--inline {
+		display: inline-flex;
+		margin: 0 var(--space-2) 0 0;
 	}
 
 	.job-invoice-panel__supporting-list {

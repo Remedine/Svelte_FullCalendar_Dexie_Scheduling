@@ -1,13 +1,23 @@
 import { describe, it, expect } from 'vitest';
+import type { Client, Job } from '$lib/db';
 import {
 	buildPaymentInstructions,
 	envelopeRecipientTopInches,
+	generateInvoiceDocx,
 	getBusinessReturnAddressLines,
 	getClientBillToAddress,
 	getClientServiceAddress,
 	getRecipientMailingLines
 } from '$lib/utils/invoiceDocx';
-import type { Client } from '$lib/db';
+import {
+	hasEnvelopeMailToLabel,
+	hasEnvelopePreviewMarkers,
+	hasEnvelopeRecipientRowHeight,
+	hasEnvelopeReturnOffset,
+	hasEnvelopeWindowColumnWidth,
+	hasTotalsRightAlignment,
+	readInvoiceDocxStructure
+} from '$lib/utils/invoiceDocx/inspect';
 
 describe('buildPaymentInstructions', () => {
 	const business = {
@@ -25,6 +35,7 @@ describe('buildPaymentInstructions', () => {
 		const lines = buildPaymentInstructions(client, business);
 		expect(lines.some((l) => l.includes('Make check payable'))).toBe(true);
 		expect(lines.some((l) => l.includes('PO Box 100'))).toBe(true);
+		expect(lines.some((l) => l.includes('Mail payment to:'))).toBe(true);
 	});
 
 	it('references billing email for email-billing clients', () => {
@@ -95,5 +106,67 @@ describe('client billing vs service address', () => {
 		const loc = getClientServiceAddress({ ...base, useBillingAddress: true });
 		expect(loc.street).toBe('100 Service Rd');
 		expect(loc.csz).toContain('Juneau');
+	});
+});
+
+const sampleJob: Job = {
+	id: 'j-docx',
+	clientId: 'c-docx',
+	title: 'Window Cleaning',
+	start: new Date('2026-07-15T09:00:00'),
+	end: new Date('2026-07-15T11:00:00'),
+	assignedCrew: ['Alex'],
+	status: 'completed',
+	billableItems: [{ title: 'Full Exterior', price: 450, quantity: 1, total: 450 }],
+	subtotal: 450,
+	taxRate: 0.05,
+	taxAmount: 22.5,
+	totalAmount: 472.5,
+	areaOfTown: 'downtown',
+	createdAt: new Date(),
+	updatedAt: new Date()
+};
+
+const sampleClient: Client = {
+	id: 'c-docx',
+	name: 'Oak Street LLC',
+	serviceAddressStreet: '123 Oak St',
+	serviceAddressCity: 'Juneau',
+	serviceAddressState: 'AK',
+	serviceAddressZip: '99801',
+	areaOfTown: 'downtown',
+	preferredBillingMethod: 'email',
+	phone: '907-555-1234',
+	email: 'billing@oak.example',
+	createdAt: new Date(),
+	updatedAt: new Date()
+};
+
+describe('generateInvoiceDocx structure', () => {
+	it('positions envelope rows and omits Mail to: label in window zone', async () => {
+		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
+			invoiceNumber: 'CCW-2026-0001',
+			businessName: 'Capital City Windows'
+		});
+		const structure = await readInvoiceDocxStructure(blob);
+
+		expect(structure.plainText).toContain('Oak Street LLC');
+		expect(hasEnvelopeMailToLabel(structure.plainText)).toBe(false);
+		expect(hasEnvelopeRecipientRowHeight(structure.documentXml)).toBe(true);
+		expect(hasEnvelopeReturnOffset(structure.documentXml)).toBe(true);
+		expect(hasEnvelopeWindowColumnWidth(structure.documentXml)).toBe(true);
+		expect(hasTotalsRightAlignment(structure.documentXml, 472.5)).toBe(true);
+		expect(hasEnvelopePreviewMarkers(structure.plainText)).toBe(false);
+	});
+
+	it('includes dev envelope preview overlays when requested in dev', async () => {
+		const blob = await generateInvoiceDocx(
+			sampleJob,
+			sampleClient,
+			{ invoiceNumber: 'CCW-2026-0099' },
+			{ envelopePreview: true }
+		);
+		const structure = await readInvoiceDocxStructure(blob);
+		expect(hasEnvelopePreviewMarkers(structure.plainText)).toBe(import.meta.env.DEV);
 	});
 });
