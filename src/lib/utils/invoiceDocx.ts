@@ -42,43 +42,35 @@ const TWIP = 1440;
 const PAGE_WIDTH = Math.round(8.5 * TWIP);
 const PAGE_HEIGHT = Math.round(11 * TWIP);
 /**
- * #10 double-window envelope alignment (tri-fold insert).
- * Left margin matches common window offset (~7/8"); addresses stay ≥0.5" from sheet edge.
+ * #10 double-window envelope (tri-fold: bottom third up, top third down).
+ * Return + recipient must live in the top 3⅔" panel so they show through both windows.
  * @see https://www.postalmethods.com/envelope-information/
  */
 const ENVELOPE_LEFT_MARGIN = Math.round(0.875 * TWIP);
 const MARGIN_RIGHT = 720; // 0.5"
-/** Return address: 0.25"–1.5" from top; recipient: 2.25"–3.25" from top. */
-const ENVELOPE_RETURN_TOP = Math.round(0.375 * TWIP);
-const ENVELOPE_MAIL_TO_TOP = Math.round(2.25 * TWIP);
-const ENVELOPE_LINE_HEIGHT = 240;
+/** Return address zone: 0.5" from sheet top. Recipient zone: 2.3125" (2⁵⁄₁₆") from sheet top. */
+const ENVELOPE_RETURN_OFFSET = Math.round(0.5 * TWIP);
+const ENVELOPE_MAIL_TO_TOP = Math.round(2.3125 * TWIP);
+/** Window fits ~4.5" × 1" of address lines — keep recipient block inside this column. */
+const ENVELOPE_WINDOW_WIDTH = Math.round(4.5 * TWIP);
 /** Minimal vertical margins so tri-fold panels use the full 11" sheet. */
 const MARGIN_TOP = 0;
 const MARGIN_BOTTOM = 0;
 /** Printable content width (letter minus envelope left + right margins). */
 const CONTENT_WIDTH = PAGE_WIDTH - ENVELOPE_LEFT_MARGIN - MARGIN_RIGHT;
-/** Wider address column; narrower invoice block on the right. */
-const INVOICE_COL = Math.round(CONTENT_WIDTH * 0.36);
-const ADDRESS_COL = CONTENT_WIDTH - INVOICE_COL;
-const MAIL_TO_COL = Math.round(ADDRESS_COL * 0.52);
-const SERVICE_COL = ADDRESS_COL - MAIL_TO_COL;
+const INVOICE_COL = CONTENT_WIDTH - ENVELOPE_WINDOW_WIDTH;
 /** Line-item table columns (fixed dxa — required for Google Docs). */
 const COL_DESC = Math.round(CONTENT_WIDTH * 0.52);
 const COL_QTY = Math.round(CONTENT_WIDTH * 0.12);
 const COL_UNIT = Math.round(CONTENT_WIDTH * 0.16);
 const COL_TOTAL = CONTENT_WIDTH - COL_DESC - COL_QTY - COL_UNIT;
-const COL_PAYMENT = Math.round(CONTENT_WIDTH * 0.58);
-const COL_TOTALS = CONTENT_WIDTH - COL_PAYMENT;
 /** Printable height and exact tri-fold thirds (11" ÷ 3 per panel). */
 const USABLE_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
 const PANEL_HEIGHT = Math.floor(USABLE_HEIGHT / 3);
 
-/** Vertical gap before mail-to block so it lands in the #10 lower window (2.25" from top). */
-export function envelopeMailToSpacingBefore(returnLineCount: number): number {
-	return Math.max(
-		ENVELOPE_MAIL_TO_TOP - ENVELOPE_RETURN_TOP - returnLineCount * ENVELOPE_LINE_HEIGHT,
-		120
-	);
+/** Recipient block top offset on unfolded sheet (inches) for #10 lower window after tri-fold. */
+export function envelopeRecipientTopInches(): number {
+	return ENVELOPE_MAIL_TO_TOP / TWIP;
 }
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
@@ -200,8 +192,8 @@ type Alignment = (typeof import('docx'))['AlignmentType'][keyof (typeof import('
 
 /**
  * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
- * Top third: #10 window return + mail-to beside service location (left), compact invoice (right).
- * Remainder: line items and payment flow together on one page.
+ * Top third: #10 window return + recipient (fixed rows, left), invoice + service (right).
+ * Remainder: line items, payment, and right-justified total on one page.
  */
 export async function generateInvoiceDocx(
 	job: Job,
@@ -357,12 +349,26 @@ export async function generateInvoiceDocx(
 			opts
 		);
 
-	const addressLines = (lines: string[], boldFirst = false) =>
+	const addressLines = (
+		lines: string[],
+		opts?: { boldFirst?: boolean; firstSpacingBefore?: number }
+	) =>
 		lines.map((line, i) =>
-			para([run(line, { bold: boldFirst && i === 0, size: FONT_ENVELOPE })], {
-				spacingAfter: 40
+			para([run(line, { bold: opts?.boldFirst && i === 0, size: FONT_ENVELOPE })], {
+				spacingAfter: i === lines.length - 1 ? 0 : 40,
+				spacingBefore: i === 0 ? (opts?.firstSpacingBefore ?? 0) : 0
 			})
 		);
+
+	const flushCell = (
+		widthTwips: number,
+		children: (InstanceType<DocxModule['Paragraph']> | InstanceType<DocxModule['Table']>)[],
+		verticalAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign]
+	) =>
+		makeCell(widthTwips, children, {
+			verticalAlign,
+			margins: { top: 0, bottom: 0, left: 0, right: 0 }
+		});
 
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
 	if (serviceLines.length === 0) serviceLines.push('—');
@@ -413,83 +419,65 @@ export async function generateInvoiceDocx(
 			: [])
 	];
 
-	const mailToServiceTable = makeTable(
-		[MAIL_TO_COL, SERVICE_COL],
-		[
-			new TableRow({
-				children: [
-					makeCell(
-						MAIL_TO_COL,
-						[
-							para([run('Mail to:', { bold: true, size: FONT_ENVELOPE })], { spacingAfter: 40 }),
-							...addressLines(recipientLines)
-						],
-						{ margins: { top: 0, bottom: 0, left: 0, right: 100 } }
-					),
-					makeCell(
-						SERVICE_COL,
-						[
-							para([run('Service location', { bold: true, size: FONT_LABEL })], {
-								align: AlignmentType.CENTER,
-								spacingAfter: 40
-							}),
-							...serviceLines.map((line) =>
-								para([run(line)], { align: AlignmentType.CENTER, spacingAfter: 40 })
-							)
-						],
-						{
-							verticalAlign: VerticalAlign.CENTER,
-							margins: { top: 0, bottom: 0, left: 60, right: 0 }
-						}
-					)
-				]
-			})
-		]
-	);
-
-	/** Top tri-fold panel: #10 window addresses (left) + compact invoice block (right). */
-	const topFoldTable = makeTable(
-		[ADDRESS_COL, INVOICE_COL],
-		[
-			new TableRow({
-				children: [
-					makeCell(
-						ADDRESS_COL,
-						[
-							...addressLines(returnLines, true),
-							para([], { spacingBefore: envelopeMailToSpacingBefore(returnLines.length) }),
-							mailToServiceTable
-						],
-						{ margins: { top: 0, bottom: 0, left: 0, right: 120 } }
-					),
-					makeCell(
-						INVOICE_COL,
-						[
-							para([run('Invoice', { bold: true, size: FONT_TITLE })], {
-								align: AlignmentType.RIGHT,
-								spacingAfter: 40
-							}),
-							...invoiceMetaBlock,
-							...(ctx.businessPhone?.trim()
-								? [contactLine('Phone', ctx.businessPhone.trim())]
-								: []),
-							...(ctx.businessEmail?.trim()
-								? [contactLine('Email', ctx.businessEmail.trim())]
-								: []),
-							...(ctx.businessWebsite?.trim()
-								? [contactLine('Website', ctx.businessWebsite.trim())]
-								: [])
-						],
-						{ margins: { top: 0, bottom: 0, left: 80, right: 0 } }
-					)
-				]
-			})
-		]
-	);
-
 	const exactRow = (heightTwips: number) => ({
 		height: { value: heightTwips, rule: HeightRule.EXACT }
 	});
+
+	const serviceBlock = [
+		para([run('Service location', { bold: true, size: FONT_LABEL })], {
+			align: AlignmentType.CENTER,
+			spacingAfter: 40
+		}),
+		...serviceLines.map((line) =>
+			para([run(line)], { align: AlignmentType.CENTER, spacingAfter: 40 })
+		)
+	];
+
+	/**
+	 * Top tri-fold panel: left column is ONLY #10 window content (return row, then recipient row
+	 * at a fixed 2.3125" crease). No labels inside the recipient window — address lines only.
+	 */
+	const topFoldTable = makeTable(
+		[ENVELOPE_WINDOW_WIDTH, INVOICE_COL],
+		[
+			new TableRow({
+				...exactRow(ENVELOPE_MAIL_TO_TOP),
+				children: [
+					flushCell(
+						ENVELOPE_WINDOW_WIDTH,
+						addressLines(returnLines, {
+							boldFirst: true,
+							firstSpacingBefore: ENVELOPE_RETURN_OFFSET
+						})
+					),
+					flushCell(INVOICE_COL, [
+						para([run('Invoice', { bold: true, size: FONT_TITLE })], {
+							align: AlignmentType.RIGHT,
+							spacingAfter: 40
+						}),
+						...invoiceMetaBlock
+					])
+				]
+			}),
+			new TableRow({
+				children: [
+					flushCell(ENVELOPE_WINDOW_WIDTH, addressLines(recipientLines)),
+					flushCell(INVOICE_COL, [
+						...serviceBlock,
+						...(ctx.businessPhone?.trim()
+							? [contactLine('Phone', ctx.businessPhone.trim())]
+							: []),
+						...(ctx.businessEmail?.trim()
+							? [contactLine('Email', ctx.businessEmail.trim())]
+							: []),
+						...(ctx.businessWebsite?.trim()
+							? [contactLine('Website', ctx.businessWebsite.trim())]
+							: [])
+					])
+				]
+			})
+		]
+	);
 
 	const billableRows = (job.billableItems || []).map((item: any, idx: number) =>
 		new TableRow({
@@ -586,33 +574,39 @@ export async function generateInvoiceDocx(
 	];
 
 	const totalsBlock = [
-		para(
-			[
-				run('Total        ', { bold: true, size: FONT_TOTAL, color: COLOR_MUTED }),
-				run(`$${total.toFixed(2)}`, { bold: true, size: FONT_TOTAL, color: COLOR_MUTED })
-			],
-			{ align: AlignmentType.RIGHT, spacingBefore: TIGHT }
-		),
-		para(
-			[run(`Amount due by ${dueDateStr}`, { bold: true, color: COLOR_MUTED })],
-			{ align: AlignmentType.RIGHT, spacingAfter: 20 }
-		)
+		para([run(`Total   $${total.toFixed(2)}`, { bold: true, size: FONT_TOTAL, color: COLOR_MUTED })], {
+			align: AlignmentType.RIGHT,
+			spacingBefore: TIGHT,
+			spacingAfter: 20
+		}),
+		para([run(`Amount due by ${dueDateStr}`, { bold: true, color: COLOR_MUTED })], {
+			align: AlignmentType.RIGHT,
+			spacingAfter: 0
+		})
 	];
 
-	const footerTable = makeTable(
-		[COL_PAYMENT, COL_TOTALS],
+	const paymentTable = makeTable(
+		[CONTENT_WIDTH],
 		[
 			new TableRow({
 				children: [
-					makeCell(COL_PAYMENT, paymentBlock, { margins: { top: 0, bottom: 0, left: 0, right: 160 } }),
-					makeCell(COL_TOTALS, totalsBlock, { margins: { top: 0, bottom: 0, left: 0, right: 0 } })
+					flushCell(CONTENT_WIDTH, paymentBlock)
 				]
 			})
 		]
 	);
 
-	// Top third = #10 envelope windows; remainder = line items + payment (no forced panel gap).
-	const bodyPanel = [lineItemsTable, footerTable];
+	const totalsTable = makeTable(
+		[CONTENT_WIDTH],
+		[
+			new TableRow({
+				children: [flushCell(CONTENT_WIDTH, totalsBlock)]
+			})
+		]
+	);
+
+	// Top third = #10 envelope windows; remainder = line items + payment + total (full-width right).
+	const bodyPanel = [lineItemsTable, paymentTable, totalsTable];
 
 	const pageTable = makeTable(
 		[CONTENT_WIDTH],
@@ -620,9 +614,7 @@ export async function generateInvoiceDocx(
 			new TableRow({
 				...exactRow(PANEL_HEIGHT),
 				children: [
-					makeCell(CONTENT_WIDTH, [topFoldTable], {
-						margins: { top: ENVELOPE_RETURN_TOP, bottom: 40, left: 0, right: 0 }
-					})
+					flushCell(CONTENT_WIDTH, [topFoldTable])
 				]
 			}),
 			new TableRow({

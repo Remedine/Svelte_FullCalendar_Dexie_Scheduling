@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	buildPaymentInstructions,
-	envelopeMailToSpacingBefore,
+	envelopeRecipientTopInches,
 	getBusinessReturnAddressLines,
 	getClientBillToAddress,
 	getClientServiceAddress,
@@ -35,9 +35,8 @@ describe('buildPaymentInstructions', () => {
 });
 
 describe('envelope window spacing', () => {
-	it('positions mail-to block near 2.25" for typical return address', () => {
-		expect(envelopeMailToSpacingBefore(3)).toBeGreaterThan(600);
-		expect(envelopeMailToSpacingBefore(5)).toBeGreaterThanOrEqual(120);
+	it('places recipient block at 2.3125" for #10 lower window', () => {
+		expect(envelopeRecipientTopInches()).toBeCloseTo(2.3125, 3);
 	});
 });
 
