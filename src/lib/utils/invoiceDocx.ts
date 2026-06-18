@@ -46,8 +46,9 @@ const PAGE_HEIGHT = Math.round(11 * TWIP);
 /** Left margin aligned with common 1-1/8" double-window envelope offset. */
 const ENVELOPE_LEFT_MARGIN = Math.round(1.125 * TWIP);
 const MARGIN_RIGHT = 720; // 0.5"
-const MARGIN_TOP = 360;
-const MARGIN_BOTTOM = 360;
+/** Minimal vertical margins so tri-fold panels use the full 11" sheet. */
+const MARGIN_TOP = 0;
+const MARGIN_BOTTOM = 0;
 /** Printable content width (letter minus envelope left + right margins). */
 const CONTENT_WIDTH = PAGE_WIDTH - ENVELOPE_LEFT_MARGIN - MARGIN_RIGHT;
 const HALF_COL = Math.round(CONTENT_WIDTH / 2);
@@ -58,8 +59,9 @@ const COL_UNIT = Math.round(CONTENT_WIDTH * 0.16);
 const COL_TOTAL = CONTENT_WIDTH - COL_DESC - COL_QTY - COL_UNIT;
 const COL_PAYMENT = Math.round(CONTENT_WIDTH * 0.58);
 const COL_TOTALS = CONTENT_WIDTH - COL_PAYMENT;
-/** #10 tri-fold envelope zones (~2.75" top and bottom). */
-const ENVELOPE_ZONE = Math.round(2.75 * TWIP);
+/** Printable height and exact tri-fold thirds (11" ÷ 3 per panel). */
+const USABLE_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+const PANEL_HEIGHT = Math.floor(USABLE_HEIGHT / 3);
 
 function resolveTaxRatePercent(job: Job, optsRate?: number): number {
 	const raw = optsRate ?? job.taxRate ?? 5;
@@ -188,8 +190,8 @@ type DocxModule = Awaited<ReturnType<typeof importDocx>>;
 type Alignment = (typeof import('docx'))['AlignmentType'][keyof (typeof import('docx'))['AlignmentType']];
 
 /**
- * Generate a compact one-page invoice .docx styled like the QuickBooks contractor template.
- * Uses flat paragraphs + DXA-width tables for Google Docs compatibility.
+ * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
+ * Top third: return + mail-to addresses; middle/bottom thirds: contractor-style invoice body.
  */
 export async function generateInvoiceDocx(
 	job: Job,
@@ -208,7 +210,8 @@ export async function generateInvoiceDocx(
 		WidthType,
 		VerticalAlign,
 		BorderStyle,
-		ShadingType
+		ShadingType,
+		HeightRule
 	} = await importDocx();
 
 	const businessName = ctx.businessName || 'Capital City Windows';
@@ -344,12 +347,24 @@ export async function generateInvoiceDocx(
 			{ margins: { top: 0, bottom: 0, left: 0, right: rightPad } }
 		);
 
-	const envelopeBlock = (lines: string[], boldFirst = false) =>
+	const addressLines = (lines: string[], boldFirst = false) =>
 		lines.map((line, i) =>
 			para([run(line, { bold: boldFirst && i === 0, size: FONT_ENVELOPE })], {
-				spacingAfter: 80
+				spacingAfter: 60
 			})
 		);
+
+	/** Top tri-fold panel: return address (upper window) + mail-to (lower window). */
+	const topFoldPanel = [
+		...addressLines(returnLines, true),
+		spacer(360),
+		para([run('Mail to:', { bold: true, size: FONT_ENVELOPE })], { spacingAfter: 60 }),
+		...addressLines(recipientLines)
+	];
+
+	const exactRow = (heightTwips: number) => ({
+		height: { value: heightTwips, rule: HeightRule.EXACT }
+	});
 
 	const billToLines = [clientName, billTo.street, billTo.csz].filter((l) => l.trim().length > 0);
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
@@ -534,22 +549,48 @@ export async function generateInvoiceDocx(
 		]
 	);
 
-	// Flat document: envelope zones use paragraph spacing (no nested tables — Google Docs friendly).
-	const children = [
-		...envelopeBlock(returnLines, true),
-		spacer(Math.max(ENVELOPE_ZONE - returnLines.length * 320, SECTION)),
+	// Full-sheet tri-fold: top third = envelope addresses, middle + bottom = invoice body.
+	const middlePanel = [
 		headerTable,
 		spacer(),
 		addressTable,
 		spacer(),
-		...detailsBlock,
-		spacer(),
-		lineItemsTable,
-		spacer(),
-		footerTable,
-		spacer(Math.max(ENVELOPE_ZONE - recipientLines.length * 320, SECTION)),
-		...envelopeBlock(recipientLines)
+		...detailsBlock
 	];
+
+	const bottomPanel = [lineItemsTable, spacer(), footerTable];
+
+	const pageTable = makeTable(
+		[CONTENT_WIDTH],
+		[
+			new TableRow({
+				...exactRow(PANEL_HEIGHT),
+				children: [
+					makeCell(CONTENT_WIDTH, topFoldPanel, {
+						margins: { top: 200, bottom: 120, left: 0, right: 0 }
+					})
+				]
+			}),
+			new TableRow({
+				...exactRow(PANEL_HEIGHT),
+				children: [
+					makeCell(CONTENT_WIDTH, middlePanel, {
+						margins: { top: 120, bottom: 80, left: 0, right: 0 }
+					})
+				]
+			}),
+			new TableRow({
+				...exactRow(PANEL_HEIGHT),
+				children: [
+					makeCell(CONTENT_WIDTH, bottomPanel, {
+						margins: { top: 80, bottom: 120, left: 0, right: 0 }
+					})
+				]
+			})
+		]
+	);
+
+	const children = [pageTable];
 
 	const doc = new Document({
 		styles: {
