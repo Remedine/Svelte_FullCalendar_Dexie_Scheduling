@@ -346,11 +346,11 @@ export function openJobDetailsModal(
 
 | Component | Source | Notes |
 |-----------|--------|-------|
-| PocketBase records | Server (`data.db` / API export) | All collections and record data. |
+| PocketBase records | Nightly **`data.db` copy** (+ `types.d.ts` / migrations as needed) | All collections and record data. Brief write quiesce during copy. |
 | Uploaded files | Server `pb_data/storage/` (or S3 — see §14.3) | Invoice `.docx`, photos, supporting docs, etc. |
-| Offline sync queue | Dexie `syncQueue` on admin device | Exported as **`sync_queue.json`** and bundled with the backup. |
+| Offline sync queue | Dexie `syncQueue` on admin device | Exported as **`sync_queue.json`** and bundled when the admin PWA uploads it. |
 
-**Important:** The sync queue today lives **only in the browser** (Dexie). Scheduled server-side jobs cannot capture it unless we (a) upload a queue snapshot from the admin PWA during/after backup, or (b) add a server-side queue mirror later. **“Backup now”** from the Options → Backups tab should always include the current device’s `sync_queue.json`.
+**Sync queue (decided):** Queue lives only in the browser. **No server mirror.** Rely on **periodic admin app use** — when an admin opens the PWA, upload the latest `sync_queue.json` to attach to the next backup bundle. **“Backup now”** always includes the current device’s queue immediately.
 
 ### 14.2 Schedule, timezone & delivery
 
@@ -363,39 +363,39 @@ export function openJobDetailsModal(
 | Manual backup | **“Backup now”** button on **Options → Backups** tab (same archive builder as scheduled job). |
 | Failure alerting | Email address(es) configured on **Options → Backups** tab when a scheduled backup fails. |
 
-### 14.3 Archive format — PocketBase native vs split (exploration)
+### 14.3 Archive format — split strategy (decided)
 
-**PocketBase native backup (`pb.backups.create`)**
-
-- Produces a `.zip` that is a **full snapshot of `pb_data`** at backup time.
-- **Includes uploaded files** when storage is on the **local filesystem** (`pb_data/storage/`).
-- **Does not include S3-backed files** (PocketBase limitation — S3 vendors are expected to provide their own versioning/backup).
-- **Restore:** Upload/restore via PocketBase admin or API — **portable** to another PB instance.
-- **Downside:** Every backup is a **full** archive; large storage → large daily zips. PocketBase has discussed but not shipped a built-in “exclude storage” flag.
-
-**Recommended hybrid (feasible, matches “small daily + files on change”)**
+Daily backups use a **split archive** (not a single full PocketBase native zip every night).
 
 | Artifact | Contents | When |
 |----------|----------|------|
-| `{date}_{business}_records.zip` | PocketBase **records-only** snapshot: either native backup with storage stripped by custom packer, **or** nightly `data.db` + migrations/types (server must quiesce writes briefly), **or** JSON export of all collections via API | **Daily** |
-| `{date}_{business}_files.zip` (optional) | **Incremental** upload of files changed since last manifest (path + mtime/size manifest on server) | **Daily**, only if files changed |
-| `sync_queue.json` | Dexie offline queue from admin PWA | **Daily** (uploaded with backup job) + always on manual backup |
-| `{date}_{business}_full.zip` | Full native PB backup (records + all files) | **Retention anchor days** and before major migrations |
+| `{date}_{business}_records.zip` | Nightly **`data.db` copy** + `types.d.ts` / migrations folder as needed | **Daily** |
+| `{date}_{business}_files.zip` | **Incremental** files changed since last manifest (path + mtime/size manifest) | **Daily**, only if files changed |
+| `sync_queue.json` | Dexie offline queue from admin PWA | When admin app uploads snapshot (periodic use) + always on **Backup now** |
+| `{date}_{business}_full.zip` | Full PocketBase native backup (`pb.backups.create` — records + all local files) | **Retention anchor days** and before major migrations |
 
-**Incremental files — feasibility**
+**Records (`data.db` copy)**
 
-- PocketBase does not emit per-file backup events; implement a **cron manifest scan**: compare `storage/` against last backup manifest → zip only new/changed paths.
-- Deleted files: manifest records deletions so restore can reconcile orphans.
-- On retention anchor days (1st, 8th, …), run a **full file snapshot** so incremental chains have a known base.
-- If storage moves to **S3**, shift file backup to S3 lifecycle/versioning; keep PB record exports on schedule.
+- Server cron copies `pb_data/data.db` during a brief write quiesce (stop PB or use SQLite backup API if available).
+- Simpler restore than JSON export: replace `data.db` and restart PocketBase.
+- Does **not** include uploaded files — those are in the files artifact.
 
-**Portable human-readable export (optional admin toggle)**
+**Incremental files**
 
-- Offer **JSON** and/or **CSV** export of collections (PocketBase admin supports bulk JSON export per collection; CSV useful for spreadsheets / non-PB tools).
-- These are **not** a substitute for disaster restore — document as “data portability / analysis” alongside the restore-capable archive.
-- Restore path: custom import scripts or manual PB import (out of scope for v1 unless we add a guided restore).
+- Cron manifest scan of `pb_data/storage/` → zip only new/changed paths vs last manifest.
+- Manifest records deletions for restore reconciliation.
+- On retention anchor days (1st, 8th, 15th, 22nd, 29th / Feb last day), run a **full file snapshot** as incremental chain base.
 
-**v1 recommendation:** Implement **split archives** (records + incremental files + `sync_queue.json`) for daily runs; **full native zip** on calendar anchor days; optional JSON/CSV download on “Backup now” for portability.
+**Full native zip (anchor days only)**
+
+- `pb.backups.create()` includes local `storage/`; does **not** include S3-backed files.
+- Used for complete point-in-time recovery on calendar anchors, not nightly.
+
+**Optional portability (not v1 restore path)**
+
+- JSON/CSV collection export toggles on **Backup now** for analysis / non-PB tools — supplementary only.
+
+**S3 note:** If storage moves off local disk, shift file backup to S3 lifecycle/versioning; keep nightly `data.db` copy on schedule.
 
 ### 14.4 Retention policy (calendar anchors — decided)
 
@@ -409,7 +409,7 @@ Retention uses **fixed calendar dates** in Alaska time (not “last Sunday of we
 | **1 – 7 years** | **Jan 1, Apr 1, Jul 1, Oct 1** (quarterly) only. |
 | **> 7 years** | **Jan 1** (yearly) only — prune older quarterly snapshots. |
 
-A scheduled **retention job** deletes backups on Google Drive / server backup store that fail the rules above. **Email copies:** TBD whether to prune (product default: do not auto-delete from mailboxes; rely on mailbox retention).
+A scheduled **retention job** prunes backups on **Google Drive** and **server backup store** only. **Email copies are never pruned** — rely on mailbox retention.
 
 **Example (Alaska dates)**
 
@@ -433,10 +433,9 @@ Oct 2026–2027:  keep 1st of each month
 
 ### 14.6 Open items (remaining)
 
-1. **Email retention** — Auto-prune emailed backups or leave to mailbox policy? (Default proposal: no server-side email pruning.)
-2. **Sync queue on unattended daily job** — Require admin PWA open once daily, or add server queue mirror for 100% automated coverage?
-3. **S3 storage** — If/when files move off local disk, document parallel S3 backup strategy.
-4. **Exact backup time of day** (e.g. 02:00 Alaska) — pick during implementation.
+1. **S3 storage** — If/when files move off local disk, document parallel S3 backup strategy.
+2. **Exact backup time of day** (e.g. 02:00 Alaska) — pick during implementation.
+3. **`data.db` quiesce strategy** — Stop PocketBase briefly vs SQLite online backup API — pick during implementation.
 
 ---
 
