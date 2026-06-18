@@ -145,15 +145,6 @@ function formatMailingLines(info: InvoiceDocxBusinessInfo): string[] {
 	return lines;
 }
 
-function formatBusinessAddressLines(info: InvoiceDocxBusinessInfo): string[] {
-	const street = info.businessStreet?.trim();
-	const csz = formatCityStateZip(info.businessCity, info.businessState, info.businessZip);
-	const lines: string[] = [];
-	if (street) lines.push(street);
-	if (csz.trim()) lines.push(csz.trim());
-	return lines;
-}
-
 /** Payment instructions tailored to client preferred billing method. */
 export function buildPaymentInstructions(
 	client: Client | null | undefined,
@@ -191,7 +182,8 @@ type Alignment = (typeof import('docx'))['AlignmentType'][keyof (typeof import('
 
 /**
  * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
- * Top third: return + mail-to addresses; middle/bottom thirds: contractor-style invoice body.
+ * Top third: return + mail-to (left) with invoice header + service location (right).
+ * Middle/bottom thirds: compact details, line items, and payment.
  */
 export async function generateInvoiceDocx(
 	job: Job,
@@ -229,11 +221,9 @@ export async function generateInvoiceDocx(
 			: '';
 
 	const clientName = client?.name || 'Client';
-	const billTo = getClientBillToAddress(client);
 	const serviceLoc = getClientServiceAddress(client);
 	const returnLines = getBusinessReturnAddressLines(ctx);
 	const recipientLines = getRecipientMailingLines(client, clientName);
-	const businessAddressLines = formatBusinessAddressLines(ctx);
 	const paymentLines = buildPaymentInstructions(client, ctx);
 
 	const noBorders = {
@@ -270,7 +260,12 @@ export async function generateInvoiceDocx(
 
 	const para = (
 		children: InstanceType<DocxModule['TextRun']>[],
-		opts?: { align?: Alignment; spacingAfter?: number; spacingBefore?: number }
+		opts?: {
+			align?: Alignment;
+			spacingAfter?: number;
+			spacingBefore?: number;
+			shading?: { fill: string; type: (typeof ShadingType)[keyof typeof ShadingType] };
+		}
 	) =>
 		new Paragraph({
 			alignment: opts?.align,
@@ -278,6 +273,7 @@ export async function generateInvoiceDocx(
 				after: opts?.spacingAfter ?? 40,
 				before: opts?.spacingBefore ?? 0
 			},
+			...(opts?.shading ? { shading: opts.shading } : {}),
 			children
 		});
 
@@ -337,16 +333,6 @@ export async function generateInvoiceDocx(
 			opts
 		);
 
-	const labeledBlock = (label: string, lines: string[], widthTwips: number, rightPad = 0) =>
-		makeCell(
-			widthTwips,
-			[
-				para([run(label, { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
-				...lines.map((line) => para([run(line)], { spacingAfter: 40 }))
-			],
-			{ margins: { top: 0, bottom: 0, left: 0, right: rightPad } }
-		);
-
 	const addressLines = (lines: string[], boldFirst = false) =>
 		lines.map((line, i) =>
 			para([run(line, { bold: boldFirst && i === 0, size: FONT_ENVELOPE })], {
@@ -354,36 +340,21 @@ export async function generateInvoiceDocx(
 			})
 		);
 
-	/** Top tri-fold panel: return address (upper window) + mail-to (lower window). */
-	const topFoldPanel = [
-		...addressLines(returnLines, true),
-		spacer(360),
-		para([run('Mail to:', { bold: true, size: FONT_ENVELOPE })], { spacingAfter: 60 }),
-		...addressLines(recipientLines)
-	];
-
-	const exactRow = (heightTwips: number) => ({
-		height: { value: heightTwips, rule: HeightRule.EXACT }
-	});
-
-	const billToLines = [clientName, billTo.street, billTo.csz].filter((l) => l.trim().length > 0);
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
 	if (serviceLines.length === 0) serviceLines.push('—');
-
-	const companyLines = [
-		para([run(businessName, { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
-		...businessAddressLines.map((line) => para([run(line)], { spacingAfter: 40 }))
-	];
 
 	const contactLine = (label: string, value: string) =>
 		para([run(`${label}: ${value}`)], { align: AlignmentType.RIGHT, spacingAfter: 40 });
 
-	const headerTable = makeTable(
+	/** Top tri-fold panel: envelope windows (left) + invoice header / service location (right). */
+	const topFoldTable = makeTable(
 		[HALF_COL, HALF_COL],
 		[
 			new TableRow({
 				children: [
-					makeCell(HALF_COL, companyLines, { margins: { top: 0, bottom: 0, left: 0, right: 160 } }),
+					makeCell(HALF_COL, addressLines(returnLines, true), {
+						margins: { top: 0, bottom: 0, left: 0, right: 160 }
+					}),
 					makeCell(
 						HALF_COL,
 						[
@@ -404,30 +375,55 @@ export async function generateInvoiceDocx(
 						{ margins: { top: 0, bottom: 0, left: 0, right: 0 } }
 					)
 				]
-			})
-		]
-	);
-
-	const addressTable = makeTable(
-		[HALF_COL, HALF_COL],
-		[
+			}),
 			new TableRow({
 				children: [
-					labeledBlock('Bill to', billToLines, HALF_COL, 160),
-					labeledBlock('Service location', serviceLines, HALF_COL)
+					makeCell(
+						HALF_COL,
+						[
+							para([run('Mail to:', { bold: true, size: FONT_ENVELOPE })], { spacingAfter: 60 }),
+							...addressLines(recipientLines)
+						],
+						{ margins: { top: 120, bottom: 0, left: 0, right: 160 } }
+					),
+					makeCell(
+						HALF_COL,
+						[
+							para([run('Service location', { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
+							...serviceLines.map((line) => para([run(line)], { spacingAfter: 40 }))
+						],
+						{ margins: { top: 120, bottom: 0, left: 0, right: 0 } }
+					)
 				]
 			})
 		]
 	);
 
+	const exactRow = (heightTwips: number) => ({
+		height: { value: heightTwips, rule: HeightRule.EXACT }
+	});
+
 	const detailsBlock = [
 		para([run('Details', { bold: true, size: FONT_LABEL })], { spacingAfter: 60 }),
-		para([run(`Invoice# ${ctx.invoiceNumber}`)], { spacingAfter: 40 }),
-		para([run(`Invoice date: ${invoiceDate}`)], { spacingAfter: 40 }),
-		para([run(`Terms: Net ${dueDays}`)], { spacingAfter: 40 }),
-		para([run(`Due date: ${dueDateStr}`)], { spacingAfter: 40 }),
+		para(
+			[
+				run(`Invoice# ${ctx.invoiceNumber}`, { bold: true }),
+				run('     '),
+				run(`Invoice date: ${invoiceDate}`)
+			],
+			{ spacingAfter: 40 }
+		),
+		para(
+			[
+				run('Due date: ', { bold: true }),
+				run(dueDateStr, { bold: true })
+			],
+			{
+				spacingAfter: 40,
+				shading: { fill: 'FFF3CD', type: ShadingType.CLEAR }
+			}
+		),
 		para([run(`Service date: ${serviceDate}${serviceEnd}`)], { spacingAfter: 40 }),
-		para([run(`Job: ${job.title || 'Window cleaning service'}`)], { spacingAfter: 40 }),
 		...(ctx.businessSalesTaxAccount
 			? [para([run(`CBJ Sales Tax Acct: ${ctx.businessSalesTaxAccount}`)], { spacingAfter: 40 })]
 			: [])
@@ -552,14 +548,8 @@ export async function generateInvoiceDocx(
 		]
 	);
 
-	// Full-sheet tri-fold: top third = envelope addresses, middle + bottom = invoice body.
-	const middlePanel = [
-		headerTable,
-		spacer(),
-		addressTable,
-		spacer(),
-		...detailsBlock
-	];
+	// Full-sheet tri-fold: top third = envelope + header; middle = compact details; bottom = line items.
+	const middlePanel = [...detailsBlock];
 
 	const bottomPanel = [lineItemsTable, spacer(), footerTable];
 
@@ -569,7 +559,7 @@ export async function generateInvoiceDocx(
 			new TableRow({
 				...exactRow(PANEL_HEIGHT),
 				children: [
-					makeCell(CONTENT_WIDTH, topFoldPanel, {
+					makeCell(CONTENT_WIDTH, [topFoldTable], {
 						margins: { top: 200, bottom: 120, left: 0, right: 0 }
 					})
 				]
