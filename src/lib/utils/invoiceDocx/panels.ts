@@ -1,4 +1,5 @@
 import type { Job } from '$lib/db';
+import type { InvoiceBillableItem, InvoiceDiscount } from '$lib/utils/invoiceTypes';
 import type { InvoiceDocxBuilder } from './builder';
 import {
 	COLOR_MUTED,
@@ -152,11 +153,19 @@ export function buildTopFoldTable(
 	]);
 }
 
-export function buildLineItemsTable(b: InvoiceDocxBuilder, job: Job, taxLabel: string, taxPct: number) {
+export function buildLineItemsTableFromSnapshot(
+	b: InvoiceDocxBuilder,
+	items: InvoiceBillableItem[],
+	subtotal: number,
+	taxAmount: number,
+	taxLabel: string,
+	taxPct: number,
+	invoiceDiscount?: InvoiceDiscount
+) {
 	const { AlignmentType } = b;
 	const lineCellMargins = { top: 40, bottom: 40, left: 60, right: 60 };
 
-	const billableRows = (job.billableItems || []).map((item, idx: number) =>
+	const billableRows = (items || []).map((item, idx: number) =>
 		new b.TableRow({
 			children: [
 				b.textCell(item.title || `Item ${idx + 1}`, COL_DESC, { margins: lineCellMargins }),
@@ -176,8 +185,31 @@ export function buildLineItemsTable(b: InvoiceDocxBuilder, job: Job, taxLabel: s
 		})
 	);
 
-	const subtotal = job.subtotal ?? 0;
-	const taxAmount = job.taxAmount ?? 0;
+	const discountRows =
+		invoiceDiscount && invoiceDiscount.value > 0
+			? [
+					new b.TableRow({
+						children: [
+							b.textCell(
+								invoiceDiscount.type === 'percent'
+									? `Discount (${invoiceDiscount.value}%)`
+									: 'Discount',
+								COL_DESC,
+								{ borders: b.lineBorders, margins: lineCellMargins }
+							),
+							b.textCell('', COL_QTY, { borders: b.lineBorders, margins: lineCellMargins }),
+							b.textCell('', COL_UNIT, { borders: b.lineBorders, margins: lineCellMargins }),
+							b.textCell(
+								invoiceDiscount.type === 'amount'
+									? `-$${invoiceDiscount.value.toFixed(2)}`
+									: '',
+								COL_TOTAL,
+								{ align: AlignmentType.RIGHT, borders: b.lineBorders, margins: lineCellMargins }
+							)
+						]
+					})
+				]
+			: [];
 
 	return b.makeTable(
 		[COL_DESC, COL_QTY, COL_UNIT, COL_TOTAL],
@@ -214,6 +246,7 @@ export function buildLineItemsTable(b: InvoiceDocxBuilder, job: Job, taxLabel: s
 				]
 			}),
 			...billableRows,
+			...discountRows,
 			new b.TableRow({
 				children: [
 					b.textCell('Subtotal', COL_DESC, { borders: b.lineBorders, margins: lineCellMargins }),
@@ -243,6 +276,17 @@ export function buildLineItemsTable(b: InvoiceDocxBuilder, job: Job, taxLabel: s
 			})
 		],
 		b.lineBorders
+	);
+}
+
+export function buildLineItemsTable(b: InvoiceDocxBuilder, job: Job, taxLabel: string, taxPct: number) {
+	return buildLineItemsTableFromSnapshot(
+		b,
+		(job.billableItems || []) as InvoiceBillableItem[],
+		job.subtotal ?? 0,
+		job.taxAmount ?? 0,
+		taxLabel,
+		taxPct
 	);
 }
 

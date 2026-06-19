@@ -137,30 +137,38 @@ export interface Invoice {
   ```
 - `dueDate` is set at generation time using `job.end + invoiceDueDays` (or current options value).
 
-## 6. Generation Flow
+## 6. Invoice Editor & Generation Flow (v2)
 
-- **Generate Draft** (available on scheduled/confirmed jobs):
-  - Creates an Invoice with `status: 'draft'`.
-  - Generates .docx from current job billables + client + current tax/due settings.
-  - Stores the .docx as the primary file on the new Invoice record.
-  - Located in JobDetailsModal under the Billing Items section.
+Opening `JobDetailsModal` calls `ensureInvoiceShell(job)`, which auto-fills an editable **invoice snapshot** from the current job + client. The always-visible `InvoiceEditor.svelte` component (under Billing Items) is the single billing UI — it replaces the old two-mode `JobInvoicePanel`.
 
-- **Mark Complete** (on any non-cancelled job):
-  - Sets `job.status = 'completed'`.
-  - Creates (or updates) an Invoice with `status: 'generated'`.
-  - (Re)generates the .docx from current billables.
-  - Stores/overwrites the primary file.
+### Snapshot (authoritative for .docx)
 
-- **Regenerate** (always available once an invoice exists):
-  - Uses the latest job billables to produce a fresh .docx and overwrites the primary file.
-  - Does **not** change status (a generated invoice stays generated even after regen).
+**Editable:** client name; service + billing addresses (`useBillingAddress` toggle with Zod validation when on); phone; email; billable line items (qty/hrs, rate, line discount $/%); invoice-level discount ($/%); invoice notes; due date (default `job.end + options.invoiceDueDays`); invoice date (default today, sticky across regenerate).
 
-- **Manual re-upload of edited .docx**:
-  - User downloads → edits in Word → uploads the saved file via the modal.
-  - The uploaded file replaces `primaryInvoiceFile` on the Invoice record.
-  - Status is not automatically changed on re-upload.
+**Read-only / auto:** options letterhead, tax rate, payment block, signatory, invoice number prefix; computed subtotal / tax / total preview; service date range (from job at docx render); status + `paidAt`.
 
-- The actual .docx generation will live in a reusable helper (e.g. `generateInvoiceDocx(job, client, options)` → Blob).
+**Optional write-back:** admin **Save to client/job** pushes snapshot fields back to the linked Client/Job records.
+
+### Invoice numbering
+
+`{prefix}-{YYYY-MM-DD}-{version}` where `version` increments on each generate/regenerate and the date segment is the generate-click date.
+
+### Actions
+
+- **Generate / Regenerate .docx** — validates snapshot, bumps version, renders via `generateInvoiceDocxFromSnapshot`, stores `primaryInvoiceFile`.
+- **Upload revised .docx** — replaces primary file without changing status.
+- **Supporting docs** — attach scans/PDFs without generating .docx (creates draft shell if needed, single sync queue item).
+- **Send to Client** — emails current .docx when client billing preference is email.
+- **Status quick actions** — Mark Sent / Mark Paid (with paid date), reversible.
+- **Remove .docx** — clears primary file only; invoice shell + supporting docs remain. **No** “Delete entire invoice” UI.
+
+### Mark Complete
+
+Sets `job.status = 'completed'` and ensures an invoice exists (`ensureInvoiceForJob`). Generate/regenerate uses the snapshot, not live job fields, unless the user clicks **Refresh from job**.
+
+### Docx helper
+
+`generateInvoiceDocxFromSnapshot(invoice, job, client, options)` is the primary path; legacy `generateInvoiceDocx` wraps it for compatibility.
 
 ## 7. /jobs Page (Admin Only)
 
@@ -215,8 +223,8 @@ export function openJobDetailsModal(
   2. Client & Location (with area color).
   3. Schedule (start/end, duration).
   4. Assigned Crew (photos + names).
-  5. Billing Items & Totals (this is where the Generate Draft / invoice controls live).
-  6. Invoice Panel (primary file controls: Download, Upload revised .docx, status transitions: Mark Sent, Mark Paid; regenerate action).
+  5. Billing Items summary + **InvoiceEditor** (always-visible snapshot editor, generate/regenerate, supporting docs, status actions).
+  6. Invoice file row (download primary .docx, upload revised, remove .docx only).
   7. Notes (job notes + cancel info if present).
   8. Supporting Documents (list + ability to add more for legacy imports).
   9. Actions footer: Edit job (opens JobFormModal then re-opens this modal via callback), Jump to calendar, Close.

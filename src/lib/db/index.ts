@@ -9,8 +9,34 @@ import {
 	normalizeTaxRateToPercent,
 	taxRatePercentToPbDecimal
 } from '$lib/utils/tax';
+import type {
+	InvoiceBillableItem,
+	InvoiceClientSnapshot,
+	InvoiceDiscount
+} from '$lib/utils/invoiceTypes';
+import {
+	buildClientSnapshotFromClient,
+	buildSnapshotDefaults,
+	billableItemsFromJob,
+	formatInvoiceNumber
+} from '$lib/utils/invoiceSnapshot';
+import { calculateInvoiceTotals, normalizeBillableItems } from '$lib/utils/invoiceTotals';
+export type {
+	InvoiceBillableItem,
+	InvoiceClientSnapshot,
+	InvoiceDiscount
+} from '$lib/utils/invoiceTypes';
+export {
+	formatInvoiceNumber,
+	buildSnapshotDefaults,
+	clientFromSnapshot,
+	isDocxStale
+} from '$lib/utils/invoiceSnapshot';
+export { calculateInvoiceTotals, normalizeBillableItems } from '$lib/utils/invoiceTotals';
+export { validateInvoiceSnapshot } from '$lib/utils/invoiceSchema';
 export {
 	generateInvoiceDocx,
+	generateInvoiceDocxFromSnapshot,
 	businessInfoFromOptions,
 	buildPaymentInstructions,
 	type InvoiceDocxContext,
@@ -216,13 +242,18 @@ export interface Invoice {
 	dueDate: Date;
 	paidAt?: Date;
 	amount: number;
-	// Optional snapshot so historical invoices don't shift if the job billables are later edited
-	billableItems?: Array<{
-		title: string;
-		price: number;
-		quantity: number;
-		total: number;
-	}>;
+	subtotal?: number;
+	taxAmount?: number;
+	billableItems?: InvoiceBillableItem[];
+	/** Editable client block for docx (snapshot; does not mutate Client unless write-back). */
+	clientSnapshot?: InvoiceClientSnapshot;
+	invoiceDiscount?: InvoiceDiscount;
+	/** User-editable date printed on docx; sticky across regenerate. */
+	invoiceDate?: Date;
+	/** Increments on each generate/regenerate for invoice number suffix. */
+	version?: number;
+	/** Set when primary .docx last generated/uploaded (stale-docx detection). */
+	lastGeneratedAt?: Date;
 	/** Invoice-specific notes for the .docx (not job or client notes). */
 	notes?: string;
 	// )=- 'asana-export', 'handwritten-ocr', 'manual', etc. Must allow imperfect data for imports.
@@ -289,6 +320,18 @@ db.version(21).stores({
 });
 
 db.version(22).stores({
+	clients: 'id, name, areaOfTown, email, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName'
+});
+
+// v23: invoice editor snapshot fields (clientSnapshot, discounts, invoiceDate, version, etc.)
+db.version(23).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
 	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
 	users:
@@ -1002,9 +1045,240 @@ export async function getInvoicesForClient(clientId: string, limit = 50): Promis
 		.then((invs: Invoice[]) => invs.slice(0, limit));
 }
 
-// )=- Convenience helper used by "Mark Complete" flow and draft generation.
-// Creates (or returns existing) invoice linked to the job, with proper dueDate from options.
-// Does NOT generate the .docx here — that will live in the UI layer / dedicated helper (Phase 4).
+async function resolveClientForJob(job: Job): Promise<Client | undefined> {
+	if (!job.clientId) return undefined;
+	let client = await db.clients.get(job.clientId);
+	if (!client) client = await db.clients.where('pbId').equals(job.clientId).first();
+	return client;
+}
+
+function applyTotalsToInvoiceDraft(
+	draft: Partial<Invoice>,
+	taxRatePercent: number
+): Partial<Invoice> {
+	const items = normalizeBillableItems(draft.billableItems || []);
+	const totals = calculateInvoiceTotals({
+		billableItems: items,
+		invoiceDiscount: draft.invoiceDiscount,
+		taxRatePercent
+	});
+	return {
+		...draft,
+		billableItems: items,
+		subtotal: totals.subtotal,
+		taxAmount: totals.taxAmount,
+		amount: totals.total
+	};
+}
+
+/** Backfill snapshot fields on legacy invoices or partial records. */
+export function hydrateInvoiceFromJobClient(
+	invoice: Invoice,
+	job: Job,
+	client: Client | null | undefined,
+	invoiceDueDays = 30
+): Invoice {
+	const defaults = buildSnapshotDefaults(job, client, invoiceDueDays);
+	return {
+		...invoice,
+		clientSnapshot: invoice.clientSnapshot?.name
+			? invoice.clientSnapshot
+			: defaults.clientSnapshot,
+		billableItems:
+			invoice.billableItems?.length ? invoice.billableItems : defaults.billableItems,
+		dueDate: invoice.dueDate || defaults.dueDate,
+		invoiceDate: invoice.invoiceDate || defaults.invoiceDate,
+		version: invoice.version ?? 0
+	};
+}
+
+/**
+ * Ensure a draft invoice shell exists for the job with an editable snapshot.
+ * Auto-fills from job+client on first create; hydrates legacy rows on read.
+ */
+export async function ensureInvoiceShell(
+	job: Job,
+	initialFiles?: {
+		primary?: { blob: Blob; filename: string };
+		supporting?: Array<{ blob: Blob; filename: string; type?: string }>;
+	}
+): Promise<Invoice> {
+	if (!job.id) throw new Error('Job has no id');
+
+	const optionsRecord = await db.options.get('1');
+	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
+	const taxPercent = normalizeTaxRateToPercent(optionsRecord?.taxRate);
+	const client = await resolveClientForJob(job);
+
+	let invoice = await getInvoiceForJob(job.id);
+	if (invoice) {
+		const hydrated = applyTotalsToInvoiceDraft(
+			hydrateInvoiceFromJobClient(invoice, job, client, dueDays),
+			taxPercent
+		);
+		if (JSON.stringify(hydrated) !== JSON.stringify(invoice)) {
+			await db.invoices.update(invoice.id!, {
+				...hydrated,
+				updatedAt: new Date()
+			} as Invoice);
+			invoice = (await db.invoices.get(invoice.id!))!;
+		}
+		return invoice;
+	}
+
+	const defaults = buildSnapshotDefaults(job, client, dueDays);
+	const draft = applyTotalsToInvoiceDraft(
+		{
+			jobId: job.id,
+			clientId: job.clientId,
+			status: 'draft',
+			dueDate: defaults.dueDate,
+			invoiceDate: defaults.invoiceDate,
+			clientSnapshot: defaults.clientSnapshot,
+			billableItems: defaults.billableItems,
+			invoiceDiscount: { type: 'amount', value: 0 },
+			version: 0,
+			notes: '',
+			importSource: job.importSource
+		},
+		taxPercent
+	);
+
+	const id = await createInvoice(draft, initialFiles);
+	return (await db.invoices.get(id))!;
+}
+
+/** Persist editable snapshot fields and recompute totals. */
+export async function saveInvoiceSnapshot(
+	invoiceId: string,
+	patch: Partial<Invoice>
+): Promise<Invoice> {
+	const current = await db.invoices.get(invoiceId);
+	if (!current) throw new Error(`Invoice not found: ${invoiceId}`);
+
+	const optionsRecord = await db.options.get('1');
+	const taxPercent = normalizeTaxRateToPercent(optionsRecord?.taxRate);
+
+	const merged = applyTotalsToInvoiceDraft(
+		{
+			...current,
+			...patch,
+			billableItems: patch.billableItems ?? current.billableItems,
+			clientSnapshot: patch.clientSnapshot ?? current.clientSnapshot
+		},
+		taxPercent
+	);
+
+	await updateInvoice(invoiceId, {
+		clientSnapshot: merged.clientSnapshot,
+		billableItems: merged.billableItems,
+		invoiceDiscount: merged.invoiceDiscount,
+		notes: merged.notes,
+		dueDate: merged.dueDate,
+		invoiceDate: merged.invoiceDate,
+		subtotal: merged.subtotal,
+		taxAmount: merged.taxAmount,
+		amount: merged.amount,
+		status: merged.status,
+		paidAt: merged.paidAt,
+		updatedAt: new Date()
+	});
+
+	const fresh = await db.invoices.get(invoiceId);
+	if (!fresh) throw new Error(`Invoice missing after save: ${invoiceId}`);
+	return fresh;
+}
+
+/** Overwrite snapshot from current job + client (Refresh from job). */
+export async function refreshInvoiceSnapshotFromJob(
+	invoiceId: string,
+	job: Job
+): Promise<Invoice> {
+	const client = await resolveClientForJob(job);
+	const optionsRecord = await db.options.get('1');
+	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
+	const defaults = buildSnapshotDefaults(job, client, dueDays);
+	return saveInvoiceSnapshot(invoiceId, {
+		clientSnapshot: defaults.clientSnapshot,
+		billableItems: defaults.billableItems,
+		dueDate: defaults.dueDate
+	});
+}
+
+/** Optional hybrid write-back: push snapshot client fields + billables to Client/Job. */
+export async function writeInvoiceSnapshotToClientJob(invoiceId: string): Promise<void> {
+	const invoice = await db.invoices.get(invoiceId);
+	if (!invoice?.clientSnapshot) return;
+
+	const job = invoice.jobId ? await db.jobs.get(invoice.jobId) : null;
+	const clientId = job?.clientId || invoice.clientId;
+	if (!clientId) return;
+
+	const snap = invoice.clientSnapshot;
+	await updateClient(clientId, {
+		name: snap.name,
+		serviceAddressStreet: snap.serviceAddressStreet,
+		serviceAddressCity: snap.serviceAddressCity,
+		serviceAddressState: snap.serviceAddressState,
+		serviceAddressZip: snap.serviceAddressZip,
+		useBillingAddress: snap.useBillingAddress,
+		billingAddressStreet: snap.billingAddressStreet,
+		billingAddressCity: snap.billingAddressCity,
+		billingAddressState: snap.billingAddressState,
+		billingAddressZip: snap.billingAddressZip,
+		phone: snap.phone,
+		email: snap.email
+	});
+
+	if (job?.id && invoice.billableItems?.length) {
+		const totals = calculateInvoiceTotals({
+			billableItems: invoice.billableItems,
+			invoiceDiscount: invoice.invoiceDiscount,
+			taxRatePercent: normalizeTaxRateToPercent(
+				(await db.options.get('1'))?.taxRate
+			)
+		});
+		await updateJob(job.id, {
+			billableItems: invoice.billableItems.map(({ title, price, quantity, total, unit }) => ({
+				title,
+				price,
+				quantity,
+				total,
+				...(unit ? { unit } : {})
+			})) as Job['billableItems'],
+			subtotal: totals.subtotal,
+			taxAmount: totals.taxAmount,
+			totalAmount: totals.total
+		});
+	}
+}
+
+/** Bump version + invoice number before generate/regenerate. */
+export async function bumpInvoiceVersionForGenerate(
+	invoiceId: string,
+	generateDate = new Date()
+): Promise<Invoice> {
+	const invoice = await db.invoices.get(invoiceId);
+	if (!invoice) throw new Error(`Invoice not found: ${invoiceId}`);
+
+	const optionsRecord = await db.options.get('1');
+	const prefix = (optionsRecord?.invoiceNumberPrefix || 'CCW').trim() || 'CCW';
+	const nextVersion = (invoice.version ?? 0) + 1;
+	const invoiceNumber = formatInvoiceNumber(prefix, generateDate, nextVersion);
+
+	await updateInvoice(invoiceId, {
+		version: nextVersion,
+		invoiceNumber,
+		lastGeneratedAt: generateDate,
+		updatedAt: new Date()
+	});
+
+	const fresh = await db.invoices.get(invoiceId);
+	if (!fresh) throw new Error(`Invoice missing after version bump: ${invoiceId}`);
+	return fresh;
+}
+
+// )=- Convenience helper used by "Mark Complete" flow and supporting docs.
 export async function ensureInvoiceForJob(
 	job: Job,
 	status: Invoice['status'] = 'generated',
@@ -1014,32 +1288,14 @@ export async function ensureInvoiceForJob(
 	}
 ): Promise<string> {
 	const existing = await getInvoiceForJob(job.id!);
-	if (existing) {
-		// If we are "completing" a job that only had a draft, bump the status
-		if (existing.status === 'draft' && status === 'generated') {
-			await updateInvoice(existing.id!, { status: 'generated', updatedAt: new Date() });
-		}
-		if (files?.supporting?.length || files?.primary) {
-			await updateInvoice(existing.id!, { updatedAt: new Date() }, files);
-		}
-		return existing.id!;
+	const shell = await ensureInvoiceShell(job, existing ? undefined : files);
+	if (status === 'generated' && shell.status === 'draft') {
+		await updateInvoice(shell.id!, { status: 'generated', updatedAt: new Date() });
 	}
-
-	const optionsRecord = await db.options.get('1');
-	const dueDays = optionsRecord?.invoiceDueDays ?? 30;
-	const dueDate = getInvoiceDueDateForJob(job, dueDays);
-
-	const invoiceData: Partial<Invoice> = {
-		jobId: job.id,
-		clientId: job.clientId,
-		status,
-		dueDate,
-		amount: job.totalAmount,
-		billableItems: job.billableItems ? job.billableItems.map((i: any) => ({ ...i })) : undefined,
-		importSource: job.importSource
-	};
-
-	return await createInvoice(invoiceData, files);
+	if (existing && (files?.supporting?.length || files?.primary)) {
+		await updateInvoice(shell.id!, { updatedAt: new Date() }, files);
+	}
+	return shell.id!;
 }
 
 // ==================== CLIENT FUNCTIONS ====================

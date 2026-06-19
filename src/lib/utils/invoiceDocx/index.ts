@@ -1,8 +1,9 @@
-import type { Client, Job } from '$lib/db';
-import { getInvoiceDueDateForJob } from '$lib/utils/dates';
+import type { Client, Invoice, Job } from '$lib/db';
+import { clientFromSnapshot } from '$lib/utils/invoiceSnapshot';
 import { createInvoiceDocxBuilder } from './builder';
 import {
 	buildLineItemsTable,
+	buildLineItemsTableFromSnapshot,
 	buildPageTable,
 	buildPaymentParagraphs,
 	buildTopFoldTable,
@@ -48,12 +49,12 @@ export {
 } from './layout';
 
 /**
- * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
- * Pass `{ envelopePreview: true }` in dev to overlay window guides on the top panel.
+ * Generate .docx from invoice snapshot (authoritative) + job service dates.
  */
-export async function generateInvoiceDocx(
+export async function generateInvoiceDocxFromSnapshot(
+	invoice: Invoice,
 	job: Job,
-	client: Client | null | undefined,
+	linkedClient: Client | null | undefined,
 	ctx: InvoiceDocxContext,
 	options?: InvoiceDocxGenerateOptions
 ): Promise<Blob> {
@@ -61,11 +62,25 @@ export async function generateInvoiceDocx(
 	const { Document, Packer } = docx;
 	const b = createInvoiceDocxBuilder(docx);
 
-	const dueDays = ctx.invoiceDueDays ?? 30;
-	const dueDate = getInvoiceDueDateForJob(job, dueDays);
-	const dueDateStr = dueDate.toLocaleDateString();
-	const invoiceDate = (ctx.invoiceDate ?? new Date()).toLocaleDateString();
-	const taxPct = normalizeTaxRateToPercent(ctx.taxRate ?? job.taxRate);
+	const snapshotClient = clientFromSnapshot(
+		invoice.clientSnapshot || {
+			name: linkedClient?.name || 'Client',
+			serviceAddressStreet: linkedClient?.serviceAddressStreet || '',
+			serviceAddressCity: linkedClient?.serviceAddressCity || '',
+			serviceAddressState: linkedClient?.serviceAddressState || '',
+			serviceAddressZip: linkedClient?.serviceAddressZip || ''
+		},
+		linkedClient?.preferredBillingMethod || 'invoice'
+	);
+
+	const dueDateStr = (
+		invoice.dueDate instanceof Date ? invoice.dueDate : new Date(invoice.dueDate)
+	).toLocaleDateString();
+	const invoiceDate = (
+		ctx.invoiceDate ??
+		(invoice.invoiceDate instanceof Date ? invoice.invoiceDate : new Date())
+	).toLocaleDateString();
+	const taxPct = normalizeTaxRateToPercent(ctx.taxRate);
 	const taxLabel =
 		ctx.salesTaxJurisdiction?.trim() || 'City and Borough of Juneau sales tax';
 	const serviceDate = new Date(job.start).toLocaleDateString();
@@ -74,32 +89,46 @@ export async function generateInvoiceDocx(
 			? ` – ${new Date(job.end).toLocaleDateString()}`
 			: '';
 
-	const clientName = client?.name || 'Client';
-	const serviceLoc = getClientServiceAddress(client);
+	const clientName = snapshotClient.name || 'Client';
+	const serviceLoc = getClientServiceAddress(snapshotClient);
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
 	if (serviceLines.length === 0) serviceLines.push('—');
 
 	const envelopePreview = import.meta.env.DEV && options?.envelopePreview === true;
 
+	const docCtx: InvoiceDocxContext = {
+		...ctx,
+		invoiceNumber: invoice.invoiceNumber || ctx.invoiceNumber,
+		invoiceNotes: invoice.notes || ctx.invoiceNotes
+	};
+
 	const topFoldTable = buildTopFoldTable(
 		b,
 		{
-			returnLines: getBusinessReturnAddressLines(ctx),
-			recipientLines: getRecipientMailingLines(client, clientName),
+			returnLines: getBusinessReturnAddressLines(docCtx),
+			recipientLines: getRecipientMailingLines(snapshotClient, clientName),
 			serviceLines,
 			envelopePreview
 		},
-		ctx,
+		docCtx,
 		{ serviceDate, serviceEnd, invoiceDate, dueDateStr }
 	);
 
-	const lineItemsTable = buildLineItemsTable(b, job, taxLabel, taxPct);
+	const lineItemsTable = buildLineItemsTableFromSnapshot(
+		b,
+		invoice.billableItems || [],
+		invoice.subtotal ?? 0,
+		invoice.taxAmount ?? 0,
+		taxLabel,
+		taxPct,
+		invoice.invoiceDiscount
+	);
 	const paymentParagraphs = buildPaymentParagraphs(
 		b,
-		ctx,
-		buildPaymentInstructions(client, ctx)
+		docCtx,
+		buildPaymentInstructions(snapshotClient, docCtx)
 	);
-	const totalsParagraphs = buildTotalsParagraphs(b, job.totalAmount ?? 0, dueDateStr);
+	const totalsParagraphs = buildTotalsParagraphs(b, invoice.amount ?? 0, dueDateStr);
 
 	const pageTable = buildPageTable(b, topFoldTable, [
 		lineItemsTable,
@@ -134,6 +163,43 @@ export async function generateInvoiceDocx(
 	});
 
 	return Packer.toBlob(doc);
+}
+
+/**
+ * Legacy entry: builds a temporary snapshot from job+client.
+ * Prefer generateInvoiceDocxFromSnapshot for the invoice editor.
+ */
+export async function generateInvoiceDocx(
+	job: Job,
+	client: Client | null | undefined,
+	ctx: InvoiceDocxContext,
+	options?: InvoiceDocxGenerateOptions
+): Promise<Blob> {
+	const { buildSnapshotDefaults } = await import('$lib/utils/invoiceSnapshot');
+	const { calculateInvoiceTotals, normalizeBillableItems } = await import('$lib/utils/invoiceTotals');
+	const defaults = buildSnapshotDefaults(job, client, ctx.invoiceDueDays ?? 30);
+	const items = normalizeBillableItems(defaults.billableItems);
+	const totals = calculateInvoiceTotals({
+		billableItems: items,
+		taxRatePercent: normalizeTaxRateToPercent(ctx.taxRate ?? job.taxRate)
+	});
+	const tempInvoice: Invoice = {
+		jobId: job.id || '',
+		clientId: job.clientId,
+		status: 'draft',
+		dueDate: defaults.dueDate,
+		invoiceDate: ctx.invoiceDate ?? defaults.invoiceDate,
+		amount: totals.total,
+		subtotal: totals.subtotal,
+		taxAmount: totals.taxAmount,
+		billableItems: items,
+		clientSnapshot: defaults.clientSnapshot,
+		notes: ctx.invoiceNotes,
+		invoiceNumber: ctx.invoiceNumber,
+		createdAt: new Date(),
+		updatedAt: new Date()
+	};
+	return generateInvoiceDocxFromSnapshot(tempInvoice, job, client, ctx, options);
 }
 
 /** Map AppOptions record to InvoiceDocxBusinessInfo. */

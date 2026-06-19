@@ -2,6 +2,8 @@
 <script lang="ts">
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
+	import { computeLineNet } from '$lib/utils/invoiceTotals';
+	import type { InvoiceDiscount } from '$lib/utils/invoiceTypes';
 
 	let {
 		item = $bindable({
@@ -9,11 +11,18 @@
 			price: 0,
 			quantity: 1,
 			total: 0,
-			unit: 'qty' as 'hour' | 'qty'
+			unit: 'qty' as 'hour' | 'qty',
+			lineDiscount: undefined as InvoiceDiscount | undefined
 		}),
 		onRemove = () => {},
-		autofocusPrice = false
-	} = $props<{ item?: any; onRemove?: (e?: any) => void; autofocusPrice?: boolean }>();
+		autofocusPrice = false,
+		showDiscount = false
+	} = $props<{
+		item?: any;
+		onRemove?: (e?: any) => void;
+		autofocusPrice?: boolean;
+		showDiscount?: boolean;
+	}>();
 
 	const templates = $derived(optionsStore.data?.defaultBillableItems || []);
 
@@ -67,8 +76,18 @@
 	});
 
 	$effect(() => {
-		item.total = (item.price || 0) * (item.quantity || 1);
+		if (showDiscount) {
+			item.total = computeLineNet(item);
+		} else {
+			item.total = (item.price || 0) * (item.quantity || 1);
+		}
 	});
+
+	function ensureLineDiscount() {
+		if (!item.lineDiscount) {
+			item.lineDiscount = { type: 'amount', value: 0 };
+		}
+	}
 
 	function selectTemplate(template: any) {
 		item.title = template.title;
@@ -193,6 +212,36 @@
 			</label>
 
 			<span class="billable-item-row__equals" aria-hidden="true">=</span>
+
+			{#if showDiscount}
+				<label class="billable-item-row__field billable-item-row__field--discount">
+					<span class="billable-item-row__label">Discount</span>
+					<div class="billable-item-row__discount-controls">
+						<select
+							class="billable-item-row__input input"
+							value={item.lineDiscount?.type || 'amount'}
+							onchange={(e) => {
+								ensureLineDiscount();
+								item.lineDiscount!.type = (e.target as HTMLSelectElement).value as 'amount' | 'percent';
+							}}
+						>
+							<option value="amount">$</option>
+							<option value="percent">%</option>
+						</select>
+						<input
+							type="number"
+							class="billable-item-row__input input"
+							min="0"
+							step="0.01"
+							value={item.lineDiscount?.value ?? 0}
+							oninput={(e) => {
+								ensureLineDiscount();
+								item.lineDiscount!.value = Number((e.target as HTMLInputElement).value) || 0;
+							}}
+						/>
+					</div>
+				</label>
+			{/if}
 
 			<div class="billable-item-row__total">
 				<span class="billable-item-row__label">Total</span>
@@ -385,6 +434,20 @@
 
 	.billable-item-row__suggestion:hover {
 		background: var(--color-surface-alt);
+	}
+
+	.billable-item-row__discount-controls {
+		display: flex;
+		gap: var(--space-1);
+		align-items: center;
+	}
+
+	.billable-item-row__field--discount select {
+		width: 3.5rem;
+	}
+
+	.billable-item-row__field--discount input {
+		width: 4.5rem;
 	}
 
 	/* Mobile: stack calc row */

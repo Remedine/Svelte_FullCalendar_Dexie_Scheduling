@@ -27,7 +27,7 @@
 		type Job,
 		type Invoice,
 		type Client,
-		getInvoiceForJob,
+		ensureInvoiceShell,
 		updateJob,
 		getUserPhotoSrc,
 		ensureInvoiceForJob,
@@ -40,7 +40,7 @@
 	import { goto } from '$app/navigation';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
-	import JobInvoicePanel from './JobInvoicePanel.svelte';
+	import InvoiceEditor from './InvoiceEditor.svelte';
 
 	// )=- Module-level singleton so any page can call openJobDetailsModal(job) without prop drilling.
 	// Mirrors the proven pattern from JobFormModal.
@@ -87,15 +87,10 @@
 						const fresh = await db.jobs.get(job.id!);
 						if (fresh) job = fresh;
 
-						invoice = (await getInvoiceForJob(job.id!)) || null;
-
 						if (auth.currentUser?.role === 'admin' && navigator.onLine) {
-							// )=- Import + call added to fix "pullInvoicesFromServer is not defined" ReferenceError on modal open (log: JobDetailsModal.svelte:65).
-							// Pull ensures fresh invoice data (incl. newly generated primary files) before showing billing panel.
-							// Guard matches users pull and jobs page refresh. Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + JOBS_AND_INVOICES_SPEC.md Phase 3/4
 							await pullInvoicesFromServer();
-							invoice = (await getInvoiceForJob(job.id!)) || null;
 						}
+						invoice = await ensureInvoiceShell(job);
 
 						if (job.clientId) {
 							let cl = await db.clients.get(job.clientId);
@@ -200,8 +195,7 @@
 		await updateJob(job.id, { status: newStatus });
 		if (newStatus === 'completed') {
 			await ensureInvoiceForJob(job, 'generated');
-			const freshInv = await getInvoiceForJob(job.id);
-			if (freshInv) invoice = freshInv;
+			if (job.id) invoice = await ensureInvoiceShell(job);
 		}
 		const fresh = await db.jobs.get(job.id);
 		if (fresh) job = fresh;
@@ -419,14 +413,10 @@
 
 					<!-- )=- JobInvoicePanel is rendered directly under Billing Items (as decided in planning).
 					     It contains the real Generate Draft (Phase 4 generator + file persistence) and revised upload. -->
-					<JobInvoicePanel
+					<InvoiceEditor
 						bind:job
 						bind:invoice
 						onStatusChange={(newInv) => {
-							// )=- Pure state lift for the header badges (status, overdue, due date) and the "Mark Complete" flow.
-							// All actual persistence (status changes, regenerate, paidAt edit, supporting add/delete, invoice delete)
-							// now lives inside JobInvoicePanel so we never double-queue updateInvoice calls.
-							// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 							invoice = newInv;
 						}}
 					/>
