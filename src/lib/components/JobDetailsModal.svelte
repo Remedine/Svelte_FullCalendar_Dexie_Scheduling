@@ -38,6 +38,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { openJobModal } from './JobFormModal.svelte';
 	import { goto } from '$app/navigation';
+	import { toDateString } from '$lib/utils/dates';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import InvoiceEditor from './InvoiceEditor.svelte';
@@ -183,11 +184,13 @@
 
 	function jumpToCalendar() {
 		if (!job) return;
-		// )=- Jump to the split calendar (the richer view with job list) and pass ?date so SplitCalendar
-		// picks it up for initialDate / gotoDate. Closes the modal for clean UX.
-		// Reference: JOBS_AND_INVOICES_SPEC.md (calendar jump in Phase 7)
-		const date = new Date(job.start).toISOString().split('T')[0];
-		goto(`/calendar/split?date=${date}`);
+		// )=- Jump to split calendar with local date + jobId so SplitCalendar focuses the day and
+		// briefly highlights the matching event block.
+		const date = toDateString(job.start);
+		const params = new URLSearchParams({ date });
+		const jobId = job.id || job.pbId;
+		if (jobId) params.set('jobId', jobId);
+		goto(`/calendar/split?${params.toString()}`);
 		closeModal();
 	}
 

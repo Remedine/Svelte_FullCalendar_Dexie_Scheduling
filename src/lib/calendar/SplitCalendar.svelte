@@ -49,15 +49,18 @@
 	}
 
 	let dayEl = $state<HTMLDivElement | null>(null);
+	const initialSearchParams =
+		typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+
 	let selectedDate = $state(
 		// )=- Support ?date=YYYY-MM-DD from job details "Jump to calendar" (and direct links).
 		// Sets the initial view date so the calendar focuses the relevant day/week when jumping from a job.
 		// Works on initial load of the split calendar page.
 		// Reference: JOBS_AND_INVOICES_SPEC.md (calendar jump improvements in Phase 7)
-		typeof window !== 'undefined'
-			? new URLSearchParams(window.location.search).get('date') || getLocalDateString()
-			: getLocalDateString()
+		initialSearchParams?.get('date') || getLocalDateString()
 	);
+	let highlightJobId = $state<string | null>(initialSearchParams?.get('jobId') || null);
+	let hasScrolledToHighlight = false;
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
@@ -90,6 +93,32 @@
 	let crewPhotoMap = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
 	let draggedJobId: string | null = null;
+
+	function jobMatchesHighlight(jobId: string | undefined, job: any): boolean {
+		if (!highlightJobId || !jobId) return false;
+		return (
+			jobId === highlightJobId ||
+			job?.id === highlightJobId ||
+			job?.pbId === highlightJobId
+		);
+	}
+
+	function clearJobHighlight() {
+		if (!highlightJobId) return;
+		highlightJobId = null;
+		hasScrolledToHighlight = false;
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete('jobId');
+		window.history.replaceState({}, '', url.pathname + url.search);
+		dayApi?.refetchEvents();
+	}
+
+	$effect(() => {
+		if (!highlightJobId) return;
+		const timer = window.setTimeout(() => clearJobHighlight(), 6000);
+		return () => window.clearTimeout(timer);
+	});
 
 	// Plain (non-$state) flag to ensure the FullCalendar instance is created only once
 	// per component mount. This stops the destroy/recreate loop that was the root cause
@@ -546,6 +575,19 @@
 				},
 
 				eventDidMount: (info) => {
+					if (
+						highlightJobId &&
+						!hasScrolledToHighlight &&
+						jobMatchesHighlight(info.event.id, info.event.extendedProps)
+					) {
+						hasScrolledToHighlight = true;
+						requestAnimationFrame(() => {
+							window.setTimeout(() => {
+								info.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							}, 120);
+						});
+					}
+
 					// )=- Do NOT set draggable="true" here. It enables native HTML5 drag which interferes with FullCalendar's own drag system (editable events), causing D&D to not work or behave erratically (native vs FC drag fighting).
 					// The visual drag handle + CSS hover is sufficient for UX. FC handles the actual drag start internally on the event.
 					// This was likely contributing to "Drag and drop isn't working".
@@ -639,10 +681,14 @@
 				},
 
 				eventClassNames: (arg) => {
+					const classes: string[] = [];
 					const status = arg.event.extendedProps?.status;
-					if (status === 'completed') return ['event-completed'];
-					if (status === 'cancelled') return ['event-cancelled'];
-					return [];
+					if (status === 'completed') classes.push('event-completed');
+					if (status === 'cancelled') classes.push('event-cancelled');
+					if (jobMatchesHighlight(arg.event.id, arg.event.extendedProps)) {
+						classes.push('event-highlighted');
+					}
+					return classes;
 				},
 
 				eventAllow: (dropInfo, draggedEvent) => {
@@ -711,6 +757,7 @@
 				},
 
 				eventClick: (info) => {
+					clearJobHighlight();
 					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
 				},
 
@@ -804,6 +851,7 @@
 	// )=- Cleaned up stray duplicate calendar init (the second new Calendar + its raf/closings) that was left outside any $effect after a previous edit. The single version inside the $effect now has the destroy return (for isConnected fix), the full eventDidMount (drag handle + area color force + circular crew avatars using crewPhotoMap), modern title-only events mapper, and the explicit post-render refetch. This resolves the Rolldown "Unexpected token" that killed the Railway build.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	function handleDateSelect(dateStr: string) {
+		clearJobHighlight();
 		selectedDate = dateStr;
 		syncDateToUrl(dateStr);
 		if (dayApi) {
@@ -826,6 +874,7 @@
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
 		url.searchParams.set('date', dateStr);
+		url.searchParams.delete('jobId');
 		// replaceState keeps browser back/forward clean (no history spam for every date click)
 		window.history.replaceState({}, '', url.pathname + url.search);
 	}
@@ -1344,6 +1393,32 @@
 	:global(.event-cancelled .fc-event-title) {
 		text-decoration: line-through;
 		color: var(--color-danger-emphasis);
+	}
+
+	:global(.event-highlighted) {
+		outline: 3px solid var(--color-warning);
+		outline-offset: 2px;
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent),
+			0 4px 14px rgb(0 0 0 / 0.25);
+		z-index: 6 !important;
+		animation: split-calendar-event-highlight 1.1s ease-in-out 4;
+	}
+
+	@keyframes split-calendar-event-highlight {
+		0%,
+		100% {
+			outline-color: var(--color-warning);
+			box-shadow:
+				0 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent),
+				0 4px 14px rgb(0 0 0 / 0.25);
+		}
+		50% {
+			outline-color: var(--color-primary);
+			box-shadow:
+				0 0 0 6px color-mix(in srgb, var(--color-primary) 35%, transparent),
+				0 6px 18px rgb(0 0 0 / 0.3);
+		}
 	}
 
 	/* )=- Crew avatars placed *inside* the event card (no more overhanging to the right).

@@ -124,6 +124,16 @@
 	}
 
 	const days = $derived(getDaysInMonth(currentYear, currentMonth));
+
+	// Keep the visible month in sync when the parent sets selectedDate (e.g. jump from job details).
+	$effect(() => {
+		const dateStr = selectedDate;
+		if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+		const [y, m] = dateStr.split('-').map(Number);
+		if (!y || !m) return;
+		currentYear = y;
+		currentMonth = m - 1;
+	});
 </script>
 
 <div class="month-picker">
