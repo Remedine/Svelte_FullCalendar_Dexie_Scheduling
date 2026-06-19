@@ -190,6 +190,7 @@
 		const params = new URLSearchParams({ date });
 		const jobId = job.id || job.pbId;
 		if (jobId) params.set('jobId', jobId);
+		if (job.status === 'cancelled') params.set('status', 'cancelled');
 		goto(`/calendar/split?${params.toString()}`);
 		closeModal();
 	}

@@ -60,7 +60,10 @@
 		initialSearchParams?.get('date') || getLocalDateString()
 	);
 	let highlightJobId = $state<string | null>(initialSearchParams?.get('jobId') || null);
+	let jumpShowCancelled = $state(initialSearchParams?.get('status') === 'cancelled');
 	let hasScrolledToHighlight = false;
+
+	const CALENDAR_STATUS_FILTERS = ['scheduled', 'confirmed', 'completed', 'cancelled'] as const;
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
@@ -113,6 +116,11 @@
 		window.history.replaceState({}, '', url.pathname + url.search);
 		dayApi?.refetchEvents();
 	}
+
+	$effect(() => {
+		if (!jumpShowCancelled) return;
+		filtersOpen = true;
+	});
 
 	$effect(() => {
 		if (!highlightJobId) return;
@@ -228,11 +236,25 @@
 		};
 	});
 	// === FILTERS ===
+	// Jumping from a cancelled job enables status filters (incl. cancelled) so the job is fetched and visible.
 	let filters = $state({
 		crew: [] as string[],
 		areas: [] as string[],
-		statuses: [] as string[]
+		statuses: jumpShowCancelled ? [...CALENDAR_STATUS_FILTERS] : ([] as string[])
 	});
+
+	function shouldIncludeCancelledJobs(): boolean {
+		return filters.statuses.includes('cancelled') || jumpShowCancelled;
+	}
+
+	function clearJumpCancelledMode() {
+		if (!jumpShowCancelled) return;
+		jumpShowCancelled = false;
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete('status');
+		window.history.replaceState({}, '', url.pathname + url.search);
+	}
 
 	// === Realtime push for cross-device appointment changes ===
 	// Uses shared jobs realtime (single SSE client) — see $lib/db/realtime.ts.
@@ -251,7 +273,7 @@
 			const outcome = await applyServerJobRecord(rec);
 			if (outcome === 'skipped') return;
 
-			const includeCancelled = filters.statuses.includes('cancelled');
+			const includeCancelled = shouldIncludeCancelledJobs();
 			const start = new Date();
 			start.setMonth(start.getMonth() - 2);
 			const end = new Date();
@@ -394,7 +416,7 @@
 			}
 		});
 
-		const includeCancelled = filters.statuses.includes('cancelled');
+		const includeCancelled = shouldIncludeCancelledJobs();
 
 		const start = new Date();
 		start.setMonth(start.getMonth() - 2);
@@ -417,7 +439,7 @@
 				await pullJobsFromServer();
 			}
 
-			const includeCancelled = filters.statuses.includes('cancelled');
+			const includeCancelled = shouldIncludeCancelledJobs();
 
 			const newJobs = await getJobsForRange(
 				new Date(new Date().setMonth(new Date().getMonth() - 2)),
@@ -473,6 +495,7 @@
 	}
 
 	function clearFilters() {
+		clearJumpCancelledMode();
 		filters = {
 			crew: [],
 			areas: [],
@@ -852,6 +875,7 @@
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	function handleDateSelect(dateStr: string) {
 		clearJobHighlight();
+		clearJumpCancelledMode();
 		selectedDate = dateStr;
 		syncDateToUrl(dateStr);
 		if (dayApi) {
@@ -875,6 +899,7 @@
 		const url = new URL(window.location.href);
 		url.searchParams.set('date', dateStr);
 		url.searchParams.delete('jobId');
+		url.searchParams.delete('status');
 		// replaceState keeps browser back/forward clean (no history spam for every date click)
 		window.history.replaceState({}, '', url.pathname + url.search);
 	}
