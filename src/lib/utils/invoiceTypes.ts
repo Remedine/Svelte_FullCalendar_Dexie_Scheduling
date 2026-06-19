@@ -5,6 +5,8 @@ export type DiscountType = 'amount' | 'percent';
 export interface InvoiceDiscount {
 	type: DiscountType;
 	value: number;
+	/** Shown on the invoice document (e.g. "Senior discount", "Repeat customer"). */
+	description?: string;
 }
 
 export interface InvoiceBillableItem {

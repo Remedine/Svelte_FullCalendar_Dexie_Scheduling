@@ -239,38 +239,46 @@
 			{:else if !job}
 				<div class="job-details-modal__empty">Job not found.</div>
 			{:else}
-				<!-- Header -->
 				<div class="job-details-modal__header">
-					<div>
-						<h2 class="job-details-modal__title">{job.title || 'Untitled Job'}</h2>
-						{#if clientContext?.fromClientName}
-							<!-- )=- Client context indicator as chosen in spec. Keeps the user oriented when opened from the clients page expandable list. -->
-							<div class="job-details-modal__context">
-								Related to <strong>{clientContext.fromClientName}</strong>
-							</div>
-						{/if}
+					<div class="job-details-modal__header-top">
+						<div class="job-details-modal__header-main">
+							<h2 class="job-details-modal__title">{job.title || 'Untitled Job'}</h2>
+							{#if clientContext?.fromClientName}
+								<div class="job-details-modal__context">
+									Related to <strong>{clientContext.fromClientName}</strong>
+								</div>
+							{/if}
+							<p class="job-details-modal__header-meta">
+								<span class={jobStatusClass}>{job.status}</span>
+								<span class="job-details-modal__meta-sep" aria-hidden="true">·</span>
+								<span
+									class="job-details-modal__status job-details-modal__status--{invoiceStatus}"
+								>
+									{invoice ? invoice.status : 'no invoice'}
+								</span>
+								{#if isOverdue}
+									<span class="job-details-modal__meta-sep" aria-hidden="true">·</span>
+									<span class="job-details-modal__overdue">Overdue</span>
+								{/if}
+								<span class="job-details-modal__meta-sep" aria-hidden="true">·</span>
+								<strong class="job-details-modal__header-amount"
+									>${(invoice?.amount ?? job.totalAmount)?.toFixed(2) || '0.00'}</strong
+								>
+								{#if invoice}
+									<span class="job-details-modal__meta-sep" aria-hidden="true">·</span>
+									<span>Due {new Date(invoice.dueDate).toLocaleDateString()}</span>
+								{/if}
+							</p>
+						</div>
+						<button
+							type="button"
+							class="job-details-modal__close-btn"
+							aria-label="Close"
+							onclick={closeModal}
+						>
+							×
+						</button>
 					</div>
-
-					<div class="job-details-modal__badges">
-						<span class={jobStatusClass}>{job.status}</span>
-						<span class="job-details-modal__status job-details-modal__status--{invoiceStatus}">
-							{invoice ? invoice.status : 'no invoice'}
-						</span>
-						{#if isOverdue}
-							<span class="job-details-modal__overdue">OVERDUE</span>
-						{/if}
-					</div>
-				</div>
-
-				<div class="job-details-modal__summary">
-					<strong class="job-details-modal__summary-amount"
-						>${(invoice?.amount ?? job.totalAmount)?.toFixed(2) || '0.00'}</strong
-					>
-					{#if invoice}
-						<span class="job-details-modal__due">
-							Due {new Date(invoice.dueDate).toLocaleDateString()}
-						</span>
-					{/if}
 				</div>
 
 				<div class="job-details-modal__tabs" role="tablist">
@@ -425,18 +433,14 @@
 							{/if}
 						</section>
 
-						<div class="job-details-modal__footer sticky-footer">
-							<div class="job-details-modal__footer-left">
-								<button class="job-details-modal__btn job-details-modal__btn--edit" onclick={editJob}>
-									Edit full job
-								</button>
-								<button class="job-details-modal__btn" onclick={jumpToCalendar}>
-									View on calendar
-								</button>
-							</div>
-							<button class="job-details-modal__btn job-details-modal__btn--close" onclick={closeModal}>
-								Close
+						<div class="job-details-modal__footer job-details-modal__footer--job sticky-footer">
+							<button
+								class="job-details-modal__btn job-details-modal__btn--edit"
+								onclick={editJob}
+							>
+								Edit job
 							</button>
+							<button class="job-details-modal__btn" onclick={jumpToCalendar}>Calendar</button>
 						</div>
 					{:else}
 						<section class="job-details-modal__section job-details-modal__section--invoice">
@@ -471,27 +475,73 @@
 	}
 
 	.job-details-modal__header {
-		padding: var(--space-5) var(--space-4) var(--space-3);
+		padding: var(--space-3) var(--space-4);
 		border-bottom: 1px solid var(--color-border);
 	}
 
+	.job-details-modal__header-top {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+	}
+
+	.job-details-modal__header-main {
+		flex: 1;
+		min-width: 0;
+	}
+
 	.job-details-modal__title {
-		margin: 0 0 var(--space-1);
-		font-size: var(--font-size-xl);
+		margin: 0;
+		font-size: var(--font-size-lg);
 		font-weight: var(--font-weight-bold);
+		line-height: 1.25;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.job-details-modal__context {
-		font-size: var(--font-size-sm);
+		font-size: var(--font-size-xs);
 		color: var(--color-primary);
-		margin-bottom: var(--space-2);
+		margin-top: var(--space-1);
 	}
 
-	.job-details-modal__badges {
+	.job-details-modal__header-meta {
 		display: flex;
-		gap: var(--space-2);
-		margin-top: var(--space-2);
 		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-1);
+		margin: var(--space-1) 0 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		line-height: 1.4;
+	}
+
+	.job-details-modal__header-amount {
+		color: var(--color-text);
+	}
+
+	.job-details-modal__meta-sep {
+		opacity: 0.5;
+	}
+
+	.job-details-modal__close-btn {
+		flex-shrink: 0;
+		width: 2rem;
+		height: 2rem;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+		color: var(--color-text-muted);
+		font-size: 1.25rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0;
+	}
+
+	.job-details-modal__close-btn:hover {
+		background: var(--color-surface-alt);
+		color: var(--color-text);
 	}
 
 	.job-details-modal__status {
@@ -513,26 +563,6 @@
 		border-radius: var(--radius-full);
 	}
 
-	.job-details-modal__summary {
-		padding: var(--space-2) var(--space-4);
-		background: var(--color-surface-alt);
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: var(--space-2);
-		border-bottom: 1px solid var(--color-border);
-	}
-
-	.job-details-modal__summary-amount {
-		font-size: var(--font-size-lg);
-		color: var(--color-text);
-	}
-
-	.job-details-modal__due {
-		font-size: var(--font-size-sm);
-		color: var(--color-text-muted);
-	}
-
 	.job-details-modal__tabs {
 		display: flex;
 		border-bottom: 1px solid var(--color-border);
@@ -541,7 +571,7 @@
 
 	.job-details-modal__tab {
 		flex: 1;
-		padding: var(--space-3) var(--space-4);
+		padding: var(--space-2) var(--space-4);
 		border: none;
 		border-bottom: 2px solid transparent;
 		background: none;
@@ -650,17 +680,16 @@
 			font-size: var(--font-size-xs);
 		}
 
-		.job-details-modal__summary {
+		.job-details-modal__header {
 			padding: var(--space-2) var(--space-3);
 		}
 
-		.job-details-modal__footer {
-			flex-direction: column;
-			align-items: stretch;
+		.job-details-modal__title {
+			font-size: var(--font-size-base);
 		}
 
-		.job-details-modal__footer-left {
-			flex-direction: column;
+		.job-details-modal__footer--job {
+			padding: var(--space-2) var(--space-3);
 		}
 	}
 
@@ -682,15 +711,16 @@
 	}
 
 	.job-details-modal__footer {
-		/* base from global .sticky-footer */
 		display: flex;
-		justify-content: space-between;
 		gap: var(--space-2);
 	}
 
-	.job-details-modal__footer-left {
-		display: flex;
-		gap: var(--space-2);
+	.job-details-modal__footer--job {
+		padding: var(--space-2) var(--space-4);
+	}
+
+	.job-details-modal__footer--job .job-details-modal__btn {
+		flex: 1;
 	}
 
 	.job-details-modal__btn {

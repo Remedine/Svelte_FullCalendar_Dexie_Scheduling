@@ -15,14 +15,18 @@
 			lineDiscount: undefined as InvoiceDiscount | undefined
 		}),
 		onRemove = () => {},
+		onPersist = () => {},
 		autofocusPrice = false,
 		showDiscount = false
 	} = $props<{
 		item?: any;
 		onRemove?: (e?: any) => void;
+		onPersist?: () => void;
 		autofocusPrice?: boolean;
 		showDiscount?: boolean;
 	}>();
+
+	let showLineDiscount = $state(false);
 
 	const templates = $derived(optionsStore.data?.defaultBillableItems || []);
 
@@ -83,10 +87,27 @@
 		}
 	});
 
-	function ensureLineDiscount() {
-		if (!item.lineDiscount) {
-			item.lineDiscount = { type: 'amount', value: 0 };
-		}
+	const hasActiveLineDiscount = $derived(
+		!!(
+			item.lineDiscount &&
+			(item.lineDiscount.value > 0 || item.lineDiscount.description?.trim())
+		)
+	);
+
+	$effect(() => {
+		if (hasActiveLineDiscount) showLineDiscount = true;
+	});
+
+	function addLineDiscount() {
+		item.lineDiscount = { type: 'amount', value: 0, description: '' };
+		showLineDiscount = true;
+		onPersist();
+	}
+
+	function removeLineDiscount() {
+		item.lineDiscount = undefined;
+		showLineDiscount = false;
+		onPersist();
 	}
 
 	function selectTemplate(template: any) {
@@ -213,17 +234,21 @@
 
 			<span class="billable-item-row__equals" aria-hidden="true">=</span>
 
-			{#if showDiscount}
+			<div class="billable-item-row__total">
+				<span class="billable-item-row__label">Total</span>
+				<strong class="billable-item-row__total-value">${(item.total || 0).toFixed(2)}</strong>
+			</div>
+		</div>
+
+		{#if showDiscount && showLineDiscount && item.lineDiscount}
+			<div class="billable-item-row__discount-block">
 				<label class="billable-item-row__field billable-item-row__field--discount">
 					<span class="billable-item-row__label">Discount</span>
 					<div class="billable-item-row__discount-controls">
 						<select
 							class="billable-item-row__input input"
-							value={item.lineDiscount?.type || 'amount'}
-							onchange={(e) => {
-								ensureLineDiscount();
-								item.lineDiscount!.type = (e.target as HTMLSelectElement).value as 'amount' | 'percent';
-							}}
+							bind:value={item.lineDiscount.type}
+							onchange={() => onPersist()}
 						>
 							<option value="amount">$</option>
 							<option value="percent">%</option>
@@ -233,21 +258,34 @@
 							class="billable-item-row__input input"
 							min="0"
 							step="0.01"
-							value={item.lineDiscount?.value ?? 0}
-							oninput={(e) => {
-								ensureLineDiscount();
-								item.lineDiscount!.value = Number((e.target as HTMLInputElement).value) || 0;
-							}}
+							bind:value={item.lineDiscount.value}
+							onchange={() => onPersist()}
 						/>
 					</div>
 				</label>
-			{/if}
-
-			<div class="billable-item-row__total">
-				<span class="billable-item-row__label">Total</span>
-				<strong class="billable-item-row__total-value">${(item.total || 0).toFixed(2)}</strong>
+				<label class="billable-item-row__field billable-item-row__field--discount-desc">
+					<span class="billable-item-row__label">Discount note</span>
+					<input
+						type="text"
+						class="billable-item-row__input input"
+						placeholder="e.g. Senior discount"
+						bind:value={item.lineDiscount.description}
+						onchange={() => onPersist()}
+					/>
+				</label>
+				<button
+					type="button"
+					class="billable-item-row__text-btn billable-item-row__text-btn--danger"
+					onclick={removeLineDiscount}
+				>
+					Remove discount
+				</button>
 			</div>
-		</div>
+		{:else if showDiscount}
+			<button type="button" class="billable-item-row__text-btn" onclick={addLineDiscount}>
+				+ Add discount
+			</button>
+		{/if}
 	</div>
 </div>
 
@@ -436,10 +474,39 @@
 		background: var(--color-surface-alt);
 	}
 
+	.billable-item-row__discount-block {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		width: 100%;
+		margin-top: var(--space-2);
+		padding-top: var(--space-2);
+		border-top: 1px dashed var(--color-border);
+	}
+
 	.billable-item-row__discount-controls {
 		display: flex;
 		gap: var(--space-1);
 		align-items: center;
+	}
+
+	.billable-item-row__field--discount-desc {
+		width: 100%;
+	}
+
+	.billable-item-row__text-btn {
+		border: none;
+		background: none;
+		color: var(--color-primary);
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+		align-self: flex-start;
+	}
+
+	.billable-item-row__text-btn--danger {
+		color: var(--color-danger-emphasis, var(--color-danger));
 	}
 
 	.billable-item-row__field--discount select {

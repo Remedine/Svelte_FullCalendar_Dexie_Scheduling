@@ -165,10 +165,15 @@ export function buildLineItemsTableFromSnapshot(
 	const { AlignmentType } = b;
 	const lineCellMargins = { top: 40, bottom: 40, left: 60, right: 60 };
 
-	const billableRows = (items || []).map((item, idx: number) =>
-		new b.TableRow({
+	const billableRows = (items || []).map((item, idx: number) => {
+		const discountNote = item.lineDiscount?.description?.trim();
+		const hasDiscount = !!(item.lineDiscount?.value > 0 && discountNote);
+		const description =
+			(item.title || `Item ${idx + 1}`) +
+			(hasDiscount ? ` — ${discountNote}` : '');
+		return new b.TableRow({
 			children: [
-				b.textCell(item.title || `Item ${idx + 1}`, COL_DESC, { margins: lineCellMargins }),
+				b.textCell(description, COL_DESC, { margins: lineCellMargins }),
 				b.textCell(String(item.quantity || 1), COL_QTY, {
 					align: AlignmentType.RIGHT,
 					margins: lineCellMargins
@@ -182,8 +187,8 @@ export function buildLineItemsTableFromSnapshot(
 					margins: lineCellMargins
 				})
 			]
-		})
-	);
+		});
+	});
 
 	const discountRows =
 		invoiceDiscount && invoiceDiscount.value > 0
@@ -191,9 +196,10 @@ export function buildLineItemsTableFromSnapshot(
 					new b.TableRow({
 						children: [
 							b.textCell(
-								invoiceDiscount.type === 'percent'
-									? `Discount (${invoiceDiscount.value}%)`
-									: 'Discount',
+								invoiceDiscount.description?.trim() ||
+									(invoiceDiscount.type === 'percent'
+										? `Discount (${invoiceDiscount.value}%)`
+										: 'Discount'),
 								COL_DESC,
 								{ borders: b.lineBorders, margins: lineCellMargins }
 							),

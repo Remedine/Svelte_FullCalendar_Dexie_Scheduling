@@ -59,6 +59,7 @@
 	let validationErrors = $state<string[]>([]);
 	let showOverflowMenu = $state(false);
 	let showSupportingList = $state(false);
+	let showInvoiceDiscount = $state(false);
 
 	let openWho = $state(false);
 	let openWhat = $state(false);
@@ -103,6 +104,25 @@
 	const hasPrimaryDocx = $derived(!!invoice?.primaryInvoiceFile?.filename);
 	const supportingCount = $derived(invoice?.supportingDocuments?.length ?? 0);
 	const workflowIndex = $derived(WORKFLOW_STEPS.findIndex((s) => s.id === status));
+	const hasActiveInvoiceDiscount = $derived(
+		invoiceDiscount.value > 0 || !!invoiceDiscount.description?.trim()
+	);
+
+	$effect(() => {
+		if (hasActiveInvoiceDiscount) showInvoiceDiscount = true;
+	});
+
+	function addInvoiceDiscount() {
+		invoiceDiscount = { type: 'amount', value: 0, description: '' };
+		showInvoiceDiscount = true;
+		void persistDraft();
+	}
+
+	function removeInvoiceDiscount() {
+		invoiceDiscount = emptyInvoiceDiscount();
+		showInvoiceDiscount = false;
+		void persistDraft();
+	}
 
 	$effect(() => {
 		const clientId = job?.clientId;
@@ -120,7 +140,7 @@
 		if (inv.clientSnapshot) clientSnapshot = { ...inv.clientSnapshot };
 		billableItems = (inv.billableItems || []).map((i) => ({ ...i }));
 		invoiceDiscount = inv.invoiceDiscount
-			? { ...inv.invoiceDiscount }
+			? { ...inv.invoiceDiscount, description: inv.invoiceDiscount.description ?? '' }
 			: emptyInvoiceDiscount();
 		notes = inv.notes || '';
 		dueDate = inv.dueDate instanceof Date ? inv.dueDate : new Date(inv.dueDate);
@@ -192,8 +212,7 @@
 				price: 0,
 				quantity: 1,
 				unit: 'qty',
-				total: 0,
-				lineDiscount: { type: 'amount', value: 0 }
+				total: 0
 			}
 		];
 	}
@@ -591,26 +610,54 @@
 						<BillableItemRow
 							bind:item={billableItems[i]}
 							showDiscount={true}
+							onPersist={() => persistDraft()}
 							onRemove={() => {
 								removeLine(i);
 								persistDraft();
 							}}
 						/>
 					{/each}
-					<div class="invoice-editor__invoice-discount">
-						<span>Invoice discount</span>
-						<select bind:value={invoiceDiscount.type} onchange={() => persistDraft()}>
-							<option value="amount">$</option>
-							<option value="percent">%</option>
-						</select>
-						<input
-							type="number"
-							min="0"
-							step="0.01"
-							bind:value={invoiceDiscount.value}
-							onchange={() => persistDraft()}
-						/>
-					</div>
+					{#if showInvoiceDiscount}
+						<div class="invoice-editor__invoice-discount">
+							<label class="invoice-editor__field">
+								Invoice discount
+								<div class="invoice-editor__discount-controls">
+									<select bind:value={invoiceDiscount.type} onchange={() => persistDraft()}>
+										<option value="amount">$</option>
+										<option value="percent">%</option>
+									</select>
+									<input
+										type="number"
+										min="0"
+										step="0.01"
+										bind:value={invoiceDiscount.value}
+										onchange={() => persistDraft()}
+									/>
+								</div>
+							</label>
+							<label class="invoice-editor__field">
+								Discount note (printed on invoice)
+								<input
+									type="text"
+									class="invoice-editor__input"
+									placeholder="e.g. Repeat customer"
+									bind:value={invoiceDiscount.description}
+									onchange={() => persistDraft()}
+								/>
+							</label>
+							<button
+								type="button"
+								class="invoice-editor__text-btn invoice-editor__text-btn--danger"
+								onclick={removeInvoiceDiscount}
+							>
+								Remove discount
+							</button>
+						</div>
+					{:else}
+						<button type="button" class="invoice-editor__text-btn" onclick={addInvoiceDiscount}>
+							+ Add discount
+						</button>
+					{/if}
 				</div>
 			{/if}
 			<div class="invoice-editor__totals-bar">
@@ -795,33 +842,30 @@
 
 		<!-- Sticky action bar -->
 		<div class="invoice-editor__footer">
-			<div class="invoice-editor__footer-primary">
+			<button
+				type="button"
+				class="invoice-editor__btn invoice-editor__btn--primary invoice-editor__btn--generate"
+				onclick={handleGenerateDocx}
+				disabled={isGenerating}
+			>
+				{isGenerating
+					? 'Working…'
+					: hasPrimaryDocx
+						? 'Regenerate invoice'
+						: 'Generate invoice'}
+			</button>
+			{#if canEmailInvoice && hasPrimaryDocx}
 				<button
 					type="button"
-					class="invoice-editor__btn invoice-editor__btn--primary invoice-editor__btn--generate"
-					onclick={handleGenerateDocx}
-					disabled={isGenerating}
+					class="invoice-editor__btn invoice-editor__btn--secondary invoice-editor__footer-send"
+					onclick={handleSendInvoiceToClient}
+					disabled={isSending || !invoice.pbId}
+					title={invoice.pbId ? 'Email invoice to client' : 'Waiting for sync'}
 				>
-					{isGenerating
-						? 'Working…'
-						: hasPrimaryDocx
-							? 'Regenerate invoice'
-							: 'Generate invoice'}
+					{isSending ? 'Sending…' : 'Send'}
 				</button>
-				{#if canEmailInvoice && hasPrimaryDocx}
-					<button
-						type="button"
-						class="invoice-editor__btn invoice-editor__btn--secondary"
-						onclick={handleSendInvoiceToClient}
-						disabled={isSending || !invoice.pbId}
-						title={invoice.pbId ? 'Email invoice to client' : 'Waiting for sync'}
-					>
-						{isSending ? 'Sending…' : 'Send to client'}
-					</button>
-				{/if}
-			</div>
-			<div class="invoice-editor__footer-secondary">
-				<button type="button" class="invoice-editor__btn" onclick={onEditJob}>Edit full job</button>
+			{/if}
+			<div class="invoice-editor__footer-tools">
 				{#if isSaving}<span class="invoice-editor__hint">Saving…</span>{/if}
 				<div class="invoice-editor__overflow" onclick={(e) => e.stopPropagation()}>
 					<button
@@ -835,6 +879,32 @@
 					</button>
 					{#if showOverflowMenu}
 						<ul class="invoice-editor__overflow-menu" role="menu">
+							{#if canEmailInvoice && hasPrimaryDocx}
+								<li role="none" class="invoice-editor__overflow-mobile-only">
+									<button
+										type="button"
+										role="menuitem"
+										class="invoice-editor__overflow-item"
+										disabled={isSending || !invoice.pbId}
+										onclick={handleSendInvoiceToClient}
+									>
+										{isSending ? 'Sending…' : 'Send to client'}
+									</button>
+								</li>
+							{/if}
+							<li role="none" class="invoice-editor__overflow-mobile-only">
+								<button
+									type="button"
+									role="menuitem"
+									class="invoice-editor__overflow-item"
+									onclick={() => {
+										closeOverflowMenu();
+										onEditJob();
+									}}
+								>
+									Edit full job
+								</button>
+							</li>
 							<li role="none">
 								<button
 									type="button"
@@ -900,10 +970,29 @@
 									</label>
 								</li>
 							{/if}
+							<li role="none" class="invoice-editor__overflow-mobile-only">
+								<button
+									type="button"
+									role="menuitem"
+									class="invoice-editor__overflow-item"
+									onclick={() => {
+										closeOverflowMenu();
+										onClose();
+									}}
+								>
+									Close
+								</button>
+							</li>
 						</ul>
 					{/if}
 				</div>
-				<button type="button" class="invoice-editor__btn" onclick={onClose}>Close</button>
+				<button
+					type="button"
+					class="invoice-editor__btn invoice-editor__footer-close"
+					onclick={onClose}
+				>
+					Close
+				</button>
 			</div>
 		</div>
 	</div>
@@ -1059,21 +1148,52 @@
 
 	.invoice-editor__invoice-discount {
 		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
+		flex-direction: column;
 		gap: var(--space-2);
-		font-size: var(--font-size-sm);
+		padding: var(--space-2);
+		background: var(--color-surface-alt);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+	}
+
+	.invoice-editor__discount-controls {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.invoice-editor__discount-controls select {
+		width: 3.5rem;
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
 		color: var(--color-text);
 	}
 
-	.invoice-editor__invoice-discount select {
-		width: 3.5rem;
-		padding: var(--space-1) var(--space-2);
-	}
-
-	.invoice-editor__invoice-discount input {
+	.invoice-editor__discount-controls input {
 		width: 5rem;
 		max-width: 100%;
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+		color: var(--color-text);
+	}
+
+	.invoice-editor__text-btn {
+		align-self: flex-start;
+		border: none;
+		background: none;
+		color: var(--color-primary);
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+	}
+
+	.invoice-editor__text-btn--danger {
+		color: var(--color-danger-emphasis, var(--color-danger));
 	}
 
 	.invoice-editor__totals-bar {
@@ -1291,12 +1411,11 @@
 	.invoice-editor__footer {
 		position: sticky;
 		bottom: 0;
-		display: flex;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: 1fr auto auto;
 		align-items: center;
-		justify-content: space-between;
 		gap: var(--space-2);
-		padding: var(--space-3);
+		padding: var(--space-2) var(--space-3);
 		margin: var(--space-1) calc(-1 * var(--space-3)) 0;
 		background: var(--color-surface);
 		border-top: 1px solid var(--color-border-strong);
@@ -1308,40 +1427,36 @@
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35);
 	}
 
+	.invoice-editor__footer-tools {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+	}
+
+	.invoice-editor__overflow-mobile-only {
+		display: none;
+	}
+
 	@media (max-width: 768px) {
 		.invoice-editor__footer {
-			flex-direction: column;
-			align-items: stretch;
+			grid-template-columns: 1fr auto;
 			margin-left: calc(-1 * var(--space-2));
 			margin-right: calc(-1 * var(--space-2));
 			padding: var(--space-2);
 		}
 
-		.invoice-editor__footer-primary {
-			flex-direction: column;
-			width: 100%;
-		}
-
 		.invoice-editor__btn--generate {
-			width: 100%;
+			grid-column: 1 / -1;
 		}
 
-		.invoice-editor__footer-secondary {
-			justify-content: space-between;
+		.invoice-editor__footer-send,
+		.invoice-editor__footer-close {
+			display: none;
 		}
-	}
 
-	.invoice-editor__footer-primary {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		align-items: center;
-	}
-
-	.invoice-editor__footer-secondary {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
+		.invoice-editor__overflow-mobile-only {
+			display: block;
+		}
 	}
 
 	.invoice-editor__overflow {

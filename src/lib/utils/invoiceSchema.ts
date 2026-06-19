@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 const discountSchema = z.object({
 	type: z.enum(['amount', 'percent']),
-	value: z.coerce.number().min(0)
+	value: z.coerce.number().min(0),
+	description: z.string().optional()
 });
 
 const billableItemSchema = z.object({
