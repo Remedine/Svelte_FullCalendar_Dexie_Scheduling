@@ -6,7 +6,7 @@
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs } from '$lib/db/index';
-	import { pullJobsFromServer, pb } from '$lib/db/pb';
+	import { pullJobsFromServer, applyServerJobRecord, pb } from '$lib/db/pb';
 	import { onJobsRealtime } from '$lib/db/realtime';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
@@ -218,30 +218,9 @@
 			const rec = e.record as any;
 			if (!rec) return;
 
-			const serverJob = {
-				id: rec.id,
-				clientId: rec.expand?.client?.id || rec.client,
-				title: rec.title,
-				start: new Date(rec.start),
-				end: new Date(rec.end),
-				assignedCrew: rec.assignedCrew || [],
-				status: rec.status,
-				billableItems: rec.billableItems || [],
-				subtotal: rec.subtotal || 0,
-				taxRate: rec.taxRate || 0.08,
-				taxAmount: rec.taxAmount || 0,
-				totalAmount: rec.totalAmount || 0,
-				areaOfTown: rec.areaOfTown,
-				notes: rec.notes,
-				cancelReason: rec.cancelReason,
-				cancelNotes: rec.cancelNotes,
-				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
-				cancelledBy: rec.cancelledBy,
-				createdAt: new Date(rec.created),
-				updatedAt: new Date(rec.updated)
-			};
-
-			await db.jobs.put(serverJob);
+			// )=- Batch A: same updatedAt merge as pullJobsFromServer — do not clobber newer local edits.
+			const outcome = await applyServerJobRecord(rec);
+			if (outcome === 'skipped') return;
 
 			const includeCancelled = filters.statuses.includes('cancelled');
 			const start = new Date();

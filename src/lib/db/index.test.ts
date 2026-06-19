@@ -1058,26 +1058,37 @@ describe('pull functions (with mocked pb)', () => {
 // Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
 
 describe('processSyncQueue (with mocked pb)', () => {
-	it('processes a job create queue item and stamps pbId on success', async () => {
-		// Mock pb to succeed on create and return an id
-		vi.doMock('$lib/db/pb', () => ({
-			pb: {
-				authStore: { isValid: true },
-				collection: (name: string) => {
-					if (name === 'jobs') {
-						return {
-							create: async (payload: any) => ({ id: 'server-job-123', ...payload })
-						};
-					}
-					return {};
-				}
-			}
-		}));
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
 
+	it('processes a job create queue item and stamps pbId on success', async () => {
+		const { pb } = await import('$lib/db/pb');
 		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');
 
-		// Seed a local job and queue item (as createJob does)
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'jobs') {
+				return {
+					create: vi.fn().mockResolvedValue({ id: 'server-job-123' })
+				} as any;
+			}
+			return {} as any;
+		});
+
 		const localId = 'local-job-abc';
+		await syncDb.clients.add({
+			id: 'c1',
+			pbId: 'pb-client-1',
+			name: 'Test Client',
+			serviceAddressStreet: '',
+			serviceAddressCity: '',
+			serviceAddressState: '',
+			serviceAddressZip: '',
+			areaOfTown: 'Downtown',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
 		await syncDb.jobs.add({
 			id: localId,
 			clientId: 'c1',
@@ -1100,17 +1111,98 @@ describe('processSyncQueue (with mocked pb)', () => {
 			type: 'create',
 			collection: 'jobs',
 			recordId: localId,
-			data: { title: 'Sync Test Job' } // simplified
+			data: {
+				title: 'Sync Test Job',
+				clientId: 'c1',
+				start: new Date(),
+				end: new Date(),
+				assignedCrew: [],
+				billableItems: [],
+				subtotal: 0,
+				taxRate: 0.08,
+				taxAmount: 0,
+				totalAmount: 0,
+				status: 'scheduled'
+			}
 		});
 
 		await processSyncQueue();
 
-		// Queue item should be cleaned (the code does this after successful or handled error path)
 		const remainingQueue = await syncDb.syncQueue.where('recordId').equals(localId).toArray();
 		expect(remainingQueue.length).toBe(0);
 
-		// Note: pbId stamping depends on exact mock of the create response matching the internal pbPayload; this smoke verifies the queue processing path runs cleanly.
-		vi.doUnmock('$lib/db/pb');
+		const job = await syncDb.jobs.get(localId);
+		expect(job?.pbId).toBe('server-job-123');
+	});
+
+	it('keeps queue item when PocketBase job create fails (Batch A)', async () => {
+		const { pb } = await import('$lib/db/pb');
+		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');
+
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'jobs') {
+				return {
+					create: vi.fn().mockRejectedValue({ response: { data: { title: { message: 'invalid' } } } })
+				} as any;
+			}
+			return {} as any;
+		});
+
+		const localId = 'local-job-fail';
+		await syncDb.clients.add({
+			id: 'c1',
+			pbId: 'pb-client-1',
+			name: 'Test Client',
+			serviceAddressStreet: '',
+			serviceAddressCity: '',
+			serviceAddressState: '',
+			serviceAddressZip: '',
+			areaOfTown: 'Downtown',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		await syncDb.jobs.add({
+			id: localId,
+			clientId: 'c1',
+			title: 'Fail Sync Job',
+			start: new Date(),
+			end: new Date(),
+			assignedCrew: [],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0.065,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: '',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		await addToSyncQueue({
+			type: 'create',
+			collection: 'jobs',
+			recordId: localId,
+			data: {
+				title: 'Fail Sync Job',
+				clientId: 'c1',
+				start: new Date(),
+				end: new Date(),
+				assignedCrew: [],
+				billableItems: [],
+				subtotal: 0,
+				taxRate: 0.08,
+				taxAmount: 0,
+				totalAmount: 0,
+				status: 'scheduled'
+			}
+		});
+
+		await processSyncQueue();
+
+		const remainingQueue = await syncDb.syncQueue.where('recordId').equals(localId).toArray();
+		expect(remainingQueue.length).toBe(1);
 	});
 });
 

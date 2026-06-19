@@ -42,7 +42,9 @@ Phases 0–7 of [`JOBS_AND_INVOICES_SPEC.md`](JOBS_AND_INVOICES_SPEC.md) are com
 
 ## Priority 0 — Code review fixes (Jun 18–22)
 
-### Batch A — Sync integrity (highest leverage, 2–3 days)
+### Batch A — Sync integrity (highest leverage, 2–3 days) — **COMPLETE (Jun 18)**
+
+Implemented: A1 queue no-drop-on-failure, A2 single-flight mutex, A3 invoice relation resolution, A4–A5 paginated job pull + empty-roster guard, A6–A7 realtime conflict check + pbId on pull. Tests: `processSyncQueue` success removes item + stamps pbId; failure retains queue item.
 
 | ID | Issue | File(s) | Fix |
 |----|-------|---------|-----|

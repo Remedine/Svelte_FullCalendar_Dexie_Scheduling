@@ -99,8 +99,54 @@ export async function loginWithEmail(
 	}
 }
 
+// )=- Batch A (PLAN.md): normalize updatedAt for last-write-wins merge (Date vs ISO string).
+function timestampMs(value: Date | string | number | undefined): number {
+	if (value == null) return 0;
+	if (value instanceof Date) return value.getTime();
+	const n = new Date(value).getTime();
+	return Number.isNaN(n) ? 0 : n;
+}
+
+/** Merge one PocketBase job record into Dexie with updatedAt conflict check. */
+export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipped'> {
+	const existingLocal = await db.jobs.where('pbId').equals(rec.id).first();
+
+	const serverJob = {
+		id: existingLocal ? existingLocal.id : rec.id,
+		pbId: rec.id,
+		clientId: rec.expand?.client?.id || rec.client,
+		title: rec.title,
+		start: new Date(rec.start),
+		end: new Date(rec.end),
+		assignedCrew: rec.assignedCrew || [],
+		status: rec.status,
+		billableItems: rec.billableItems || [],
+		subtotal: rec.subtotal || 0,
+		taxRate: rec.taxRate || 0.08,
+		taxAmount: rec.taxAmount || 0,
+		totalAmount: rec.totalAmount || 0,
+		areaOfTown: rec.areaOfTown,
+		notes: rec.notes,
+		cancelReason: rec.cancelReason,
+		cancelNotes: rec.cancelNotes,
+		cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
+		cancelledBy: rec.cancelledBy,
+		importSource: rec.importSource || undefined,
+		createdAt: new Date(rec.created),
+		updatedAt: new Date(rec.updated)
+	};
+
+	const localJob = await db.jobs.get(serverJob.id);
+
+	if (localJob && timestampMs(localJob.updatedAt) > timestampMs(serverJob.updatedAt)) {
+		return 'skipped';
+	}
+
+	await db.jobs.put(serverJob);
+	return 'applied';
+}
+
 // Pull jobs from PocketBase (with conflict resolution)
-// line 79
 export async function pullJobsFromServer() {
 	if (!pb.authStore.isValid) return;
 
@@ -109,72 +155,54 @@ export async function pullJobsFromServer() {
 	if (now - (pullJobsFromServer as any)._lastCall < 800) return;
 	(pullJobsFromServer as any)._lastCall = now;
 
-	try {
-		const records = await pb.collection('jobs').getFullList({
-			sort: '-updatedAt',
-			// Removed expand: 'client' because the clients collection's rules only allow superusers for expand access (causing "only superusers can view collection \"clients\" records").
-			// We fall back to rec.client for the relation id anyway.
-			// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-			$autoCancel: false
-		});
+	const PAGE_SIZE = 100;
+	let page = 1;
+	let totalPages = 1;
+	let totalPulled = 0;
+	let totalDeleted = 0;
 
+	try {
 		const pbJobIds = new Set<string>();
 
-		for (const rec of records) {
-			pbJobIds.add(rec.id);
+		while (page <= totalPages) {
+			const result = await pb.collection('jobs').getList(page, PAGE_SIZE, {
+				sort: '-updated',
+				$autoCancel: false
+			});
 
-			const serverJob = {
-				id: rec.id,
-				clientId: rec.expand?.client?.id || rec.client,
-				title: rec.title,
-				start: new Date(rec.start),
-				end: new Date(rec.end),
-				assignedCrew: rec.assignedCrew || [],
-				status: rec.status,
-				billableItems: rec.billableItems || [],
-				subtotal: rec.subtotal || 0,
-				taxRate: rec.taxRate || 0.08,
-				taxAmount: rec.taxAmount || 0,
-				totalAmount: rec.totalAmount || 0,
-				areaOfTown: rec.areaOfTown,
-				notes: rec.notes,
-				cancelReason: rec.cancelReason,
-				cancelNotes: rec.cancelNotes,
-				cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
-				cancelledBy: rec.cancelledBy,
-				createdAt: new Date(rec.created),
-				updatedAt: new Date(rec.updated)
-			};
+			totalPages = result.totalPages;
 
-			const localJob = await db.jobs.get(rec.id);
-
-			if (localJob && localJob.updatedAt > serverJob.updatedAt) {
-				console.log(`⏭️ Skipping job ${rec.id} — local version is newer`);
-				continue;
+			for (const rec of result.items) {
+				pbJobIds.add(rec.id);
+				const outcome = await applyServerJobRecord(rec);
+				if (outcome === 'applied') totalPulled++;
 			}
 
-			await db.jobs.put(serverJob);
+			page++;
 		}
 
-		// Delete stale local jobs
-		const localJobs = await db.jobs.toArray();
-		for (const localJob of localJobs) {
-			// Only delete if this job was previously synced (has pbId) AND its pbId is no longer on the server
-			if (localJob.pbId && !pbJobIds.has(localJob.pbId)) {
-				await db.jobs.delete(localJob.id!);
-				console.log(`🗑️ Removed stale job from Dexie: ${localJob.title}`);
+		if (pbJobIds.size > 0) {
+			const localJobs = await db.jobs.toArray();
+			for (const localJob of localJobs) {
+				if (localJob.pbId && !pbJobIds.has(localJob.pbId)) {
+					await db.jobs.delete(localJob.id!);
+					totalDeleted++;
+					console.log(`🗑️ Removed stale job from Dexie: ${localJob.title}`);
+				}
 			}
+		} else {
+			console.warn('[pullJobs] Skipping stale delete — empty PocketBase job roster');
 		}
 
 		const { cleanupDuplicateJobs } = await import('$lib/db');
 		const dupesRemoved = await cleanupDuplicateJobs();
 
-		if (records.length > 0 || dupesRemoved > 0) {
-			console.log(`✅ Pulled ${records.length} jobs, removed ${dupesRemoved} duplicate row(s)`);
+		if (totalPulled > 0 || totalDeleted > 0 || dupesRemoved > 0) {
+			console.log(
+				`✅ Pulled ${totalPulled} jobs, deleted ${totalDeleted} stale, removed ${dupesRemoved} duplicate row(s)`
+			);
 		}
-		// )=- Reduced log noise: only log when there are actual records. 0-job case was spamming console.
 	} catch (err: any) {
-		// Only log real errors, not auto-cancellations
 		if (err?.status !== 0) {
 			console.error('Pull jobs failed', err);
 		}

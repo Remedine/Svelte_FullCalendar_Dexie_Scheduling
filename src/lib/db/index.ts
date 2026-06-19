@@ -1231,16 +1231,85 @@ export async function resolveClientPbId(localClientId: string): Promise<string> 
 	return client?.pbId || client?.id || localClientId;
 }
 
+// )=- Batch A (PLAN.md): Dexie UUID detector — never send these as PocketBase relation ids.
+const isDexieUuid = (id: string) =>
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+/** Resolve a job to its PocketBase id for relation fields. Returns null if not synced yet. */
+export async function resolveJobPbId(localJobId: string): Promise<string | null> {
+	if (!localJobId) return null;
+
+	let job = await db.jobs.get(localJobId);
+	if (job?.pbId) return job.pbId;
+
+	const byPb = await db.jobs.where('pbId').equals(localJobId).first();
+	if (byPb?.pbId) return byPb.pbId;
+
+	await new Promise((r) => setTimeout(r, 60));
+	job = await db.jobs.get(localJobId);
+	if (job?.pbId) return job.pbId;
+
+	if (job?.id && isDexieUuid(job.id)) return null;
+	if (job?.id && !isDexieUuid(job.id)) return job.id;
+
+	return null;
+}
+
+/** Strict client resolver for PB relations — null when only a local Dexie row exists. */
+export async function resolveClientPbIdForSync(localClientId: string): Promise<string | null> {
+	if (!localClientId) return null;
+
+	let client = await db.clients.get(localClientId);
+	if (client?.pbId) return client.pbId;
+
+	const byPb = await db.clients.where('pbId').equals(localClientId).first();
+	if (byPb?.pbId) return byPb.pbId;
+
+	await new Promise((r) => setTimeout(r, 60));
+	client = await db.clients.get(localClientId);
+	if (client?.pbId) return client.pbId;
+
+	if (isDexieUuid(localClientId) || (client?.id && isDexieUuid(client.id))) return null;
+	if (client?.id && !isDexieUuid(client.id)) return client.id;
+
+	return null;
+}
+
+async function resolveInvoicePbRelations(
+	jobId?: string,
+	clientId?: string
+): Promise<{ job: string; client: string } | null> {
+	const jobPb = jobId ? await resolveJobPbId(jobId) : null;
+	const clientPb = clientId ? await resolveClientPbIdForSync(clientId) : null;
+	if (!jobPb || !clientPb) return null;
+	return { job: jobPb, client: clientPb };
+}
+
 // ==================== SYNC QUEUE ====================
 
 export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'createdAt'>) {
 	await db.syncQueue.add({ ...item, createdAt: new Date() });
 }
 
-export async function processSyncQueue() {
+// )=- Batch A: single-flight guard so concurrent login/CRUD/online handlers cannot double-create on PB.
+let syncQueueInFlight: Promise<void> | null = null;
+
+export async function processSyncQueue(): Promise<void> {
+	if (syncQueueInFlight) {
+		return syncQueueInFlight;
+	}
+	syncQueueInFlight = runProcessSyncQueue().finally(() => {
+		syncQueueInFlight = null;
+	});
+	return syncQueueInFlight;
+}
+
+async function runProcessSyncQueue(): Promise<void> {
 	const items = await db.syncQueue.orderBy('createdAt').toArray();
 
 	for (const item of items) {
+		let itemSynced = false;
+
 		try {
 			if (item.collection === 'jobs') {
 				if (item.type === 'create') {
@@ -1267,6 +1336,7 @@ export async function processSyncQueue() {
 						const record = await pb.collection('jobs').create(pbPayload);
 						await db.jobs.update(item.recordId, { pbId: record.id });
 						console.log(`✅ Job pushed to PocketBase: ${record.id}`);
+						itemSynced = true;
 					} catch (err: any) {
 						console.error('❌ Job create failed:', JSON.stringify(err.response?.data, null, 2));
 					}
@@ -1277,6 +1347,7 @@ export async function processSyncQueue() {
 					try {
 						await pb.collection('jobs').update(realId, item.data);
 						console.log(`✅ Job updated in PocketBase: ${realId}`);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1290,6 +1361,7 @@ export async function processSyncQueue() {
 
 					try {
 						await pb.collection('jobs').delete(realId);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1330,6 +1402,7 @@ export async function processSyncQueue() {
 						for (const q of pendingDeletes) {
 							await db.syncQueue.update(q.id!, { recordId: record.id });
 						}
+						itemSynced = true;
 					} catch (err: any) {
 						console.error('❌ Client sync failed with 400:', err.response?.data);
 						throw err;
@@ -1348,6 +1421,7 @@ export async function processSyncQueue() {
 
 						await pb.collection('clients').update(realId, safeCleanData);
 						console.log(`✅ Client updated in PocketBase: ${realId}`);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1369,6 +1443,7 @@ export async function processSyncQueue() {
 
 					try {
 						await pb.collection('clients').delete(realId);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1443,6 +1518,7 @@ export async function processSyncQueue() {
 						for (const q of pendingDeletes) {
 							await db.syncQueue.update(q.id!, { recordId: record.id });
 						}
+						itemSynced = true;
 					} catch (err: any) {
 						console.error('❌ User sync failed with 400:', err.response?.data);
 						// Clean up the bad/stale queue item (e.g. old pending NewUser create that included fields PB rules reject).
@@ -1490,6 +1566,7 @@ export async function processSyncQueue() {
 							await pb.collection('users').update(realId, pbPayload);
 							console.log(`✅ User updated in PocketBase: ${realId}`);
 						}
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							// The pbId on this local record is stale/dead (common after dups, cleanups, or server deletes of test users).
@@ -1516,6 +1593,7 @@ export async function processSyncQueue() {
 
 					try {
 						await pb.collection('users').delete(realId);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1539,6 +1617,18 @@ export async function processSyncQueue() {
 					try {
 						const data = item.data;
 						const localAtProcess = await db.invoices.get(item.recordId);
+
+						// )=- Batch A: resolve PB relation ids before any invoice push (skip until job/client synced).
+						const relationIds = await resolveInvoicePbRelations(
+							data.jobId || localAtProcess?.jobId,
+							data.clientId || localAtProcess?.clientId
+						);
+						if (!relationIds && !localAtProcess?.pbId) {
+							console.warn(
+								`ℹ️ Keeping invoice create queue item ${item.id} — job/client not on PocketBase yet`
+							);
+							continue;
+						}
 
 						// )=- If by the time this create item is processed the local now has a pbId (e.g. the original
 						// create from Generate ran, or a promoted update fallback created it), treat this as an update
@@ -1583,22 +1673,24 @@ export async function processSyncQueue() {
 								console.log(
 									`✅ Invoice (with files) updated in PocketBase (create item promoted to update): ${realId}`
 								);
+								itemSynced = true;
 							} else {
 								await pb.collection('invoices').update(realId, data);
 								console.log(
 									`✅ Invoice updated in PocketBase (create item promoted to update): ${realId}`
 								);
+								itemSynced = true;
 							}
-						} else {
+						} else if (relationIds) {
 							const hasFiles = !!data._files || !!data._fileDeletes;
 
 							if (hasFiles) {
 								// Use FormData for reliable multi-file + scalar upload
 								const formData = new FormData();
 
-								// Append scalar fields (PB will interpret relations by id)
-								if (data.jobId) formData.append('job', data.jobId);
-								if (data.clientId) formData.append('client', data.clientId);
+								// Append scalar fields (PB relations use resolved PocketBase ids)
+								formData.append('job', relationIds.job);
+								formData.append('client', relationIds.client);
 								if (data.status) formData.append('status', data.status);
 								if (data.dueDate)
 									formData.append(
@@ -1642,11 +1734,12 @@ export async function processSyncQueue() {
 								const record = await pb.collection('invoices').create(formData);
 								await db.invoices.update(item.recordId, { pbId: record.id });
 								console.log(`✅ Invoice (with files) pushed to PocketBase: ${record.id}`);
+								itemSynced = true;
 							} else {
 								// No files — plain JSON create (faster)
 								const pbPayload: any = {
-									job: data.jobId,
-									client: data.clientId,
+									job: relationIds.job,
+									client: relationIds.client,
 									status: data.status || 'draft',
 									dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
 									paidAt: data.paidAt
@@ -1663,6 +1756,7 @@ export async function processSyncQueue() {
 								const record = await pb.collection('invoices').create(pbPayload);
 								await db.invoices.update(item.recordId, { pbId: record.id });
 								console.log(`✅ Invoice pushed to PocketBase: ${record.id}`);
+								itemSynced = true;
 							}
 						}
 					} catch (err: any) {
@@ -1684,6 +1778,17 @@ export async function processSyncQueue() {
 						}
 
 						if (!localInvoice.pbId) {
+							const fallbackRelations = await resolveInvoicePbRelations(
+								localInvoice.jobId,
+								localInvoice.clientId
+							);
+							if (!fallbackRelations) {
+								console.warn(
+									`ℹ️ Keeping invoice update queue item ${item.id} — job/client not on PocketBase yet`
+								);
+								continue;
+							}
+
 							// )=- Fallback create for invoices that only exist locally (no pbId yet).
 							// This happens when the original createInvoice (from Generate Draft) never successfully
 							// landed on PocketBase (offline, previous error, strict collection rules, or the row was
@@ -1699,8 +1804,8 @@ export async function processSyncQueue() {
 								const formData = new FormData();
 
 								// Full fields from the current local record (the authoritative state for initial create)
-								if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
-								if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
+								formData.append('job', fallbackRelations.job);
+								formData.append('client', fallbackRelations.client);
 								if (localInvoice.status) formData.append('status', localInvoice.status);
 								if (localInvoice.dueDate)
 									formData.append(
@@ -1751,10 +1856,11 @@ export async function processSyncQueue() {
 								console.log(
 									`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback): ${record.id}`
 								);
+								itemSynced = true;
 							} else {
 								const pbPayload: any = {
-									job: localInvoice.jobId,
-									client: localInvoice.clientId,
+									job: fallbackRelations.job,
+									client: fallbackRelations.client,
 									status: localInvoice.status || 'draft',
 									dueDate:
 										localInvoice.dueDate instanceof Date
@@ -1776,6 +1882,7 @@ export async function processSyncQueue() {
 								console.log(
 									`✅ Invoice pushed to PocketBase (regenerate/create fallback): ${record.id}`
 								);
+								itemSynced = true;
 							}
 						} else {
 							// Normal update path — we have a pbId so the record should exist on PB.
@@ -1831,6 +1938,7 @@ export async function processSyncQueue() {
 									console.log(`✅ Invoice updated in PocketBase: ${realId}`);
 								}
 								updateSucceeded = true;
+								itemSynced = true;
 							} catch (updateErr: any) {
 								const is404 =
 									updateErr?.status === 404 ||
@@ -1855,12 +1963,23 @@ export async function processSyncQueue() {
 							}
 
 							if (!updateSucceeded) {
+								const fallbackRelations = await resolveInvoicePbRelations(
+									localInvoice.jobId,
+									localInvoice.clientId
+								);
+								if (!fallbackRelations) {
+									console.warn(
+										`ℹ️ Keeping invoice update queue item ${item.id} — job/client not on PocketBase yet (404 fallback)`
+									);
+									continue;
+								}
+
 								// Fallback create path (triggered either by no pbId above, or by 404 on update here)
 								if (hasFiles) {
 									const formData = new FormData();
 
-									if (localInvoice.jobId) formData.append('job', localInvoice.jobId);
-									if (localInvoice.clientId) formData.append('client', localInvoice.clientId);
+									formData.append('job', fallbackRelations.job);
+									formData.append('client', fallbackRelations.client);
 									if (localInvoice.status) formData.append('status', localInvoice.status);
 									if (localInvoice.dueDate)
 										formData.append(
@@ -1910,10 +2029,11 @@ export async function processSyncQueue() {
 									console.log(
 										`✅ Invoice (with files) pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`
 									);
+									itemSynced = true;
 								} else {
 									const pbPayload: any = {
-										job: localInvoice.jobId,
-										client: localInvoice.clientId,
+										job: fallbackRelations.job,
+										client: fallbackRelations.client,
 										status: localInvoice.status || 'draft',
 										dueDate:
 											localInvoice.dueDate instanceof Date
@@ -1935,6 +2055,7 @@ export async function processSyncQueue() {
 									console.log(
 										`✅ Invoice pushed to PocketBase (regenerate/create fallback after 404): ${record.id}`
 									);
+									itemSynced = true;
 								}
 							}
 						}
@@ -1956,6 +2077,7 @@ export async function processSyncQueue() {
 					}
 					try {
 						await pb.collection('invoices').delete(item.recordId);
+						itemSynced = true;
 					} catch (err: any) {
 						if (err.status === 404) {
 							await db.syncQueue.delete(item.id!);
@@ -1966,8 +2088,11 @@ export async function processSyncQueue() {
 				}
 			}
 
-			await db.syncQueue.delete(item.id!);
-			console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
+			// )=- Batch A: only remove queue items after confirmed PocketBase success (never on swallowed errors).
+			if (itemSynced) {
+				await db.syncQueue.delete(item.id!);
+				console.log(`✅ Synced ${item.type} ${item.collection} ${item.recordId}`);
+			}
 		} catch (err) {
 			if (err && (err as any).__intentionallyDropped) {
 				// Expected drop, e.g. 404 on invoice update for a local-only record (the regenerate/create fallback handled it)
