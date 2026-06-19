@@ -190,19 +190,6 @@
 		}
 	}
 
-	async function handleWriteBack() {
-		if (!invoice?.id) return;
-		const saved = await persistDraft();
-		if (!saved) return;
-		try {
-			await writeInvoiceSnapshotToClientJob(invoice.id);
-			toast.success('Saved snapshot to client and job records');
-		} catch (err) {
-			console.error(err);
-			toast.error('Write-back failed');
-		}
-	}
-
 	async function handleGenerateDocx() {
 		if (!job || !invoice?.id) return;
 		isGenerating = true;
@@ -251,6 +238,14 @@
 				status = fresh.status;
 				onStatusChange(fresh);
 			}
+
+			try {
+				await writeInvoiceSnapshotToClientJob(invoice.id);
+			} catch (err) {
+				console.error('Write-back to client/job failed after generate', err);
+				toast.error('Invoice saved, but failed to sync billing to client/job records');
+			}
+
 			toast.success(hasPrimaryDocx ? 'Invoice regenerated' : 'Invoice generated');
 		} catch (err) {
 			console.error('Generate invoice failed', err);
@@ -545,10 +540,14 @@
 					Envelope preview
 				</label>
 			{/if}
-			<button type="button" class="invoice-editor__btn" onclick={handleRefreshFromJob}>Refresh from job</button>
-			{#if isAdmin}
-				<button type="button" class="invoice-editor__btn" onclick={handleWriteBack}>Save to client/job</button>
-			{/if}
+			<button
+				type="button"
+				class="invoice-editor__btn"
+				onclick={handleRefreshFromJob}
+				title="Reload client, addresses, billables, and due date from the current job and client records. Keeps invoice date, notes, and discounts."
+			>
+				Refresh from job
+			</button>
 			<button
 				type="button"
 				class="invoice-editor__btn invoice-editor__btn--primary"
@@ -602,39 +601,219 @@
 		border-radius: var(--radius-md);
 		padding: var(--space-3);
 		background: var(--color-surface-alt);
+		color: var(--color-text);
 		margin-top: var(--space-2);
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-3);
 	}
-	.invoice-editor__section { display: flex; flex-direction: column; gap: var(--space-2); }
-	.invoice-editor__section-title { margin: 0; font-size: var(--font-size-sm); font-weight: 600; }
-	.invoice-editor__section-head { display: flex; justify-content: space-between; align-items: center; }
-	.invoice-editor__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
-	.invoice-editor__field, .invoice-editor__grid label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); }
-	.invoice-editor__input, .invoice-editor__textarea {
+
+	@media (max-width: 768px) {
+		.invoice-editor {
+			padding: var(--space-2);
+			border-radius: var(--radius-sm);
+			margin-top: var(--space-1);
+			gap: var(--space-2);
+		}
+	}
+
+	.invoice-editor__section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.invoice-editor__section-title {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+
+	.invoice-editor__section-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	.invoice-editor__grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: var(--space-2);
+	}
+
+	@media (max-width: 768px) {
+		.invoice-editor__grid {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	.invoice-editor__field,
+	.invoice-editor__grid label {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
+	}
+
+	.invoice-editor__input,
+	.invoice-editor__textarea,
+	.invoice-editor__invoice-discount select,
+	.invoice-editor__invoice-discount input,
+	.invoice-editor__status-row input[type='date'] {
 		padding: var(--space-2);
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
+		color: var(--color-text);
 		font: inherit;
+		box-sizing: border-box;
 	}
-	.invoice-editor__checkbox { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); }
-	.invoice-editor__totals { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: var(--font-size-sm); }
-	.invoice-editor__invoice-discount { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); }
-	.invoice-editor__actions { flex-wrap: wrap; flex-direction: row; align-items: center; }
+
+	.invoice-editor__textarea {
+		resize: vertical;
+		min-height: 3rem;
+		width: 100%;
+	}
+
+	.invoice-editor__input[type='date']::-webkit-calendar-picker-indicator {
+		filter: invert(0.2);
+	}
+
+	.dark .invoice-editor__input[type='date']::-webkit-calendar-picker-indicator,
+	.dark .invoice-editor__status-row input[type='date']::-webkit-calendar-picker-indicator {
+		filter: invert(1);
+	}
+
+	.invoice-editor__checkbox {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+		cursor: pointer;
+	}
+
+	.invoice-editor__totals {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2) var(--space-3);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+		padding: var(--space-2);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+	}
+
+	.invoice-editor__invoice-discount {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+	}
+
+	.invoice-editor__invoice-discount select {
+		width: 3.5rem;
+		padding: var(--space-1) var(--space-2);
+	}
+
+	.invoice-editor__invoice-discount input {
+		width: 5rem;
+		max-width: 100%;
+	}
+
+	.invoice-editor__meta {
+		margin: 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.invoice-editor__actions {
+		display: flex;
+		flex-wrap: wrap;
+		flex-direction: row;
+		align-items: center;
+		gap: var(--space-2);
+		padding-top: var(--space-1);
+		border-top: 1px solid var(--color-border);
+	}
+
+	@media (max-width: 768px) {
+		.invoice-editor__actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.invoice-editor__actions .invoice-editor__btn--primary {
+			width: 100%;
+			padding: var(--space-2) var(--space-3);
+		}
+	}
+
 	.invoice-editor__btn {
 		font-size: var(--font-size-xs);
 		padding: var(--space-1) var(--space-2);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
+		color: var(--color-text);
 		cursor: pointer;
 	}
-	.invoice-editor__btn--primary { background: var(--color-primary); color: white; border-color: var(--color-primary); }
-	.invoice-editor__btn--danger { border-color: var(--color-danger); color: var(--color-danger); }
-	.invoice-editor__upload { font-size: var(--font-size-xs); color: var(--color-primary); cursor: pointer; }
-	.invoice-editor__upload input { display: none; }
+
+	.invoice-editor__btn:hover:not(:disabled) {
+		background: var(--color-surface-alt);
+	}
+
+	.invoice-editor__btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.invoice-editor__btn--primary {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
+	}
+
+	.invoice-editor__btn--primary:hover:not(:disabled) {
+		filter: brightness(1.1);
+		background: var(--color-primary);
+	}
+
+	.invoice-editor__btn--danger {
+		border-color: var(--color-danger);
+		color: var(--color-danger-emphasis, var(--color-danger));
+	}
+
+	.invoice-editor__btn--danger:hover:not(:disabled) {
+		background: var(--color-danger-soft);
+	}
+
+	.invoice-editor__upload {
+		font-size: var(--font-size-xs);
+		color: var(--color-primary);
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.invoice-editor__upload input {
+		display: none;
+	}
+
+	@media (max-width: 768px) {
+		.invoice-editor__upload {
+			text-align: center;
+			padding: var(--space-1) 0;
+		}
+	}
+
 	.invoice-editor__stale-banner {
 		margin: 0;
 		padding: var(--space-2);
@@ -642,15 +821,105 @@
 		border: 1px solid var(--color-warning);
 		border-radius: var(--radius-sm);
 		font-size: var(--font-size-xs);
+		color: var(--color-warning);
 	}
-	.invoice-editor__errors { margin: 0; padding-left: 1.2rem; color: var(--color-danger); font-size: var(--font-size-xs); }
-	.invoice-editor__badge { font-size: var(--font-size-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-full); text-transform: uppercase; }
-	.invoice-editor__badge--draft { background: var(--color-warning-soft); color: var(--color-warning); }
-	.invoice-editor__badge--generated { background: var(--color-primary-soft); color: var(--color-primary-emphasis); }
-	.invoice-editor__badge--sent { background: var(--color-success-soft); color: var(--color-success); }
-	.invoice-editor__badge--paid { background: var(--color-success-soft); color: var(--color-success); }
-	.invoice-editor__status-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-	.invoice-editor__hint { font-size: var(--font-size-xs); color: var(--color-text-muted); }
-	.invoice-editor__supporting { list-style: none; margin: 0; padding: 0; font-size: var(--font-size-xs); }
-	.invoice-editor__supporting li { display: flex; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) 0; }
+
+	.invoice-editor__errors {
+		margin: 0;
+		padding: var(--space-2) var(--space-2) var(--space-2) 1.4rem;
+		color: var(--color-danger);
+		font-size: var(--font-size-xs);
+		background: var(--color-danger-soft);
+		border: 1px solid var(--color-danger);
+		border-radius: var(--radius-sm);
+	}
+
+	.invoice-editor__badge {
+		font-size: var(--font-size-xs);
+		padding: 0.15rem 0.55rem;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+	}
+
+	.invoice-editor__badge--draft {
+		background: var(--color-warning-soft);
+		color: var(--color-warning);
+	}
+
+	.invoice-editor__badge--generated {
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+	}
+
+	.invoice-editor__badge--sent,
+	.invoice-editor__badge--paid {
+		background: var(--color-success-soft);
+		color: var(--color-success);
+	}
+
+	.invoice-editor__status-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	@media (max-width: 768px) {
+		.invoice-editor__status-row {
+			gap: var(--space-1);
+		}
+
+		.invoice-editor__status-row label {
+			width: 100%;
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-1);
+			font-size: var(--font-size-xs);
+			color: var(--color-text-muted);
+		}
+	}
+
+	.invoice-editor__hint {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-style: italic;
+	}
+
+	.invoice-editor__supporting {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+	}
+
+	.invoice-editor__supporting li {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+	}
+
+	.invoice-editor__supporting li span {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: monospace;
+		color: var(--color-text-muted);
+	}
+
+	@media (max-width: 768px) {
+		.invoice-editor__supporting li {
+			flex-wrap: wrap;
+		}
+	}
 </style>
