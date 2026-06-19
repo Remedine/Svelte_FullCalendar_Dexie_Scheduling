@@ -17,7 +17,7 @@
 	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 	import { db } from '$lib/db';
-	import JobFormModal, { openJobModal } from '$lib/components/JobFormModal.svelte';
+	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 
 	let calendarEl = $state<HTMLDivElement | null>(null);
@@ -167,8 +167,6 @@
 
 	<div bind:this={calendarEl} class="calendar__container"></div>
 </div>
-
-<JobFormModal />
 
 <style>
 	.calendar__wrapper {

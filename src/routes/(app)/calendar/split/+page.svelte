@@ -1,7 +1,6 @@
 <!-- src/routes/(app)/calendar/split/+page.svelte -->
 <script lang="ts">
 	import SplitCalendar from '$lib/calendar/SplitCalendar.svelte';
-	import JobFormModal from '$lib/components/JobFormModal.svelte';
 </script>
 
 <div class="split-page">
@@ -9,8 +8,6 @@
 		<SplitCalendar />
 	</div>
 </div>
-
-<JobFormModal />
 
 <style>
 	.split-page {
