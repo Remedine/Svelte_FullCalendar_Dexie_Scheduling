@@ -132,8 +132,9 @@ export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipp
 		cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
 		cancelledBy: rec.cancelledBy,
 		importSource: rec.importSource || undefined,
-		createdAt: new Date(rec.created),
-		updatedAt: new Date(rec.updated)
+		// Jobs collection uses custom createdAt/updatedAt autodate fields (not system created/updated).
+		createdAt: new Date(rec.createdAt || rec.created),
+		updatedAt: new Date(rec.updatedAt || rec.updated)
 	};
 
 	const localJob = await db.jobs.get(serverJob.id);
@@ -166,7 +167,8 @@ export async function pullJobsFromServer() {
 
 		while (page <= totalPages) {
 			const result = await pb.collection('jobs').getList(page, PAGE_SIZE, {
-				sort: '-updated',
+				// )=- Jobs schema has updatedAt (custom autodate), not sortable as -updated — caused 400 after Batch A pagination.
+				sort: '-updatedAt',
 				$autoCancel: false
 			});
 
