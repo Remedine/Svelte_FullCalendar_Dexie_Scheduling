@@ -1,5 +1,7 @@
 # Jobs Page, Job Details Modal & Invoices — Technical Spec
 
+> **Execution plan:** See [`PLAN.md`](PLAN.md) for schedule, priorities, and code-review fixes. This document is the technical spec only (Phases 0–7 complete; import + hardening tracked in PLAN).
+
 **Project:** Remedine/Svelte_FullCalendar_Dexie_Scheduling  
 **Date:** 2026  
 **Status:** Approved for implementation (spec first, then build)

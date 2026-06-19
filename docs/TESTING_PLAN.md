@@ -1,5 +1,7 @@
 # Testing Plan — Capital City Windows Scheduler
 
+> **Execution plan:** See [`PLAN.md`](PLAN.md) for schedule and priorities. Run tests against Batch A–D fixes per that plan.
+
 **Project:** Remedine/Svelte_FullCalendar_Dexie_Scheduling  
 **Date:** 2026  
 **Goal:** Establish a practical, maintainable test suite for an offline-first Svelte 5 + Dexie + PocketBase + FullCalendar scheduling/CRM application.
