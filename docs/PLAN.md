@@ -56,7 +56,11 @@ Implemented: A1 queue no-drop-on-failure, A2 single-flight mutex, A3 invoice rel
 | A6 | Realtime clobbers local edits | `SplitCalendar.svelte` ~217–244 | Reuse pull's `updatedAt` conflict check |
 | A7 | Pulled jobs omit `pbId` | `pb.ts` 126–156 | Always set `pbId: rec.id` on pull/realtime |
 
-### Batch B — Data correctness (1 day)
+### Batch B — Data correctness (1 day) — **COMPLETE (Jun 18)**
+
+Implemented: B1 cancelNotes fix, B2 tax normalization (`$lib/utils/tax.ts`), B3 `jobDataToPbPayload` for create/update, B4 cancelledBy pbId, B5 invoice JSON field mapping, B6 logout sync flush + warn.
+
+### Batch B — Data correctness (reference)
 
 | ID | Issue | File(s) | Fix |
 |----|-------|---------|-----|

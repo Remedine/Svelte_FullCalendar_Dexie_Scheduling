@@ -22,7 +22,20 @@ export async function logout() {
 	} catch {}
 
 	try {
-		const { db } = await import('$lib/db');
+		const { db, processSyncQueue } = await import('$lib/db');
+		if (navigator.onLine) {
+			try {
+				await processSyncQueue();
+			} catch (syncErr) {
+				console.warn('[auth] Sync flush before logout failed', syncErr);
+			}
+		}
+		const pending = await db.syncQueue.count();
+		if (pending > 0) {
+			console.warn(
+				`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared`
+			);
+		}
 		await db.delete();
 		await db.open();
 	} catch (err) {

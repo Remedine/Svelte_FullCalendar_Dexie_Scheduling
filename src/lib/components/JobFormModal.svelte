@@ -21,6 +21,7 @@
 	import BillableItemRow from './BillableItemRow.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
+	import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 	import { db, type Client, cleanupDuplicateUsers, getUserPhotoSrc } from '$lib/db';
 
 	let show = $state(false);
@@ -185,7 +186,8 @@
 		currentJob.billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0)
 	);
 
-	const taxRateDecimal = $derived((optionsStore.data?.taxRate || 8) / 100);
+	const taxRatePercent = $derived(normalizeTaxRateToPercent(optionsStore.data?.taxRate, 8));
+	const taxRateDecimal = $derived(taxRatePercent / 100);
 	const taxAmount = $derived(Math.round(subtotal * taxRateDecimal * 100) / 100);
 	const totalAmount = $derived(subtotal + taxAmount);
 
@@ -249,7 +251,7 @@
 			notes: currentJob.notes || undefined,
 			billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
 			subtotal,
-			taxRate: optionsStore.data?.taxRate || 8,
+			taxRate: taxRatePercent,
 			taxAmount,
 			totalAmount,
 			status: isEditing ? currentJob.status || 'scheduled' : 'scheduled'
@@ -469,7 +471,7 @@
 				<!-- Totals -->
 				<div class="totals-summary">
 					<div class="totals-summary__line">Subtotal: <strong>${subtotal.toFixed(2)}</strong></div>
-					<div class="totals-summary__line">Tax ({(optionsStore.data?.taxRate || 8).toFixed(1)}%):</div>
+					<div class="totals-summary__line">Tax ({taxRatePercent.toFixed(1)}%):</div>
 					<div class="totals-summary__total">Total: <strong>${totalAmount.toFixed(2)}</strong></div>
 				</div>
 			</div>

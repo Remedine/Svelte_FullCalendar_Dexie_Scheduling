@@ -1,6 +1,7 @@
 // src/lib/pb.ts
 import PocketBase from 'pocketbase';
 import { db, processSyncQueue, type User } from '$lib/db';
+import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 import { setCurrentUser } from '$lib/stores/auth.svelte';
 import {
 	buildUserFromPbRecord,
@@ -122,7 +123,7 @@ export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipp
 		status: rec.status,
 		billableItems: rec.billableItems || [],
 		subtotal: rec.subtotal || 0,
-		taxRate: rec.taxRate || 0.08,
+		taxRate: normalizeTaxRateToPercent(rec.taxRate, 8),
 		taxAmount: rec.taxAmount || 0,
 		totalAmount: rec.totalAmount || 0,
 		areaOfTown: rec.areaOfTown,

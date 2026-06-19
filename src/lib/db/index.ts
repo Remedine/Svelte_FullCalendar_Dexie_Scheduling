@@ -5,6 +5,10 @@ import { pb, pullJobsFromServer } from '$lib/db/pb';
 // )=- Import pure date helper extracted in Phase 2 so due date logic is testable and not duplicated.
 // Reference: TESTING_PLAN.md + JOBS_AND_INVOICES_SPEC.md
 import { getInvoiceDueDateForJob } from '$lib/utils/dates';
+import {
+	normalizeTaxRateToPercent,
+	taxRatePercentToPbDecimal
+} from '$lib/utils/tax';
 export {
 	generateInvoiceDocx,
 	businessInfoFromOptions,
@@ -406,7 +410,7 @@ export async function createJob(jobData: any): Promise<string> {
 
 	// )=- Pull tax rate from options table instead of hardcoded value
 	const optionsRecord = await db.options.get('1');
-	const taxRate = optionsRecord?.taxRate ?? 5;
+	const taxRate = normalizeTaxRateToPercent(optionsRecord?.taxRate);
 
 	const newJob = safeClone({
 		id: newId,
@@ -491,12 +495,18 @@ export async function updateJob(
 export async function cancelJob(jobId: string, cancelReason: string, notes?: string) {
 	const currentUser = auth?.currentUser;
 
+	let cancelledByPb: string | null = null;
+	if (currentUser?.id) {
+		cancelledByPb = (await resolveUserPbId(currentUser.id)) || currentUser.pbId || null;
+	}
+
+	// )=- Batch B: cancelNotes is separate from job notes (was incorrectly overwriting notes).
 	const updates = safeClone({
 		status: 'cancelled' as const,
 		cancelReason,
 		cancelledAt: new Date(),
-		cancelledBy: currentUser?.id || null,
-		notes: notes || undefined,
+		cancelledBy: cancelledByPb,
+		cancelNotes: notes || undefined,
 		updatedAt: new Date()
 	});
 
@@ -1285,6 +1295,65 @@ async function resolveInvoicePbRelations(
 	return { job: jobPb, client: clientPb };
 }
 
+/** Map Dexie job queue data → PocketBase jobs collection payload (Batch B). */
+async function jobDataToPbPayload(data: any): Promise<Record<string, unknown>> {
+	const realClientId = await resolveClientPbId(data.clientId || data.client);
+	const taxPercent = normalizeTaxRateToPercent(data.taxRate);
+
+	const payload: Record<string, unknown> = {
+		title: data.title,
+		start: data.start instanceof Date ? data.start.toISOString() : data.start,
+		end: data.end instanceof Date ? data.end.toISOString() : data.end,
+		client: realClientId,
+		assignedCrew: data.assignedCrew || [],
+		areaOfTown: data.areaOfTown,
+		notes: data.notes || undefined,
+		billableItems: data.billableItems || [],
+		subtotal: Number(data.subtotal) || 0,
+		taxRate: taxRatePercentToPbDecimal(taxPercent),
+		taxAmount: Number(data.taxAmount) || 0,
+		totalAmount: Number(data.totalAmount) || 0,
+		status: data.status || 'scheduled',
+		cancelReason: data.cancelReason || undefined,
+		cancelNotes: data.cancelNotes || undefined,
+		cancelledAt: data.cancelledAt
+			? data.cancelledAt instanceof Date
+				? data.cancelledAt.toISOString()
+				: data.cancelledAt
+			: undefined,
+		cancelledBy: data.cancelledBy || undefined,
+		importSource: data.importSource || undefined
+	};
+
+	return Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));
+}
+
+function invoiceScalarToPbPayload(data: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [key, val] of Object.entries(data)) {
+		if (
+			key === '_files' ||
+			key === '_fileDeletes' ||
+			key === 'id' ||
+			key === 'pbId' ||
+			key === 'createdAt' ||
+			key === 'updatedAt' ||
+			key === 'jobId' ||
+			key === 'clientId'
+		) {
+			continue;
+		}
+		if (val == null) continue;
+		out[key] =
+			val instanceof Date
+				? val.toISOString()
+				: typeof val === 'object' && !Array.isArray(val)
+					? val
+					: val;
+	}
+	return out;
+}
+
 // ==================== SYNC QUEUE ====================
 
 export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'createdAt'>) {
@@ -1313,24 +1382,7 @@ async function runProcessSyncQueue(): Promise<void> {
 		try {
 			if (item.collection === 'jobs') {
 				if (item.type === 'create') {
-					const data = item.data;
-					const realClientId = await resolveClientPbId(data.clientId || data.client);
-
-					const pbPayload = safeClone({
-						title: data.title,
-						start: data.start instanceof Date ? data.start.toISOString() : data.start,
-						end: data.end instanceof Date ? data.end.toISOString() : data.end,
-						client: realClientId,
-						assignedCrew: data.assignedCrew || [],
-						areaOfTown: data.areaOfTown,
-						notes: data.notes || undefined,
-						billableItems: data.billableItems || [],
-						subtotal: Number(data.subtotal) || 0,
-						taxRate: Number(data.taxRate) || 0.08,
-						taxAmount: Number(data.taxAmount) || 0,
-						totalAmount: Number(data.totalAmount) || 0,
-						status: data.status || 'scheduled'
-					});
+					const pbPayload = await jobDataToPbPayload(item.data);
 
 					try {
 						const record = await pb.collection('jobs').create(pbPayload);
@@ -1345,7 +1397,9 @@ async function runProcessSyncQueue(): Promise<void> {
 					const realId = job?.pbId || job?.id || item.recordId;
 
 					try {
-						await pb.collection('jobs').update(realId, item.data);
+						const merged = safeClone({ ...job, ...item.data });
+						const pbPayload = await jobDataToPbPayload(merged);
+						await pb.collection('jobs').update(realId, pbPayload);
 						console.log(`✅ Job updated in PocketBase: ${realId}`);
 						itemSynced = true;
 					} catch (err: any) {
@@ -1893,11 +1947,16 @@ async function runProcessSyncQueue(): Promise<void> {
 								if (hasFiles) {
 									const formData = new FormData();
 
-									// Only append fields that are being updated
-									Object.keys(data).forEach((key) => {
-										if (key === '_files' || key === '_fileDeletes') return;
-										const val = data[key];
-										if (val == null) return;
+									// Only append scalar fields (map Dexie names → PB relation fields)
+									const rel = await resolveInvoicePbRelations(
+										data.jobId ?? localInvoice.jobId,
+										data.clientId ?? localInvoice.clientId
+									);
+									if (rel) {
+										formData.append('job', rel.job);
+										formData.append('client', rel.client);
+									}
+									for (const [key, val] of Object.entries(invoiceScalarToPbPayload(data))) {
 										if (val instanceof Date) {
 											formData.append(key, val.toISOString());
 										} else if (typeof val === 'object' && !Array.isArray(val)) {
@@ -1905,7 +1964,7 @@ async function runProcessSyncQueue(): Promise<void> {
 										} else {
 											formData.append(key, String(val));
 										}
-									});
+									}
 
 									if (data._files?.primary) {
 										const f = data._files.primary;
@@ -1934,7 +1993,15 @@ async function runProcessSyncQueue(): Promise<void> {
 									await pb.collection('invoices').update(realId, formData);
 									console.log(`✅ Invoice files removed in PocketBase: ${realId}`);
 								} else {
-									await pb.collection('invoices').update(realId, data);
+									const rel = await resolveInvoicePbRelations(
+										data.jobId ?? localInvoice.jobId,
+										data.clientId ?? localInvoice.clientId
+									);
+									const pbPayload: Record<string, unknown> = {
+										...invoiceScalarToPbPayload(data),
+										...(rel ? { job: rel.job, client: rel.client } : {})
+									};
+									await pb.collection('invoices').update(realId, pbPayload);
 									console.log(`✅ Invoice updated in PocketBase: ${realId}`);
 								}
 								updateSucceeded = true;

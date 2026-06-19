@@ -642,7 +642,7 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 		expect(job).toBeTruthy();
 		expect(job!.clientId).toBe('pb-client-xyz'); // resolved to pbId
 		expect(job!.title).toBe('Exterior Clean');
-		expect(job!.taxRate).toBe(0.065); // from options
+		expect(job!.taxRate).toBe(6.5); // 0.065 decimal in options → 6.5% in Dexie
 		expect(job!.billableItems.length).toBeGreaterThan(0); // defaulted
 		expect(job!.status).toBe('scheduled');
 
@@ -703,6 +703,7 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 			taxAmount: 0,
 			totalAmount: 0,
 			areaOfTown: '',
+			notes: 'Keep this instruction',
 			createdAt: new Date(),
 			updatedAt: new Date()
 		} as any);
@@ -712,9 +713,9 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 		const job = await db.jobs.get(jobId);
 		expect(job!.status).toBe('cancelled');
 		expect(job!.cancelReason).toBe('Client cancelled');
-		// cancelJob writes the notes param into the top-level .notes field (current implementation)
-		expect(job!.notes).toBe('Bad weather');
-		expect(job!.cancelledBy).toBe('user-99');
+		expect(job!.cancelNotes).toBe('Bad weather');
+		expect(job!.notes).toBe('Keep this instruction');
+		expect(job!.cancelledBy).toBeNull();
 
 		const queue = await db.syncQueue.where({ recordId: jobId, type: 'update' }).toArray();
 		expect(queue.length).toBe(1);

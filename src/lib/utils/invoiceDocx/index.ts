@@ -25,6 +25,7 @@ import {
 	getClientServiceAddress,
 	getRecipientMailingLines
 } from './addresses';
+import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 import type { InvoiceDocxContext, InvoiceDocxGenerateOptions } from './types';
 
 export type {
@@ -46,11 +47,6 @@ export {
 	TOP_ADDRESS_PANEL_HEIGHT
 } from './layout';
 
-function resolveTaxRatePercent(job: Job, optsRate?: number): number {
-	const raw = optsRate ?? job.taxRate ?? 5;
-	return raw < 1 ? raw * 100 : raw;
-}
-
 /**
  * Generate a one-page invoice .docx for #10 double-window tri-fold mailing.
  * Pass `{ envelopePreview: true }` in dev to overlay window guides on the top panel.
@@ -69,7 +65,7 @@ export async function generateInvoiceDocx(
 	const dueDate = getInvoiceDueDateForJob(job, dueDays);
 	const dueDateStr = dueDate.toLocaleDateString();
 	const invoiceDate = (ctx.invoiceDate ?? new Date()).toLocaleDateString();
-	const taxPct = resolveTaxRatePercent(job, ctx.taxRate);
+	const taxPct = normalizeTaxRateToPercent(ctx.taxRate ?? job.taxRate);
 	const taxLabel =
 		ctx.salesTaxJurisdiction?.trim() || 'City and Borough of Juneau sales tax';
 	const serviceDate = new Date(job.start).toLocaleDateString();
