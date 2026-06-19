@@ -2,17 +2,17 @@
 <script module>
 	import { type Job, type Invoice } from '$lib/db';
 
+	type JobDetailsContext = {
+		fromClientId?: string;
+		fromClientName?: string;
+		initialTab?: 'job' | 'invoice';
+	};
+
 	let modalInstance: {
-		open: (
-			jobOrId: string | Job,
-			context?: { fromClientId?: string; fromClientName?: string }
-		) => void;
+		open: (jobOrId: string | Job, context?: JobDetailsContext) => void;
 	} | null = null;
 
-	export function openJobDetailsModal(
-		jobOrId: string | Job,
-		context?: { fromClientId?: string; fromClientName?: string }
-	) {
+	export function openJobDetailsModal(jobOrId: string | Job, context?: JobDetailsContext) {
 		if (modalInstance) {
 			modalInstance.open(jobOrId, context);
 		} else {
@@ -50,7 +50,7 @@
 	let loading = $state(true);
 	let job = $state<Job | null>(null);
 	let invoice = $state<Invoice | null>(null);
-	let clientContext = $state<{ fromClientId?: string; fromClientName?: string } | null>(null);
+	let clientContext = $state<JobDetailsContext | null>(null);
 	let showInvoiceUpload = $state(false);
 	let resolvedClient = $state<Client | null>(null);
 
@@ -62,19 +62,16 @@
 	let showCancelForm = $state(false);
 	let selectedCancelReason = $state('');
 	let cancelNotesInput = $state('');
-	let activeTab = $state<'job' | 'invoice'>('invoice');
+	let activeTab = $state<'job' | 'invoice'>('job');
 
 	// Register singleton (runes only, no onMount)
 	$effect(() => {
 		modalInstance = {
-			open: async (
-				jobOrId: string | Job,
-				ctx?: { fromClientId?: string; fromClientName?: string }
-			) => {
+			open: async (jobOrId: string | Job, ctx?: JobDetailsContext) => {
 				clientContext = ctx || null;
 				loading = true;
 				show = true;
-				activeTab = 'invoice';
+				activeTab = ctx?.initialTab ?? 'job';
 				showCancelForm = false;
 
 				try {
@@ -148,7 +145,7 @@
 		clientContext = null;
 		showInvoiceUpload = false;
 		resolvedClient = null;
-		activeTab = 'invoice';
+		activeTab = 'job';
 		showCancelForm = false;
 	}
 
@@ -171,10 +168,14 @@
 				const freshJob = await db.jobs.get(currentJob.id);
 				// small delay to reduce visual flash between modals
 				await new Promise((r) => setTimeout(r, 50));
+				const reopenContext: JobDetailsContext = {
+					...clientContext,
+					initialTab: 'job'
+				};
 				if (freshJob) {
-					openJobDetailsModal(freshJob, clientContext || undefined);
+					openJobDetailsModal(freshJob, reopenContext);
 				} else {
-					openJobDetailsModal(currentJob.id, clientContext || undefined);
+					openJobDetailsModal(currentJob.id, reopenContext);
 				}
 			}
 		});
@@ -443,6 +444,7 @@
 								bind:job
 								bind:invoice
 								onClose={closeModal}
+								onEditJob={editJob}
 								onStatusChange={(newInv) => {
 									invoice = newInv;
 								}}

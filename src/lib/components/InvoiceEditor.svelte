@@ -37,7 +37,8 @@
 		job = $bindable<Job | null>(null),
 		invoice = $bindable<Invoice | null>(null),
 		onStatusChange = (_newInvoice: Invoice | null) => {},
-		onClose = () => {}
+		onClose = () => {},
+		onEditJob = () => {}
 	} = $props();
 
 	const WORKFLOW_STEPS = [
@@ -59,8 +60,8 @@
 	let showOverflowMenu = $state(false);
 	let showSupportingList = $state(false);
 
-	let openWho = $state(true);
-	let openWhat = $state(true);
+	let openWho = $state(false);
+	let openWhat = $state(false);
 	let openDocument = $state(false);
 
 	let clientSnapshot = $state<InvoiceClientSnapshot>({
@@ -138,10 +139,6 @@
 
 	$effect(() => {
 		if (invoice?.id) loadDraftFromInvoice(invoice);
-	});
-
-	$effect(() => {
-		if (hasPrimaryDocx) openDocument = true;
 	});
 
 	function draftPayload(): Partial<Invoice> {
@@ -280,7 +277,6 @@
 				toast.error('Invoice saved, but failed to sync billing to client/job records');
 			}
 
-			openDocument = true;
 			toast.success(hasPrimaryDocx ? 'Invoice regenerated' : 'Invoice generated');
 		} catch (err) {
 			console.error('Generate invoice failed', err);
@@ -825,6 +821,7 @@
 				{/if}
 			</div>
 			<div class="invoice-editor__footer-secondary">
+				<button type="button" class="invoice-editor__btn" onclick={onEditJob}>Edit full job</button>
 				{#if isSaving}<span class="invoice-editor__hint">Saving…</span>{/if}
 				<div class="invoice-editor__overflow" onclick={(e) => e.stopPropagation()}>
 					<button
