@@ -62,6 +62,7 @@
 	let showCancelForm = $state(false);
 	let selectedCancelReason = $state('');
 	let cancelNotesInput = $state('');
+	let activeTab = $state<'job' | 'invoice'>('invoice');
 
 	// Register singleton (runes only, no onMount)
 	$effect(() => {
@@ -73,6 +74,8 @@
 				clientContext = ctx || null;
 				loading = true;
 				show = true;
+				activeTab = 'invoice';
+				showCancelForm = false;
 
 				try {
 					if (typeof jobOrId === 'string') {
@@ -145,6 +148,8 @@
 		clientContext = null;
 		showInvoiceUpload = false;
 		resolvedClient = null;
+		activeTab = 'invoice';
+		showCancelForm = false;
 	}
 
 	// )=- "Edit full job" flow required by spec: close this modal first (avoid inception),
@@ -253,201 +258,197 @@
 						{#if isOverdue}
 							<span class="job-details-modal__overdue">OVERDUE</span>
 						{/if}
-						<!-- )=- Per spec: Mark complete marks job complete + generates invoice for review.
-						     Button appears if not yet completed. Sets status, then user can immediately use the
-						     Generate button in the Billing/Invoice panel below (which will use 'generated' status).
-						     Reference: JOBS_AND_INVOICES_SPEC.md -->
-						<!-- )=- Context-aware single button for job status per user request. Scheduled shows "Mark Complete" (with start-time guard). Completed shows "Revert to Scheduled". Confirmed status removed from this UI as not needed. Guard prevents completing before start time. -->
-						{#if job.status === 'completed'}
-							<button
-								class="job-details-modal__btn job-details-modal__btn--small"
-								onclick={() => quickUpdateJobStatus('scheduled')}
-							>
-								Revert to Scheduled
-							</button>
-						{:else}
-							<button
-								class="job-details-modal__btn job-details-modal__btn--small"
-								onclick={() => quickUpdateJobStatus('completed')}
-								disabled={new Date() < new Date(job.start)}
-							>
-								Mark Complete
-							</button>
-						{/if}
-
-						<!-- )=- Cancel flow from details (Phase 7 "if needed"). Only for non-cancelled jobs.
-						     Toggles inline form using options.cancelReasons + notes (same data as JobFormModal cancel).
-						     On confirm calls cancelJob which sets all the cancel* fields + status.
-						     )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-						{#if job.status !== 'cancelled' && job.status !== 'completed'}
-							<button
-								class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel"
-								onclick={() => (showCancelForm = !showCancelForm)}
-							>
-								{showCancelForm ? 'Hide Cancel' : 'Cancel'}
-							</button>
-						{/if}
 					</div>
-
-					<!-- )=- Inline cancel form (BEM). Appears when Cancel toggled.
-					     Select from cancelReasons (required), optional notes textarea.
-					     Buttons to confirm (calls cancelJob) or dismiss.
-					     On success form hides and job reloads (cancel info appears in Notes section below). -->
-					{#if showCancelForm}
-						<div class="job-details-modal__cancel-form">
-							<select bind:value={selectedCancelReason} class="job-details-modal__cancel-select">
-								<option value="">Select cancel reason...</option>
-								{#each cancelReasons as reason (reason)}
-									<option value={reason}>{reason}</option>
-								{/each}
-							</select>
-							<textarea
-								bind:value={cancelNotesInput}
-								class="job-details-modal__cancel-notes"
-								placeholder="Optional notes (e.g. customer request, weather, etc.)"
-								rows="2"
-							></textarea>
-							<div class="job-details-modal__cancel-actions">
-								<button
-									class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel-confirm"
-									onclick={confirmCancelJob}
-									disabled={!selectedCancelReason}
-								>
-									Confirm Cancel
-								</button>
-								<button
-									class="job-details-modal__btn job-details-modal__btn--small"
-									onclick={() => {
-										showCancelForm = false;
-										selectedCancelReason = '';
-										cancelNotesInput = '';
-									}}
-								>
-									Dismiss
-								</button>
-							</div>
-						</div>
-					{/if}
 				</div>
 
-				<div class="job-details-modal__totals">
-					<strong>${job.totalAmount?.toFixed(2) || '0.00'}</strong>
+				<div class="job-details-modal__summary">
+					<strong class="job-details-modal__summary-amount"
+						>${(invoice?.amount ?? job.totalAmount)?.toFixed(2) || '0.00'}</strong
+					>
 					{#if invoice}
 						<span class="job-details-modal__due">
-							Due: {new Date(invoice.dueDate).toLocaleDateString()}
+							Due {new Date(invoice.dueDate).toLocaleDateString()}
 						</span>
 					{/if}
 				</div>
 
-				<!-- Client / Area -->
-				<section class="job-details-modal__section">
-					<h3 class="job-details-modal__section-title">Client &amp; Location</h3>
-					<div class="job-details-modal__meta">
-						<!-- )=- Now resolves full client (via clientId/pbId) for name + address display (Phase 4+ polish). Falls back to ID if not found. Area uses options for label + color. -->
-						{#if resolvedClient}
-							<div><strong>{resolvedClient.name}</strong></div>
-							<div>
-								{resolvedClient.serviceAddressStreet || ''}
-								{resolvedClient.serviceAddressCity || ''}
-							</div>
-						{:else}
-							<div>Client: {job.clientId}</div>
-						{/if}
-						<div style="color: {getDisplayAreaColor(area?.color) || '#64748b'};">
-							Area: {area?.label || job.areaOfTown || '—'}
-						</div>
-					</div>
-				</section>
-
-				<!-- Schedule -->
-				<section class="job-details-modal__section">
-					<h3 class="job-details-modal__section-title">Schedule</h3>
-					<div class="job-details-modal__meta">
-						<div>Start: {new Date(job.start).toLocaleString()}</div>
-						<div>End: {new Date(job.end).toLocaleString()}</div>
-					</div>
-				</section>
-
-				<!-- Crew (with avatars, consistent with jobs cards and calendar) -->
-				<section class="job-details-modal__section">
-					<h3 class="job-details-modal__section-title">Assigned Crew</h3>
-					<div class="job-details-modal__crew">
-						<!-- )=- Guard for legacy jobs (assignedCrew may be undefined/null from old imports). 'imperfection allowed' requirement.
-						     )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 + Phase 10 -->
-						{#each job.assignedCrew || [] as crewName}
-							{@const u = users.find((uu) => uu.name === crewName)}
-							<span class="job-details-modal__crew-pill" title={crewName}>
-								{#if u?.photo}
-									<!-- )=- Use central helper for normalization. -->
-									<img
-										class="job-details-modal__crew-avatar"
-										src={getUserPhotoSrc(u.photo, u)}
-										alt={crewName}
-									/>
-								{:else}
-									<span class="job-details-modal__crew-initial"
-										>{crewName?.[0]?.toUpperCase() || '?'}</span
-									>
-								{/if}
-								{crewName}
-							</span>
-						{:else}
-							<span class="job-details-modal__empty-text">No crew assigned</span>
-						{/each}
-					</div>
-				</section>
-
-				<!-- Billing Items + Invoice Panel (Generate Draft lives under Billing per spec) -->
-				<section class="job-details-modal__section">
-					<h3 class="job-details-modal__section-title">Billable Items</h3>
-					<div class="job-details-modal__billables">
-						{#each job.billableItems || [] as item, i (i)}
-							<div class="job-details-modal__billable-row">
-								<span>{item.title || 'Item'}</span>
-								<span>${(item.total || 0).toFixed(2)} × {item.quantity}</span>
-							</div>
-						{:else}
-							<div class="job-details-modal__empty-text">No billable items</div>
-						{/each}
-					</div>
-
-					<!-- )=- JobInvoicePanel is rendered directly under Billing Items (as decided in planning).
-					     It contains the real Generate Draft (Phase 4 generator + file persistence) and revised upload. -->
-					<InvoiceEditor
-						bind:job
-						bind:invoice
-						onStatusChange={(newInv) => {
-							invoice = newInv;
-						}}
-					/>
-				</section>
-
-				<!-- Notes -->
-				<section class="job-details-modal__section">
-					<h3 class="job-details-modal__section-title">Notes</h3>
-					<p class="job-details-modal__notes">{job.notes || '—'}</p>
-					{#if job.cancelReason}
-						<p class="job-details-modal__cancel">
-							Cancelled: {job.cancelReason}
-							{job.cancelNotes ? `— ${job.cancelNotes}` : ''}
-						</p>
-					{/if}
-				</section>
-
-				<!-- Footer Actions -->
-				<div class="job-details-modal__footer sticky-footer">
-					<div class="job-details-modal__footer-left">
-						<button class="job-details-modal__btn job-details-modal__btn--edit" onclick={editJob}>
-							Edit full job
-						</button>
-						<button class="job-details-modal__btn" onclick={jumpToCalendar}>
-							View on calendar
-						</button>
-					</div>
-
-					<button class="job-details-modal__btn job-details-modal__btn--close" onclick={closeModal}>
-						Close
+				<div class="job-details-modal__tabs" role="tablist">
+					<button
+						type="button"
+						role="tab"
+						class="job-details-modal__tab"
+						class:job-details-modal__tab--active={activeTab === 'job'}
+						aria-selected={activeTab === 'job'}
+						onclick={() => (activeTab = 'job')}
+					>
+						Job
 					</button>
+					<button
+						type="button"
+						role="tab"
+						class="job-details-modal__tab"
+						class:job-details-modal__tab--active={activeTab === 'invoice'}
+						aria-selected={activeTab === 'invoice'}
+						onclick={() => (activeTab = 'invoice')}
+					>
+						Invoice
+					</button>
+				</div>
+
+				<div class="job-details-modal__body">
+					{#if activeTab === 'job'}
+						<section class="job-details-modal__section">
+							<h3 class="job-details-modal__section-title">Client &amp; Location</h3>
+							<div class="job-details-modal__meta">
+								{#if resolvedClient}
+									<div><strong>{resolvedClient.name}</strong></div>
+									<div>
+										{resolvedClient.serviceAddressStreet || ''}
+										{resolvedClient.serviceAddressCity || ''}
+									</div>
+								{:else}
+									<div>Client: {job.clientId}</div>
+								{/if}
+								<div style="color: {getDisplayAreaColor(area?.color) || '#64748b'};">
+									Area: {area?.label || job.areaOfTown || '—'}
+								</div>
+							</div>
+						</section>
+
+						<section class="job-details-modal__section">
+							<h3 class="job-details-modal__section-title">Schedule</h3>
+							<div class="job-details-modal__meta">
+								<div>Start: {new Date(job.start).toLocaleString()}</div>
+								<div>End: {new Date(job.end).toLocaleString()}</div>
+							</div>
+						</section>
+
+						<section class="job-details-modal__section">
+							<h3 class="job-details-modal__section-title">Assigned Crew</h3>
+							<div class="job-details-modal__crew">
+								{#each job.assignedCrew || [] as crewName}
+									{@const u = users.find((uu) => uu.name === crewName)}
+									<span class="job-details-modal__crew-pill" title={crewName}>
+										{#if u?.photo}
+											<img
+												class="job-details-modal__crew-avatar"
+												src={getUserPhotoSrc(u.photo, u)}
+												alt={crewName}
+											/>
+										{:else}
+											<span class="job-details-modal__crew-initial"
+												>{crewName?.[0]?.toUpperCase() || '?'}</span
+											>
+										{/if}
+										{crewName}
+									</span>
+								{:else}
+									<span class="job-details-modal__empty-text">No crew assigned</span>
+								{/each}
+							</div>
+						</section>
+
+						<section class="job-details-modal__section">
+							<h3 class="job-details-modal__section-title">Notes</h3>
+							<p class="job-details-modal__notes">{job.notes || '—'}</p>
+							{#if job.cancelReason}
+								<p class="job-details-modal__cancel">
+									Cancelled: {job.cancelReason}
+									{job.cancelNotes ? `— ${job.cancelNotes}` : ''}
+								</p>
+							{/if}
+						</section>
+
+						<section class="job-details-modal__section job-details-modal__job-actions">
+							<h3 class="job-details-modal__section-title">Job actions</h3>
+							<div class="job-details-modal__action-row">
+								{#if job.status === 'completed'}
+									<button
+										class="job-details-modal__btn job-details-modal__btn--small"
+										onclick={() => quickUpdateJobStatus('scheduled')}
+									>
+										Revert to scheduled
+									</button>
+								{:else}
+									<button
+										class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--primary"
+										onclick={() => quickUpdateJobStatus('completed')}
+										disabled={new Date() < new Date(job.start)}
+									>
+										Mark complete
+									</button>
+								{/if}
+								{#if job.status !== 'cancelled' && job.status !== 'completed'}
+									<button
+										class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel"
+										onclick={() => (showCancelForm = !showCancelForm)}
+									>
+										{showCancelForm ? 'Hide cancel' : 'Cancel job'}
+									</button>
+								{/if}
+							</div>
+							{#if showCancelForm}
+								<div class="job-details-modal__cancel-form">
+									<select bind:value={selectedCancelReason} class="job-details-modal__cancel-select">
+										<option value="">Select cancel reason...</option>
+										{#each cancelReasons as reason (reason)}
+											<option value={reason}>{reason}</option>
+										{/each}
+									</select>
+									<textarea
+										bind:value={cancelNotesInput}
+										class="job-details-modal__cancel-notes"
+										placeholder="Optional notes (e.g. customer request, weather, etc.)"
+										rows="2"
+									></textarea>
+									<div class="job-details-modal__cancel-actions">
+										<button
+											class="job-details-modal__btn job-details-modal__btn--small job-details-modal__btn--cancel-confirm"
+											onclick={confirmCancelJob}
+											disabled={!selectedCancelReason}
+										>
+											Confirm cancel
+										</button>
+										<button
+											class="job-details-modal__btn job-details-modal__btn--small"
+											onclick={() => {
+												showCancelForm = false;
+												selectedCancelReason = '';
+												cancelNotesInput = '';
+											}}
+										>
+											Dismiss
+										</button>
+									</div>
+								</div>
+							{/if}
+						</section>
+
+						<div class="job-details-modal__footer sticky-footer">
+							<div class="job-details-modal__footer-left">
+								<button class="job-details-modal__btn job-details-modal__btn--edit" onclick={editJob}>
+									Edit full job
+								</button>
+								<button class="job-details-modal__btn" onclick={jumpToCalendar}>
+									View on calendar
+								</button>
+							</div>
+							<button class="job-details-modal__btn job-details-modal__btn--close" onclick={closeModal}>
+								Close
+							</button>
+						</div>
+					{:else}
+						<section class="job-details-modal__section job-details-modal__section--invoice">
+							<InvoiceEditor
+								bind:job
+								bind:invoice
+								onClose={closeModal}
+								onStatusChange={(newInv) => {
+									invoice = newInv;
+								}}
+							/>
+						</section>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -510,18 +511,86 @@
 		border-radius: var(--radius-full);
 	}
 
-	.job-details-modal__totals {
-		padding: var(--space-3) var(--space-4);
+	.job-details-modal__summary {
+		padding: var(--space-2) var(--space-4);
 		background: var(--color-surface-alt);
-		font-size: var(--font-size-lg);
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: var(--space-2);
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.job-details-modal__summary-amount {
+		font-size: var(--font-size-lg);
+		color: var(--color-text);
+	}
+
+	.job-details-modal__due {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+
+	.job-details-modal__tabs {
+		display: flex;
+		border-bottom: 1px solid var(--color-border);
+		background: var(--color-surface);
+	}
+
+	.job-details-modal__tab {
+		flex: 1;
+		padding: var(--space-3) var(--space-4);
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: none;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		cursor: pointer;
+	}
+
+	.job-details-modal__tab:hover {
+		color: var(--color-text);
+		background: var(--color-surface-alt);
+	}
+
+	.job-details-modal__tab--active {
+		color: var(--color-primary-emphasis);
+		border-bottom-color: var(--color-primary);
+		background: var(--color-surface-alt);
+	}
+
+	.job-details-modal__body {
+		flex: 1;
+		overflow-y: auto;
+		min-height: 0;
+	}
+
+	.job-details-modal__content {
+		display: flex;
+		flex-direction: column;
+		max-height: min(92vh, 900px);
+		overflow: hidden;
 	}
 
 	.job-details-modal__section {
 		padding: var(--space-4);
 		border-bottom: 1px solid var(--color-border);
+	}
+
+	.job-details-modal__section--invoice {
+		padding: var(--space-3);
+		border-bottom: none;
+	}
+
+	.job-details-modal__job-actions {
+		border-bottom: none;
+	}
+
+	.job-details-modal__action-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
 	}
 
 	.job-details-modal__section-title {
@@ -565,29 +634,31 @@
 		font-weight: var(--font-weight-semibold);
 	}
 
-	.job-details-modal__billables {
-		margin-bottom: var(--space-3);
-	}
-
-	.job-details-modal__billable-row {
-		display: flex;
-		justify-content: space-between;
-		font-size: var(--font-size-sm);
-		padding: var(--space-1) 0;
-		border-bottom: 1px dotted var(--color-border);
-	}
-
-	/* Mobile bottom-sheet refinements for billing/invoice area (tighter spacing, full use of width). */
 	@media (max-width: 768px) {
 		.job-details-modal__section {
 			padding: var(--space-3);
 		}
-		.job-details-modal__billables {
-			margin-bottom: var(--space-2);
+
+		.job-details-modal__section--invoice {
+			padding: var(--space-2);
 		}
-		.job-details-modal__billable-row {
+
+		.job-details-modal__tab {
+			padding: var(--space-2) var(--space-3);
 			font-size: var(--font-size-xs);
-			padding: 0.05rem 0;
+		}
+
+		.job-details-modal__summary {
+			padding: var(--space-2) var(--space-3);
+		}
+
+		.job-details-modal__footer {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.job-details-modal__footer-left {
+			flex-direction: column;
 		}
 	}
 
@@ -647,6 +718,12 @@
 		background: var(--color-surface-alt);
 	}
 
+	.job-details-modal__btn--primary {
+		background: var(--color-primary);
+		color: white;
+		border-color: var(--color-primary);
+	}
+
 	.job-details-modal__btn--small {
 		font-size: var(--font-size-xs);
 		padding: 0.15rem 0.5rem;
@@ -654,10 +731,11 @@
 
 	/* Cancel form uses tokens */
 	.job-details-modal__cancel-form {
-		padding: var(--space-3) var(--space-4);
+		margin-top: var(--space-3);
+		padding: var(--space-3);
 		background: var(--color-surface-alt);
-		border-top: 1px solid var(--color-border);
-		border-bottom: 1px solid var(--color-border);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
 	}
 	.job-details-modal__cancel-select,
 	.job-details-modal__cancel-notes {
