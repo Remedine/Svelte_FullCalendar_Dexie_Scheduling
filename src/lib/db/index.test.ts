@@ -19,6 +19,7 @@ import {
 	createInvoice,
 	deleteInvoice,
 	removeInvoiceSupportingDocuments,
+	removePrimaryInvoiceFile,
 	addSupportingDocumentsToJob,
 	allocateInvoiceNumber,
 	generateInvoiceDocx,
@@ -841,6 +842,33 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 
 		const queue = await db.syncQueue.where({ recordId: invoiceId, type: 'create' }).toArray();
 		expect(queue.length).toBe(1);
+	});
+
+	it('removePrimaryInvoiceFile clears primary metadata and queues PB file delete', async () => {
+		const invoiceId = 'inv-primary-del';
+		await db.invoices.add({
+			id: invoiceId,
+			pbId: 'pb-inv-primary',
+			jobId: 'j1',
+			clientId: 'c1',
+			status: 'generated',
+			dueDate: new Date(),
+			amount: 200,
+			primaryInvoiceFile: { filename: 'job_title.docx' },
+			supportingDocuments: [{ filename: 'scan.pdf', type: 'application/pdf' }],
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as Invoice);
+
+		await removePrimaryInvoiceFile(invoiceId);
+
+		const inv = await db.invoices.get(invoiceId);
+		expect(inv!.primaryInvoiceFile).toBeUndefined();
+		expect(inv!.supportingDocuments?.map((d) => d.filename)).toEqual(['scan.pdf']);
+
+		const queue = await db.syncQueue.where({ recordId: invoiceId, type: 'update' }).toArray();
+		expect(queue.length).toBe(1);
+		expect(queue[0].data._fileDeletes.primary).toBe(true);
 	});
 
 	it('removeInvoiceSupportingDocuments updates metadata and queues file delete', async () => {

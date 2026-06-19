@@ -12,6 +12,7 @@
 		allocateInvoiceNumber,
 		deleteInvoice,
 		removeInvoiceSupportingDocuments,
+		removePrimaryInvoiceFile,
 		addSupportingDocumentsToJob
 	} from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -369,10 +370,31 @@
 		}
 	}
 
+	async function handleRemovePrimaryDocx() {
+		if (!invoice?.id || !isAdmin || !invoice.primaryInvoiceFile?.filename) return;
+		const msg = `Remove "${invoice.primaryInvoiceFile.filename}"? The invoice record, supporting docs, and notes will stay. You can Regenerate or upload a new .docx later.`;
+		if (!confirm(msg)) return;
+		try {
+			await removePrimaryInvoiceFile(invoice.id);
+			const fresh = await db.invoices.get(invoice.id);
+			if (fresh) {
+				invoice = fresh;
+				onStatusChange(fresh);
+			}
+			toast.success('Invoice .docx removed');
+		} catch (err) {
+			console.error('Failed to remove invoice .docx', err);
+			toast.error('Failed to remove invoice .docx');
+		}
+	}
+
 	async function handleDeleteInvoice() {
 		if (!invoice?.id || !isAdmin) return;
-		const label = invoice.primaryInvoiceFile?.filename || 'this invoice';
-		const msg = `Delete invoice (${label})? This removes the invoice record and all attached files. This cannot be undone.`;
+		const label = invoice.primaryInvoiceFile?.filename || invoice.invoiceNumber || 'this invoice';
+		const supportingNote = invoice.supportingDocuments?.length
+			? ` This also deletes ${invoice.supportingDocuments.length} supporting document(s).`
+			: '';
+		const msg = `Delete entire invoice (${label})? This removes the invoice record and all attached files.${supportingNote} This cannot be undone. To remove only the .docx, use Remove .docx instead.`;
 		if (!confirm(msg)) return;
 		try {
 			await deleteInvoice(invoice.id);
@@ -502,11 +524,22 @@
 		<div class="job-invoice-panel__file-row">
 			{#if invoice.primaryInvoiceFile?.filename}
 				<span class="job-invoice-panel__filename">{invoice.primaryInvoiceFile.filename}</span>
-				{#if invoice.pbId}
-					<button class="job-invoice-panel__small-btn" onclick={downloadPrimary}>Open</button>
-				{:else}
-					<span class="job-invoice-panel__sync-hint">not available offline (pending sync)</span>
-				{/if}
+				<div class="job-invoice-panel__primary-actions">
+					{#if invoice.pbId}
+						<button class="job-invoice-panel__small-btn" onclick={downloadPrimary}>Open</button>
+					{:else}
+						<span class="job-invoice-panel__sync-hint">not available offline (pending sync)</span>
+					{/if}
+					{#if isAdmin}
+						<button
+							type="button"
+							class="job-invoice-panel__small-btn job-invoice-panel__small-btn--danger"
+							onclick={handleRemovePrimaryDocx}
+						>
+							Remove .docx
+						</button>
+					{/if}
+				</div>
 			{/if}
 			<label class="job-invoice-panel__upload-label">
 				<input
@@ -569,7 +602,7 @@
 					class="job-invoice-panel__small-btn job-invoice-panel__small-btn--danger"
 					onclick={handleDeleteInvoice}
 				>
-					Delete invoice
+					Delete entire invoice
 				</button>
 			</div>
 		{/if}
@@ -859,6 +892,13 @@
 	}
 
 	.job-invoice-panel__supporting-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		flex-shrink: 0;
+	}
+
+	.job-invoice-panel__primary-actions {
 		display: flex;
 		align-items: center;
 		gap: var(--space-1);

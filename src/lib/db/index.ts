@@ -890,6 +890,13 @@ export async function removeInvoiceSupportingDocuments(
 	});
 }
 
+/** Remove only the generated/uploaded primary .docx; keeps invoice shell, supporting docs, notes, etc. */
+export async function removePrimaryInvoiceFile(invoiceId: string): Promise<void> {
+	const inv = await db.invoices.get(invoiceId);
+	if (!inv?.primaryInvoiceFile?.filename) return;
+	await updateInvoice(invoiceId, { updatedAt: new Date() }, undefined, { primary: true });
+}
+
 /** Allocate the next sequential invoice number and persist the counter in options. */
 export async function allocateInvoiceNumber(): Promise<string> {
 	const opts = (await db.options.get('1')) || { id: '1' };
