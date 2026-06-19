@@ -544,7 +544,7 @@
 				type="button"
 				class="invoice-editor__btn"
 				onclick={handleRefreshFromJob}
-				title="Reload client, addresses, billables, and due date from the current job and client records. Keeps invoice date, notes, and discounts."
+				title="Update this invoice with the latest info from the job — who it's for, where the work was done, what's being billed, and when payment is due. Your invoice notes, discounts, and invoice date stay as you set them."
 			>
 				Refresh from job
 			</button>
