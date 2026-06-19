@@ -16,7 +16,7 @@
 </script>
 
 <script lang="ts">
-	import { createJob, updateJob, cancelJob, updateClient } from '$lib/db';
+	import { createJob, updateJob, cancelJob, rescheduleCancelledJob, updateClient } from '$lib/db';
 	import ClientPicker from './ClientPicker.svelte';
 	import BillableItemRow from './BillableItemRow.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
@@ -28,6 +28,8 @@
 	let isEditing = $state(false);
 	let editingJobId = $state<string | null>(null);
 	let showCancelConfirm = $state(false);
+	let isUpdatingCancelReason = $state(false);
+	let showRescheduleHighlight = $state(false);
 	let selectedCancelReason = $state('');
 
 	let currentJob = $state<any>({
@@ -126,6 +128,11 @@
 					editingJobId = null;
 				}
 
+				showRescheduleHighlight = false;
+				isUpdatingCancelReason = false;
+				showCancelConfirm = false;
+				selectedCancelReason = job?.cancelReason || '';
+
 				show = true;
 			}
 		};
@@ -220,10 +227,54 @@
 		return getDisplayAreaColor(area?.color);
 	}
 
+	function parseJobDate(value: Date | string | undefined): Date | null {
+		if (!value) return null;
+		const date = value instanceof Date ? value : new Date(value);
+		return isNaN(date.getTime()) ? null : date;
+	}
+
+	function startReschedule() {
+		showRescheduleHighlight = true;
+		requestAnimationFrame(() => {
+			document.getElementById('job-start')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		});
+	}
+
+	function openUpdateCancelReason() {
+		selectedCancelReason = currentJob.cancelReason || '';
+		isUpdatingCancelReason = true;
+		showCancelConfirm = true;
+	}
+
+	function closeCancelConfirm() {
+		showCancelConfirm = false;
+		isUpdatingCancelReason = false;
+	}
+
 	async function saveJob() {
 		if (!currentJob.clientId) {
 			alert('Please select a client');
 			return;
+		}
+
+		const startDate = parseJobDate(currentJob.start);
+		const endDate = parseJobDate(currentJob.end);
+
+		if (!startDate || !endDate) {
+			alert('Please enter valid start and end times.');
+			return;
+		}
+
+		if (showRescheduleHighlight) {
+			const now = new Date();
+			if (startDate <= now || endDate <= now) {
+				alert('Start and end times must be in the future to reschedule a cancelled job.');
+				return;
+			}
+			if (endDate <= startDate) {
+				alert('End time must be after start time.');
+				return;
+			}
 		}
 
 		// )=- If the client has no areaOfTown yet but this job does, backfill the client.
@@ -243,8 +294,8 @@
 
 		const cleanPayload = {
 			title: currentJob.title || 'Untitled Job',
-			start: currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start),
-			end: currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end),
+			start: startDate,
+			end: endDate,
 			clientId: currentJob.clientId,
 			assignedCrew: currentJob.assignedCrew || [],
 			areaOfTown: currentJob.areaOfTown,
@@ -259,11 +310,16 @@
 
 		try {
 			if (isEditing && editingJobId) {
-				await updateJob(editingJobId, cleanPayload);
+				if (showRescheduleHighlight && currentJob.status === 'cancelled') {
+					await rescheduleCancelledJob(editingJobId, cleanPayload);
+				} else {
+					await updateJob(editingJobId, cleanPayload);
+				}
 			} else {
 				await createJob(cleanPayload);
 			}
 
+			showRescheduleHighlight = false;
 			show = false;
 
 			if (afterSaveCallback) {
@@ -277,22 +333,34 @@
 
 	async function confirmCancel() {
 		if (!editingJobId || !selectedCancelReason) return;
+
+		if (isUpdatingCancelReason) {
+			if (currentJob.status !== 'cancelled') {
+				closeCancelConfirm();
+				return;
+			}
+			await cancelJob(editingJobId, selectedCancelReason, currentJob.cancelNotes);
+			currentJob.cancelReason = selectedCancelReason;
+			closeCancelConfirm();
+			return;
+		}
+
 		// )=- Extra runtime guard: do not allow cancelling completed jobs even if UI button was somehow shown.
-		// Completed jobs should only allow revert (handled in details modal) or other edits.
 		if (currentJob.status === 'completed' || currentJob.status === 'cancelled') {
 			alert('Cannot cancel a completed or already-cancelled job.');
-			showCancelConfirm = false;
+			closeCancelConfirm();
 			return;
 		}
 		await cancelJob(editingJobId, selectedCancelReason, currentJob.cancelNotes);
 		show = false;
-		showCancelConfirm = false;
+		closeCancelConfirm();
 		if (afterSaveCallback) afterSaveCallback();
 	}
 
 	function closeModal() {
 		show = false;
-		showCancelConfirm = false;
+		showRescheduleHighlight = false;
+		closeCancelConfirm();
 	}
 </script>
 
@@ -312,9 +380,19 @@
 				}
 			}}
 		>
-			<h2 class="new-job-modal__title">
-				{isEditing ? 'Edit Job' : 'Create New Job'}
-			</h2>
+			<div class="new-job-modal__header">
+				<h2 class="new-job-modal__title">
+					{isEditing ? 'Edit Job' : 'Create New Job'}
+				</h2>
+				{#if isEditing && currentJob.status === 'cancelled'}
+					<div class="new-job-modal__header-meta">
+						<span class="new-job-modal__status new-job-modal__status--cancelled">Cancelled</span>
+						{#if currentJob.cancelReason}
+							<span class="new-job-modal__cancel-detail">{currentJob.cancelReason}</span>
+						{/if}
+					</div>
+				{/if}
+			</div>
 
 			<div class="new-job-modal__form">
 				<!-- Job Title -->
@@ -372,13 +450,17 @@
 				</div>
 
 				<!-- Dates -->
-				<div class="new-job-modal__field-group">
+				<div
+					class="new-job-modal__field-group"
+					class:new-job-modal__field-group--reschedule-highlight={showRescheduleHighlight}
+				>
 					<div class="new-job-modal__field">
 						<label for="job-start" class="new-job-modal__label label">Start</label>
 						<input
 							id="job-start"
 							type="datetime-local"
 							class="new-job-modal__input input"
+							class:new-job-modal__input--reschedule-highlight={showRescheduleHighlight}
 							value={toDatetimeLocal(currentJob?.start)}
 							oninput={(e) => {
 								const val = (e.target as HTMLInputElement).value;
@@ -393,6 +475,7 @@
 							id="job-end"
 							type="datetime-local"
 							class="new-job-modal__input input"
+							class:new-job-modal__input--reschedule-highlight={showRescheduleHighlight}
 							value={toDatetimeLocal(currentJob?.end)}
 							oninput={(e) => {
 								const val = (e.target as HTMLInputElement).value;
@@ -486,10 +569,33 @@
 						{isEditing ? 'Close' : 'Cancel'}
 					</button>
 
-					<button class="new-job-modal__btn button button--primary" onclick={saveJob}>
-						{isEditing ? 'Save Changes' : 'Create Job'}
+					<button
+						class="new-job-modal__btn button button--primary"
+						class:new-job-modal__btn--reschedule-highlight={showRescheduleHighlight}
+						onclick={saveJob}
+					>
+						{showRescheduleHighlight ? 'Save reschedule' : isEditing ? 'Save Changes' : 'Create Job'}
 					</button>
 				</div>
+
+				{#if isEditing && currentJob.status === 'cancelled'}
+					<div class="new-job-modal__cancelled-actions">
+						<button
+							type="button"
+							class="new-job-modal__secondary-action"
+							onclick={openUpdateCancelReason}
+						>
+							Update cancel reason
+						</button>
+						<button
+							type="button"
+							class="new-job-modal__secondary-action new-job-modal__secondary-action--reschedule"
+							onclick={startReschedule}
+						>
+							Reschedule
+						</button>
+					</div>
+				{/if}
 
 				{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
 					<!-- )=- Prevent cancel for completed or already-cancelled jobs.
@@ -505,15 +611,17 @@
 
 <!-- Cancel Confirmation -->
 {#if showCancelConfirm}
-	<div class="modal-overlay cancel-confirm-modal" role="presentation" onclick={() => (showCancelConfirm = false)}>
+	<div class="modal-overlay cancel-confirm-modal" role="presentation" onclick={closeCancelConfirm}>
 		<div class="modal-content cancel-confirm-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => {
 				if (e.key === 'Escape') {
 					e.stopPropagation();
-					showCancelConfirm = false;
+					closeCancelConfirm();
 				}
 			}}>
-			<h3 class="cancel-confirm-modal__title">Cancel Job?</h3>
+			<h3 class="cancel-confirm-modal__title">
+				{isUpdatingCancelReason ? 'Update cancel reason' : 'Cancel Job?'}
+			</h3>
 			<p class="cancel-confirm-modal__subtitle">Please select a reason:</p>
 
 			<div class="cancel-reasons">
@@ -545,7 +653,7 @@
 			<div class="cancel-confirm-modal__footer">
 				<button
 					class="new-job-modal__btn new-job-modal__btn--cancel button button--ghost"
-					onclick={() => (showCancelConfirm = false)}
+					onclick={closeCancelConfirm}
 				>
 					Nevermind
 				</button>
@@ -554,7 +662,7 @@
 					onclick={confirmCancel}
 					disabled={!selectedCancelReason}
 				>
-					Confirm Cancellation
+					{isUpdatingCancelReason ? 'Save reason' : 'Confirm Cancellation'}
 				</button>
 			</div>
 		</div>
@@ -568,17 +676,47 @@
 	/* Base .new-job-modal shell now uses global .modal-overlay + .modal-content for cohesion.
 	   (global handles mobile bottom-sheet). Only prefixed BEM extensions here. */
 
+	.new-job-modal__header {
+		padding: var(--space-6) var(--space-4) 0;
+	}
+
 	.new-job-modal__title {
-		margin: 0 0 var(--space-6) 0;
+		margin: 0;
 		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
-		padding: var(--space-6) var(--space-4) 0;
+	}
+
+	.new-job-modal__header-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+		margin-top: var(--space-2);
+	}
+
+	.new-job-modal__status {
+		font-size: var(--font-size-xs);
+		padding: 0.15rem 0.6rem;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+	}
+
+	.new-job-modal__status--cancelled {
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+	}
+
+	.new-job-modal__cancel-detail {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
 	}
 
 	.new-job-modal__form {
 		flex: 1;
 		overflow-y: auto;
+		margin-top: var(--space-6);
 		padding: 0 var(--space-4);
 		display: flex;
 		flex-direction: column;
@@ -762,6 +900,60 @@
 		cursor: pointer;
 	}
 
+	.new-job-modal__cancelled-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: var(--space-2);
+		width: 100%;
+	}
+
+	.new-job-modal__secondary-action {
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+		color: var(--color-text);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		padding: var(--space-1) var(--space-3);
+		cursor: pointer;
+	}
+
+	.new-job-modal__secondary-action--reschedule {
+		border-color: var(--color-primary);
+		color: var(--color-primary-emphasis);
+		background: var(--color-primary-soft);
+	}
+
+	.new-job-modal__input--reschedule-highlight,
+	.new-job-modal__field-group--reschedule-highlight {
+		outline: 2px solid var(--color-warning);
+		outline-offset: 2px;
+		border-radius: var(--radius-sm);
+	}
+
+	.new-job-modal__field-group--reschedule-highlight {
+		padding: var(--space-2);
+		animation: new-job-modal-reschedule-pulse 1.2s ease-in-out infinite;
+	}
+
+	.new-job-modal__btn--reschedule-highlight {
+		animation: new-job-modal-reschedule-pulse 1.2s ease-in-out infinite;
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 35%, transparent);
+	}
+
+	@keyframes new-job-modal-reschedule-pulse {
+		0%,
+		100% {
+			outline-color: var(--color-warning);
+			box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 35%, transparent);
+		}
+		50% {
+			outline-color: var(--color-primary);
+			box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 30%, transparent);
+		}
+	}
+
 	/* Calendar picker icon color for dark mode (the native indicator is dark by default) */
 	.new-job-modal__input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 		filter: invert(0.2);
@@ -773,10 +965,16 @@
 	/* Mobile tweaks for job form modal title (per request): reduce height by minimizing margin/padding,
 	   slightly smaller font. Keeps a few pixels for visual breathing room. Desktop unchanged. */
 	@media (max-width: 768px) {
-		.new-job-modal__title {
-			margin: 0 0 2px 0;
+		.new-job-modal__header {
 			padding: 2px var(--space-2) 0;
+		}
+
+		.new-job-modal__title {
 			font-size: var(--font-size-lg);
+		}
+
+		.new-job-modal__form {
+			margin-top: var(--space-2);
 		}
 	}
 </style>

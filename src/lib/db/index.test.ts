@@ -15,6 +15,7 @@ import {
 	createJob,
 	updateJob,
 	cancelJob,
+	rescheduleCancelledJob,
 	createClient,
 	createInvoice,
 	deleteInvoice,
@@ -720,6 +721,51 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 
 		const queue = await db.syncQueue.where({ recordId: jobId, type: 'update' }).toArray();
 		expect(queue.length).toBe(1);
+	});
+
+	it('rescheduleCancelledJob restores scheduled status and clears cancel metadata', async () => {
+		const jobId = 'job-to-reschedule';
+		const oldStart = new Date('2020-01-01T10:00:00');
+		const newStart = new Date('2030-06-01T10:00:00');
+		const newEnd = new Date('2030-06-01T12:00:00');
+
+		await db.jobs.add({
+			id: jobId,
+			clientId: 'c1',
+			title: 'Cancelled job',
+			start: oldStart,
+			end: new Date('2020-01-01T12:00:00'),
+			assignedCrew: [],
+			status: 'cancelled',
+			cancelReason: 'Weather',
+			cancelNotes: 'Rain',
+			cancelledAt: new Date('2020-01-02'),
+			cancelledBy: 'user-1',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: '',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		await rescheduleCancelledJob(jobId, { start: newStart, end: newEnd });
+
+		const job = await db.jobs.get(jobId);
+		expect(job!.status).toBe('scheduled');
+		expect(job!.start).toEqual(newStart);
+		expect(job!.end).toEqual(newEnd);
+		expect(job!.cancelReason).toBeUndefined();
+		expect(job!.cancelNotes).toBeUndefined();
+		expect(job!.cancelledAt).toBeUndefined();
+		expect(job!.cancelledBy).toBeUndefined();
+
+		const queue = await db.syncQueue.where({ recordId: jobId, type: 'update' }).toArray();
+		expect(queue.length).toBe(1);
+		expect(queue[0].data.status).toBe('scheduled');
+		expect(queue[0].data.cancelReason).toBe('');
 	});
 
 	it('createClient creates local + queue', async () => {

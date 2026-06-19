@@ -570,6 +570,57 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 	console.log(`✅ Job ${jobId} cancelled by ${currentUser?.name || 'Unknown'}`);
 }
 
+/** Reschedule a cancelled job: new future dates, status back to scheduled, cancel metadata cleared. */
+export async function rescheduleCancelledJob(jobId: string, jobData: Partial<Job>) {
+	const existing = await db.jobs.get(jobId);
+	if (!existing) {
+		throw new Error(`rescheduleCancelledJob: job not found ${jobId}`);
+	}
+
+	const resolved = { ...jobData };
+	if (resolved.clientId) {
+		resolved.clientId = await resolveClientPbId(resolved.clientId);
+	}
+
+	const nextJob: Job = {
+		...existing,
+		...resolved,
+		status: 'scheduled',
+		updatedAt: new Date()
+	};
+	delete (nextJob as Record<string, unknown>).cancelReason;
+	delete (nextJob as Record<string, unknown>).cancelNotes;
+	delete (nextJob as Record<string, unknown>).cancelledAt;
+	delete (nextJob as Record<string, unknown>).cancelledBy;
+
+	await db.jobs.put(nextJob);
+
+	const queueData = safeClone({
+		...resolved,
+		status: 'scheduled',
+		cancelReason: '',
+		cancelNotes: '',
+		cancelledAt: null,
+		cancelledBy: null,
+		updatedAt: new Date()
+	});
+
+	await addToSyncQueue({
+		type: 'update',
+		collection: 'jobs',
+		recordId: jobId,
+		data: queueData
+	});
+
+	if (navigator.onLine) await processSyncQueue();
+
+	if (resolved.start !== undefined || resolved.assignedCrew !== undefined) {
+		import('$lib/notifications/crewAssignment')
+			.then((m) => m.refreshCrewNotificationQueueForJob(jobId))
+			.catch(() => {});
+	}
+}
+
 export async function updateJobDates(jobId: string, newStart: Date | null, newEnd: Date | null) {
 	if (!newStart) {
 		throw new Error('updateJobDates: newStart is null');
@@ -1578,14 +1629,18 @@ async function jobDataToPbPayload(data: any): Promise<Record<string, unknown>> {
 		taxAmount: Number(data.taxAmount) || 0,
 		totalAmount: Number(data.totalAmount) || 0,
 		status: data.status || 'scheduled',
-		cancelReason: data.cancelReason || undefined,
-		cancelNotes: data.cancelNotes || undefined,
-		cancelledAt: data.cancelledAt
-			? data.cancelledAt instanceof Date
-				? data.cancelledAt.toISOString()
+		cancelReason:
+			data.cancelReason === '' ? '' : data.cancelReason || undefined,
+		cancelNotes: data.cancelNotes === '' ? '' : data.cancelNotes || undefined,
+		cancelledAt:
+			data.cancelledAt === null
+				? null
 				: data.cancelledAt
-			: undefined,
-		cancelledBy: data.cancelledBy || undefined,
+					? data.cancelledAt instanceof Date
+						? data.cancelledAt.toISOString()
+						: data.cancelledAt
+					: undefined,
+		cancelledBy: data.cancelledBy === null ? null : data.cancelledBy || undefined,
 		importSource: data.importSource || undefined
 	};
 
