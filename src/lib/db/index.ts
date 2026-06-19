@@ -582,12 +582,21 @@ export async function rescheduleCancelledJob(jobId: string, jobData: Partial<Job
 		resolved.clientId = await resolveClientPbId(resolved.clientId);
 	}
 
-	const nextJob: Job = {
+	const billableItems = (resolved.billableItems ?? existing.billableItems ?? []).map((item: any) =>
+		safeClone({ ...item })
+	);
+
+	// safeClone strips Svelte proxies before IndexedDB put (same pattern as createJob / updateJob).
+	const nextJob = safeClone({
 		...existing,
 		...resolved,
-		status: 'scheduled',
+		assignedCrew: [...(resolved.assignedCrew ?? existing.assignedCrew ?? [])],
+		billableItems,
+		start: new Date(resolved.start ?? existing.start),
+		end: new Date(resolved.end ?? existing.end),
+		status: 'scheduled' as const,
 		updatedAt: new Date()
-	};
+	});
 	delete (nextJob as Record<string, unknown>).cancelReason;
 	delete (nextJob as Record<string, unknown>).cancelNotes;
 	delete (nextJob as Record<string, unknown>).cancelledAt;

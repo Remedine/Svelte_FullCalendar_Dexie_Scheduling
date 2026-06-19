@@ -755,8 +755,8 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 
 		const job = await db.jobs.get(jobId);
 		expect(job!.status).toBe('scheduled');
-		expect(job!.start).toEqual(newStart);
-		expect(job!.end).toEqual(newEnd);
+		expect(new Date(job!.start).getTime()).toBe(newStart.getTime());
+		expect(new Date(job!.end).getTime()).toBe(newEnd.getTime());
 		expect(job!.cancelReason).toBeUndefined();
 		expect(job!.cancelNotes).toBeUndefined();
 		expect(job!.cancelledAt).toBeUndefined();
