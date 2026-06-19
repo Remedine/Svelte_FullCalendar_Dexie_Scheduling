@@ -34,6 +34,7 @@ export {
 } from '$lib/utils/invoiceSnapshot';
 export { calculateInvoiceTotals, normalizeBillableItems } from '$lib/utils/invoiceTotals';
 export { validateInvoiceSnapshot } from '$lib/utils/invoiceSchema';
+export { normalizeTaxRateToPercent } from '$lib/utils/tax';
 export {
 	generateInvoiceDocx,
 	generateInvoiceDocxFromSnapshot,
