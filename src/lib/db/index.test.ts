@@ -1136,6 +1136,89 @@ describe('processSyncQueue (with mocked pb)', () => {
 		expect(job?.pbId).toBe('server-job-123');
 	});
 
+	it('invoice update with supporting files sends blobs only (not metadata scalar)', async () => {
+		const { pb } = await import('$lib/db/pb');
+		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');
+
+		const updateMock = vi.fn().mockResolvedValue({});
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'invoices') {
+				return { update: updateMock } as any;
+			}
+			if (name === 'jobs') {
+				return { getOne: vi.fn().mockResolvedValue({ id: 'pb-job-1' }) } as any;
+			}
+			if (name === 'clients') {
+				return { getOne: vi.fn().mockResolvedValue({ id: 'pb-client-1' }) } as any;
+			}
+			return {} as any;
+		});
+
+		const invoiceId = 'inv-support-sync';
+		await syncDb.jobs.add({
+			id: 'job-1',
+			pbId: 'pb-job-1',
+			clientId: 'c1',
+			title: 'Test Job',
+			start: new Date(),
+			end: new Date(),
+			status: 'scheduled',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+		await syncDb.clients.add({
+			id: 'c1',
+			pbId: 'pb-client-1',
+			name: 'Client',
+			serviceAddressStreet: '',
+			serviceAddressCity: '',
+			serviceAddressState: '',
+			serviceAddressZip: '',
+			areaOfTown: 'Downtown',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+		await syncDb.invoices.add({
+			id: invoiceId,
+			pbId: 'pb-inv-1',
+			jobId: 'job-1',
+			clientId: 'c1',
+			status: 'draft',
+			dueDate: new Date(),
+			amount: 100,
+			supportingDocuments: [{ filename: 'receipt.pdf', type: 'application/pdf' }],
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as Invoice);
+
+		const blob = new Blob(['pdf'], { type: 'application/pdf' });
+		await addToSyncQueue({
+			type: 'update',
+			collection: 'invoices',
+			recordId: invoiceId,
+			data: {
+				supportingDocuments: [{ filename: 'receipt.pdf', type: 'application/pdf' }],
+				_files: {
+					supporting: [{ blob, filename: 'receipt.pdf', type: 'application/pdf' }]
+				}
+			}
+		});
+
+		await processSyncQueue();
+
+		expect(updateMock).toHaveBeenCalledTimes(1);
+		const formData = updateMock.mock.calls[0][1] as FormData;
+		const supportingEntries = [...formData.entries()].filter(([k]) => k === 'supportingDocuments');
+		expect(supportingEntries.length).toBe(1);
+		expect(supportingEntries[0][1]).toBeInstanceOf(File);
+		expect([...formData.entries()].some(([k, v]) => k === 'supportingDocuments' && typeof v === 'string')).toBe(
+			false
+		);
+
+		const remainingQueue = await syncDb.syncQueue.where('recordId').equals(invoiceId).toArray();
+		expect(remainingQueue.length).toBe(0);
+	});
+
 	it('keeps queue item when PocketBase job create fails (Batch A)', async () => {
 		const { pb } = await import('$lib/db/pb');
 		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');

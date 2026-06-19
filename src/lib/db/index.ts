@@ -1328,22 +1328,25 @@ async function jobDataToPbPayload(data: any): Promise<Record<string, unknown>> {
 	return Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));
 }
 
+// Dexie-only / transient queue keys — never send as PocketBase scalar fields.
+const INVOICE_QUEUE_SKIP_KEYS = new Set([
+	'_files',
+	'_fileDeletes',
+	'id',
+	'pbId',
+	'createdAt',
+	'updatedAt',
+	'jobId',
+	'clientId',
+	// File fields: blobs go via _files in FormData; metadata stays local-only.
+	'supportingDocuments',
+	'primaryInvoiceFile'
+]);
+
 function invoiceScalarToPbPayload(data: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	for (const [key, val] of Object.entries(data)) {
-		if (
-			key === '_files' ||
-			key === '_fileDeletes' ||
-			key === 'id' ||
-			key === 'pbId' ||
-			key === 'createdAt' ||
-			key === 'updatedAt' ||
-			key === 'jobId' ||
-			key === 'clientId'
-		) {
-			continue;
-		}
-		if (val == null) continue;
+		if (INVOICE_QUEUE_SKIP_KEYS.has(key) || val == null) continue;
 		out[key] =
 			val instanceof Date
 				? val.toISOString()
@@ -1352,6 +1355,19 @@ function invoiceScalarToPbPayload(data: Record<string, unknown>): Record<string,
 					: val;
 	}
 	return out;
+}
+
+function appendInvoiceQueueScalarsToFormData(formData: FormData, data: Record<string, unknown>) {
+	for (const [key, val] of Object.entries(data)) {
+		if (INVOICE_QUEUE_SKIP_KEYS.has(key) || val == null) continue;
+		if (val instanceof Date) {
+			formData.append(key, val.toISOString());
+		} else if (typeof val === 'object') {
+			formData.append(key, JSON.stringify(val));
+		} else {
+			formData.append(key, String(val));
+		}
+	}
 }
 
 // ==================== SYNC QUEUE ====================
@@ -1692,15 +1708,7 @@ async function runProcessSyncQueue(): Promise<void> {
 							const hasFiles = !!data._files || !!data._fileDeletes;
 							if (hasFiles) {
 								const formData = new FormData();
-								Object.keys(data).forEach((key) => {
-									if (key === '_files' || key === '_fileDeletes') return;
-									const val = data[key];
-									if (val == null) return;
-									if (val instanceof Date) formData.append(key, val.toISOString());
-									else if (typeof val === 'object' && !Array.isArray(val))
-										formData.append(key, JSON.stringify(val));
-									else formData.append(key, String(val));
-								});
+								appendInvoiceQueueScalarsToFormData(formData, data);
 								if (data._files?.primary) {
 									const f = data._files.primary;
 									formData.append(
@@ -1729,7 +1737,15 @@ async function runProcessSyncQueue(): Promise<void> {
 								);
 								itemSynced = true;
 							} else {
-								await pb.collection('invoices').update(realId, data);
+								const rel = await resolveInvoicePbRelations(
+									data.jobId || localAtProcess?.jobId,
+									data.clientId || localAtProcess?.clientId
+								);
+								const pbPayload: Record<string, unknown> = {
+									...invoiceScalarToPbPayload(data),
+									...(rel ? { job: rel.job, client: rel.client } : {})
+								};
+								await pb.collection('invoices').update(realId, pbPayload);
 								console.log(
 									`✅ Invoice updated in PocketBase (create item promoted to update): ${realId}`
 								);
@@ -1956,15 +1972,10 @@ async function runProcessSyncQueue(): Promise<void> {
 										formData.append('job', rel.job);
 										formData.append('client', rel.client);
 									}
-									for (const [key, val] of Object.entries(invoiceScalarToPbPayload(data))) {
-										if (val instanceof Date) {
-											formData.append(key, val.toISOString());
-										} else if (typeof val === 'object' && !Array.isArray(val)) {
-											formData.append(key, JSON.stringify(val));
-										} else {
-											formData.append(key, String(val));
-										}
-									}
+									appendInvoiceQueueScalarsToFormData(
+										formData,
+										invoiceScalarToPbPayload(data) as Record<string, unknown>
+									);
 
 									if (data._files?.primary) {
 										const f = data._files.primary;
