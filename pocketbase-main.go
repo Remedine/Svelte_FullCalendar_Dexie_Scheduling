@@ -459,14 +459,20 @@ func main() {
 			if err := e.BindBody(&body); err != nil {
 				return err
 			}
-			record, err := e.App.FindAuthRecordById("users", body.UserId)
+			record, err := e.App.FindRecordById("users", body.UserId)
 			if err != nil {
 				return apis.NewNotFoundError("user not found", err)
+			}
+			if !record.Collection().IsAuth() {
+				return apis.NewNotFoundError("user not found", nil)
 			}
 			if !record.GetBool("active") {
 				return apis.NewForbiddenError("account deactivated", nil)
 			}
-			token := record.NewAuthToken()
+			token, err := record.NewAuthToken()
+			if err != nil {
+				return err
+			}
 			return e.JSON(http.StatusOK, map[string]any{
 				"token":  token,
 				"record": record.PublicExport(),
