@@ -84,6 +84,22 @@ func main() {
 			}
 		}
 
+		// passkeys collection for WebAuthn / passkey login
+		if _, err := se.App.FindCollectionByNameOrId("passkeys"); err != nil {
+			col := core.NewBaseCollection("passkeys")
+			col.Fields.Add(&core.TextField{Name: "userId", Required: true})
+			col.Fields.Add(&core.TextField{Name: "credentialId", Required: true})
+			col.Fields.Add(&core.TextField{Name: "publicKey", Required: true})
+			col.Fields.Add(&core.NumberField{Name: "counter", Required: true})
+			col.Fields.Add(&core.JSONField{Name: "transports"})
+			col.Fields.Add(&core.TextField{Name: "deviceName"})
+			if err := se.App.Save(col); err != nil {
+				log.Printf("failed to create 'passkeys' collection: %v", err)
+			} else {
+				log.Println("created 'passkeys' collection on first start")
+			}
+		}
+
 		// === options collection fix (no "key" field) ===
 		// create without key + remove any legacy "key" from existing collection + seed global record
 		// (prevents 400 "Failed to create record" from Svelte client)
@@ -277,6 +293,183 @@ func main() {
 			return e.JSON(http.StatusOK, map[string]any{
 				"items":      items,
 				"totalItems": len(items),
+			})
+		})
+
+		se.Router.POST("/api/internal/passkeys/by-credential", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				CredentialId string `json:"credentialId"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindFirstRecordByFilter(
+				"passkeys",
+				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
+			)
+			if err != nil {
+				return apis.NewNotFoundError("passkey not found", err)
+			}
+			return e.JSON(http.StatusOK, map[string]any{
+				"id":           record.Id,
+				"userId":       record.GetString("userId"),
+				"credentialId": record.GetString("credentialId"),
+				"publicKey":    record.GetString("publicKey"),
+				"counter":      record.GetFloat("counter"),
+				"transports":   record.Get("transports"),
+				"deviceName":   record.GetString("deviceName"),
+			})
+		})
+
+		se.Router.POST("/api/internal/passkeys/list", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				UserId string `json:"userId"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			records, err := e.App.FindRecordsByFilter(
+				"passkeys",
+				fmt.Sprintf("userId = '%s'", body.UserId),
+				"-created",
+				50,
+				0,
+			)
+			if err != nil {
+				return err
+			}
+			items := make([]map[string]any, 0, len(records))
+			for _, rec := range records {
+				items = append(items, map[string]any{
+					"id":           rec.Id,
+					"userId":       rec.GetString("userId"),
+					"credentialId": rec.GetString("credentialId"),
+					"publicKey":    rec.GetString("publicKey"),
+					"counter":      rec.GetFloat("counter"),
+					"transports":   rec.Get("transports"),
+					"deviceName":   rec.GetString("deviceName"),
+					"created":      rec.GetDateTime("created").Time().UTC().Format(time.RFC3339),
+				})
+			}
+			return e.JSON(http.StatusOK, map[string]any{"items": items})
+		})
+
+		se.Router.POST("/api/internal/passkeys/save", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				UserId       string   `json:"userId"`
+				CredentialId string   `json:"credentialId"`
+				PublicKey    string   `json:"publicKey"`
+				Counter      float64  `json:"counter"`
+				Transports   []string `json:"transports"`
+				DeviceName   string   `json:"deviceName"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			col, err := e.App.FindCollectionByNameOrId("passkeys")
+			if err != nil {
+				return err
+			}
+			existing, findErr := e.App.FindFirstRecordByFilter(
+				"passkeys",
+				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
+			)
+			var rec *core.Record
+			if findErr != nil {
+				rec = core.NewRecord(col)
+			} else {
+				rec = existing
+			}
+			rec.Set("userId", body.UserId)
+			rec.Set("credentialId", body.CredentialId)
+			rec.Set("publicKey", body.PublicKey)
+			rec.Set("counter", body.Counter)
+			rec.Set("transports", body.Transports)
+			rec.Set("deviceName", body.DeviceName)
+			if err := e.App.Save(rec); err != nil {
+				return err
+			}
+			return e.JSON(http.StatusOK, map[string]string{"id": rec.Id})
+		})
+
+		se.Router.POST("/api/internal/passkeys/update-counter", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				CredentialId string  `json:"credentialId"`
+				Counter      float64 `json:"counter"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindFirstRecordByFilter(
+				"passkeys",
+				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
+			)
+			if err != nil {
+				return apis.NewNotFoundError("passkey not found", err)
+			}
+			record.Set("counter", body.Counter)
+			if err := e.App.Save(record); err != nil {
+				return err
+			}
+			return e.JSON(http.StatusOK, map[string]bool{"success": true})
+		})
+
+		se.Router.POST("/api/internal/passkeys/delete", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				CredentialId string `json:"credentialId"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindFirstRecordByFilter(
+				"passkeys",
+				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
+			)
+			if err != nil {
+				return apis.NewNotFoundError("passkey not found", err)
+			}
+			if err := e.App.Delete(record); err != nil {
+				return err
+			}
+			return e.JSON(http.StatusOK, map[string]bool{"success": true})
+		})
+
+		se.Router.POST("/api/internal/auth-token", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				UserId string `json:"userId"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindAuthRecordById("users", body.UserId)
+			if err != nil {
+				return apis.NewNotFoundError("user not found", err)
+			}
+			if !record.GetBool("active") {
+				return apis.NewForbiddenError("account deactivated", nil)
+			}
+			token := record.NewAuthToken()
+			return e.JSON(http.StatusOK, map[string]any{
+				"token":  token,
+				"record": record.PublicExport(),
 			})
 		})
 

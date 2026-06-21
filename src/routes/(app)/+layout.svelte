@@ -8,6 +8,7 @@
 	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
 	import JobFormModal from '$lib/components/JobFormModal.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import QuickUnlock from '$lib/components/QuickUnlock.svelte';
 	import { theme } from '$lib/stores/theme.svelte.ts';
 
 	// Import global design tokens + base styles (tokens power the entire overhaul)
@@ -319,6 +320,9 @@
 	     JobFormModal: edit/create job from details modal, calendar, etc. -->
 	<JobDetailsModal />
 	<JobFormModal />
+	{#if auth.locked && auth.isAuthenticated}
+		<QuickUnlock />
+	{/if}
 </div>
 
 <style>

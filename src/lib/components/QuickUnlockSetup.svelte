@@ -1,0 +1,211 @@
+<script lang="ts">
+	import {
+		enableQuickUnlock,
+		isPlatformAuthenticatorAvailable,
+		validatePinFormat
+	} from '$lib/auth/deviceUnlock';
+
+	type Props = {
+		userId: string;
+		email: string;
+		displayName: string;
+		onComplete: () => void;
+		onSkip: () => void;
+	};
+
+	let { userId, email, displayName, onComplete, onSkip }: Props = $props();
+
+	let pin = $state('');
+	let confirmPin = $state('');
+	let useBiometric = $state(true);
+	let biometricAvailable = $state(false);
+	let loading = $state(false);
+	let error = $state('');
+
+	$effect(() => {
+		void isPlatformAuthenticatorAvailable().then((ok) => {
+			biometricAvailable = ok;
+			if (!ok) useBiometric = false;
+		});
+	});
+
+	async function save() {
+		error = '';
+		const wantsPin = pin.length > 0 || confirmPin.length > 0;
+
+		if (wantsPin) {
+			const pinErr = validatePinFormat(pin);
+			if (pinErr) {
+				error = pinErr;
+				return;
+			}
+			if (pin !== confirmPin) {
+				error = 'PINs do not match';
+				return;
+			}
+		}
+
+		if (!wantsPin && !(useBiometric && biometricAvailable)) {
+			error = 'Set a PIN and/or enable biometric unlock';
+			return;
+		}
+
+		loading = true;
+		try {
+			await enableQuickUnlock({
+				userId,
+				email,
+				displayName,
+				pin: wantsPin ? pin : undefined,
+				enableBiometric: useBiometric && biometricAvailable
+			});
+			onComplete();
+		} catch (e: any) {
+			error = e?.message || 'Could not enable quick unlock';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<div class="quick-unlock-setup">
+	<div class="quick-unlock-setup__card">
+		<h2 class="quick-unlock-setup__title">Faster unlock</h2>
+		<p class="quick-unlock-setup__intro">
+			Optional: use your device fingerprint, Face ID, or a quick PIN when reopening the app.
+		</p>
+
+		{#if biometricAvailable}
+			<label class="quick-unlock-setup__check">
+				<input type="checkbox" bind:checked={useBiometric} disabled={loading} />
+				Use fingerprint / Face ID
+			</label>
+		{/if}
+
+		<div class="quick-unlock-setup__field">
+			<label class="quick-unlock-setup__label" for="setup-pin">Quick PIN (optional, 4–8 digits)</label>
+			<input
+				id="setup-pin"
+				class="quick-unlock-setup__input"
+				type="password"
+				inputmode="numeric"
+				maxlength="8"
+				bind:value={pin}
+				disabled={loading}
+			/>
+		</div>
+
+		<div class="quick-unlock-setup__field">
+			<label class="quick-unlock-setup__label" for="setup-pin-confirm">Confirm PIN</label>
+			<input
+				id="setup-pin-confirm"
+				class="quick-unlock-setup__input"
+				type="password"
+				inputmode="numeric"
+				maxlength="8"
+				bind:value={confirmPin}
+				disabled={loading}
+			/>
+		</div>
+
+		{#if error}
+			<p class="quick-unlock-setup__error">{error}</p>
+		{/if}
+
+		<button type="button" class="quick-unlock-setup__primary" onclick={save} disabled={loading}>
+			{loading ? 'Saving…' : 'Enable quick unlock'}
+		</button>
+		<button type="button" class="quick-unlock-setup__skip" onclick={onSkip} disabled={loading}>
+			Not now
+		</button>
+	</div>
+</div>
+
+<style>
+	.quick-unlock-setup {
+		position: fixed;
+		inset: 0;
+		z-index: 10000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.45);
+		padding: var(--space-4);
+	}
+
+	.quick-unlock-setup__card {
+		width: 100%;
+		max-width: 400px;
+		background: var(--color-surface);
+		border-radius: var(--radius-xl);
+		padding: var(--space-6);
+		box-shadow: var(--shadow-lg);
+	}
+
+	.quick-unlock-setup__title {
+		margin: 0 0 var(--space-2);
+		font-size: var(--font-size-xl);
+	}
+
+	.quick-unlock-setup__intro {
+		margin: 0 0 var(--space-5);
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		line-height: 1.5;
+	}
+
+	.quick-unlock-setup__check {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
+		font-size: var(--font-size-sm);
+	}
+
+	.quick-unlock-setup__field {
+		margin-bottom: var(--space-4);
+	}
+
+	.quick-unlock-setup__label {
+		display: block;
+		margin-bottom: var(--space-2);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+
+	.quick-unlock-setup__input {
+		width: 100%;
+		padding: var(--space-3);
+		border: 2px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+	}
+
+	.quick-unlock-setup__error {
+		color: var(--color-danger);
+		font-size: var(--font-size-sm);
+		margin: 0 0 var(--space-3);
+	}
+
+	.quick-unlock-setup__primary {
+		width: 100%;
+		padding: var(--space-3);
+		margin-bottom: var(--space-2);
+		border: none;
+		border-radius: var(--radius-md);
+		background: var(--color-primary);
+		color: white;
+		font-weight: var(--font-weight-semibold);
+		cursor: pointer;
+	}
+
+	.quick-unlock-setup__skip {
+		width: 100%;
+		padding: var(--space-2);
+		border: none;
+		background: none;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		text-decoration: underline;
+	}
+</style>
