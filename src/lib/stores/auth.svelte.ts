@@ -4,7 +4,9 @@ import { browser } from '$app/environment';
 export const auth = $state({
 	currentUser: null as any,
 	isAuthenticated: false,
-	loading: true
+	loading: true,
+	/** Quick-unlock gate: session restored but UI locked until PIN/biometric. */
+	locked: false
 });
 
 async function resolveUserFromPbSession(db: typeof import('$lib/db').db): Promise<any | null> {
@@ -48,6 +50,15 @@ async function resolveUserFromPbSession(db: typeof import('$lib/db').db): Promis
 	return user;
 }
 
+async function applyQuickUnlockIfNeeded(userId: string | null | undefined): Promise<void> {
+	try {
+		const { shouldRequireUnlock } = await import('$lib/auth/deviceUnlock');
+		auth.locked = await shouldRequireUnlock(userId);
+	} catch {
+		auth.locked = false;
+	}
+}
+
 /** Restore session from Dexie + PocketBase (called once on client startup). */
 export async function restoreSession(): Promise<void> {
 	let user: any = null;
@@ -83,11 +94,12 @@ export async function restoreSession(): Promise<void> {
 				await persistSessionUserId(id);
 			}
 
-			// Keep API/realtime working after a cold PWA open with an expired JWT.
 			void refreshPbAuthIfNeeded();
+			await applyQuickUnlockIfNeeded(user.id);
 		} else {
 			auth.currentUser = null;
 			auth.isAuthenticated = false;
+			auth.locked = false;
 
 			try {
 				const { pb } = await import('$lib/db/pb');
@@ -104,16 +116,25 @@ export async function restoreSession(): Promise<void> {
 		console.warn('[auth] restore failed', e);
 		auth.currentUser = null;
 		auth.isAuthenticated = false;
+		auth.locked = false;
 	} finally {
 		auth.loading = false;
 	}
 }
 
+export function unlockApp(): void {
+	auth.locked = false;
+}
+
+export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
+	if (!auth.isAuthenticated || !auth.currentUser) return;
+	await applyQuickUnlockIfNeeded(auth.currentUser.id);
+}
+
 export async function logout() {
-	// )=- Unified logout: clears central store (used by UI/guards) + localStorage.
-	// Also clears PocketBase authStore and wipes local Dexie data (jobs, clients, invoices, queue).
 	auth.currentUser = null;
 	auth.isAuthenticated = false;
+	auth.locked = false;
 	localStorage.removeItem('currentUserId');
 
 	try {
@@ -149,6 +170,7 @@ export async function logout() {
 export function setCurrentUser(user: any | null) {
 	auth.currentUser = user;
 	auth.isAuthenticated = !!user;
+	auth.locked = false;
 
 	if (user?.id) {
 		const id = user.id.toString();
@@ -160,13 +182,17 @@ export function setCurrentUser(user: any | null) {
 	}
 }
 
-// Auto-restore session (robust to Dexie dedup/cleanup and hybrid PB/local records).
-// On hard refresh of protected pages (e.g. /calendar) the previous logic could fail to
-// find the exact savedId after pullUsersFromServer / cleanupDuplicateUsers deleted a
-// duplicate record, causing loading=false + !authenticated → unwanted redirect to login.
 if (browser) {
 	void restoreSession();
+
+	// Re-lock when the PWA returns from background (if quick unlock is enabled).
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'visible') {
+			void lockAppIfQuickUnlockEnabled();
+		}
+	});
 } else {
 	auth.loading = false;
 	auth.isAuthenticated = false;
+	auth.locked = false;
 }

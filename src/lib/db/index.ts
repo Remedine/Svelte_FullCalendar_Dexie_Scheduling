@@ -184,6 +184,18 @@ export interface AppSession {
 	currentUserId: string;
 }
 
+/** Local quick-unlock settings (PIN / device biometric gate on reopen). */
+export interface DeviceAuthSettings {
+	id: 'current';
+	enabled: boolean;
+	pinEnabled: boolean;
+	biometricEnabled: boolean;
+	pinHash?: string;
+	biometricCredentialId?: string;
+	userId?: string;
+	email?: string;
+}
+
 export interface AppOptions {
 	id: string;
 	taxRate: number;
@@ -306,6 +318,7 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 		'id'
 	>;
 	appSession: EntityTable<AppSession, 'id'>;
+	deviceAuth: EntityTable<DeviceAuthSettings, 'id'>;
 };
 
 // )=- Bumped to version 21 (was 20) to force schema upgrade on all clients for the *assignedCrew
@@ -361,6 +374,20 @@ db.version(24).stores({
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
 	crewNotifications: 'id, jobId, scheduledFor, crewName',
 	appSession: 'id'
+});
+
+// v25: device quick-unlock (local PIN / biometric gate)
+db.version(25).stores({
+	clients: 'id, name, areaOfTown, email, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName',
+	appSession: 'id',
+	deviceAuth: 'id'
 });
 
 export async function persistSessionUserId(userId: string | null): Promise<void> {

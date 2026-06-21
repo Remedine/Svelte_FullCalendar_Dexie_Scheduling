@@ -1,11 +1,14 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-	import { loginWithEmail, requestPasswordReset } from '$lib/db/pb';
+	import { loginWithEmail, loginWithPasskey, requestPasswordReset } from '$lib/db/pb';
 	import { goto } from '$app/navigation';
 	import { db } from '$lib/db';
 	import type { User } from '$lib/db';
 	import WelcomeModal from '$lib/components/WelcomeModal.svelte';
 	import ForcePhotoUpdate from '$lib/components/ForcePhotoUpdate.svelte';
+	import QuickUnlockSetup from '$lib/components/QuickUnlockSetup.svelte';
+	import { canUsePasskeys } from '$lib/auth/passkeys';
+	import { isQuickUnlockEnabled } from '$lib/auth/deviceUnlock';
 
 	let email = $state('');
 	let password = $state('');
@@ -23,6 +26,9 @@
 	// or directly on login for verified users where an admin set forcePhotoUpdate).
 	let showForcePhoto = $state(false);
 	let forcePhotoUser = $state<User | null>(null);
+	let showQuickUnlockSetup = $state(false);
+	let quickUnlockUser = $state<User | null>(null);
+	const passkeysAvailable = $derived(canUsePasskeys());
 
 	function userNeedsPhoto(user: User): boolean {
 		if (!user.forcePhotoUpdate) return false;
@@ -59,6 +65,44 @@
 		}
 	}
 
+	async function continueAfterAuth(localUser: User) {
+		if (localUser.verified === false) {
+			welcomeUser = localUser;
+			showWelcome = true;
+			return;
+		}
+		if (userNeedsPhoto(localUser)) {
+			forcePhotoUser = localUser;
+			showForcePhoto = true;
+			return;
+		}
+		if (!(await isQuickUnlockEnabled())) {
+			quickUnlockUser = localUser;
+			showQuickUnlockSetup = true;
+			return;
+		}
+		goto('/calendar', { replaceState: true });
+	}
+
+	async function handlePasskeyLogin() {
+		isLoading = true;
+		error = '';
+		try {
+			const normalizedEmail = (email || '').trim().toLowerCase();
+			if (!normalizedEmail) {
+				error = 'Enter your email, then use passkey sign-in';
+				return;
+			}
+			const { localUser } = await loginWithPasskey(normalizedEmail);
+			email = normalizedEmail;
+			await continueAfterAuth(localUser);
+		} catch (err: any) {
+			error = err?.message || 'Passkey sign-in failed';
+		} finally {
+			isLoading = false;
+		}
+	}
+
 	async function handleLogin() {
 		isLoading = true;
 		error = '';
@@ -73,15 +117,7 @@
 			// - verified + forcePhotoUpdate → ForcePhotoUpdate modal
 			// PB verified is source of truth (mergeAuthUserIntoLocal); local false only applies
 			// when PB has not yet marked the account verified (temp-password first login).
-			if (localUser.verified === false) {
-				welcomeUser = localUser;
-				showWelcome = true;
-			} else if (userNeedsPhoto(localUser)) {
-				forcePhotoUser = localUser;
-				showForcePhoto = true;
-			} else {
-				goto('/calendar', { replaceState: true });
-			}
+			await continueAfterAuth(localUser);
 		} catch (err: any) {
 			const pbData = err?.response?.data;
 			error = pbData?.password?.message || pbData?.email?.message || err?.message || 'Login failed';
@@ -122,7 +158,7 @@
 </script>
 
 <div class="login-page">
-	{#if !showWelcome && !showForcePhoto}
+	{#if !showWelcome && !showForcePhoto && !showQuickUnlockSetup}
 		<div class="login-card">
 			<h1 class="login-card__title">CapitalCity Windows</h1>
 			<p class="login-card__subtitle">
@@ -230,12 +266,25 @@
 						<p class="login-form__error">{error}</p>
 					{/if}
 
-					<button type="submit" class="login-form__btn" disabled={isLoading}>
-						{isLoading ? 'Logging in...' : 'Login'}
-					</button>
-				</form>
+				<button type="submit" class="login-form__btn" disabled={isLoading}>
+					{isLoading ? 'Logging in...' : 'Login'}
+				</button>
 
-				<p class="login-card__help">Sign in with your email and password.</p>
+				{#if passkeysAvailable}
+					<button
+						type="button"
+						class="login-form__passkey-btn"
+						onclick={handlePasskeyLogin}
+						disabled={isLoading}
+					>
+						Sign in with fingerprint / passkey
+					</button>
+				{/if}
+			</form>
+
+			<p class="login-card__help">
+				Sign in with email and password{#if passkeysAvailable}, or use a passkey on this device{/if}.
+			</p>
 			{/if}
 		</div>
 	{/if}
@@ -257,6 +306,24 @@
 			onClose={() => {
 				showForcePhoto = false;
 				forcePhotoUser = null;
+				goto('/calendar', { replaceState: true });
+			}}
+		/>
+	{/if}
+
+	{#if showQuickUnlockSetup && quickUnlockUser}
+		<QuickUnlockSetup
+			userId={String(quickUnlockUser.id)}
+			email={(quickUnlockUser.email || email).trim().toLowerCase()}
+			displayName={quickUnlockUser.name || quickUnlockUser.email || 'Crew'}
+			onComplete={() => {
+				showQuickUnlockSetup = false;
+				quickUnlockUser = null;
+				goto('/calendar', { replaceState: true });
+			}}
+			onSkip={() => {
+				showQuickUnlockSetup = false;
+				quickUnlockUser = null;
 				goto('/calendar', { replaceState: true });
 			}}
 		/>
@@ -417,6 +484,23 @@
 
 	.login-form__btn:hover:not(:disabled) {
 		background: var(--color-primary-hover);
+	}
+
+	.login-form__passkey-btn {
+		width: 100%;
+		padding: var(--space-3);
+		margin-top: var(--space-3);
+		border: 2px solid var(--color-primary);
+		border-radius: var(--radius-md);
+		background: transparent;
+		color: var(--color-primary);
+		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+	}
+
+	.login-form__passkey-btn:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 	}
 
 	.login-form__error {

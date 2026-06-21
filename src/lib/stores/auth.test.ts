@@ -39,6 +39,7 @@ describe('auth store (runes $state + session restore)', () => {
 		auth.currentUser = null;
 		auth.isAuthenticated = false;
 		auth.loading = true;
+		auth.locked = false;
 	});
 
 	afterEach(() => {

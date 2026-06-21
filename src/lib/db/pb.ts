@@ -82,6 +82,59 @@ export async function requestPasswordReset(email: string): Promise<void> {
 	}
 }
 
+async function completeLoginFromPbRecord(
+	pbUser: PbUserRecord,
+	normalizedEmail: string,
+	token: string
+): Promise<{ authData: { record: PbUserRecord; token: string }; localUser: User }> {
+	if (pbUser.active === false) {
+		pb.authStore.clear();
+		throw new Error('Your account has been deactivated. Please contact an administrator.');
+	}
+
+	pb.authStore.save(token, pbUser as Parameters<typeof pb.authStore.save>[1]);
+
+	let existing = await findLocalUserForPbRecord({ ...pbUser, email: normalizedEmail });
+	if (!existing) {
+		const guess = normalizedEmail.split('@')[0];
+		existing =
+			(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
+			(await db.users.where('name').equalsIgnoreCase(guess).first());
+	}
+
+	const localUser = mergeAuthUserIntoLocal(pbUser, normalizedEmail, existing);
+	await db.users.put(localUser);
+	await deleteDuplicateUserRows(localUser.id!, {
+		pbId: localUser.pbId,
+		email: localUser.email
+	});
+	await cleanupDuplicateUsers();
+
+	setCurrentUser(localUser);
+	console.log('✅ PB user synced to Dexie:', localUser.name, 'pbId:', localUser.pbId);
+
+	await pullJobsFromServer();
+	await pullClientsFromServer();
+	await pullInvoicesFromServer();
+	if (localUser.role === 'admin') {
+		await pullUsersFromServer();
+	}
+
+	if (navigator.onLine) {
+		await processSyncQueue();
+	}
+
+	const fresh = (await db.users.get(localUser.id!)) || localUser;
+	setCurrentUser(fresh);
+	console.log('✅ Login complete + sync queue processed');
+
+	const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import('$lib/db/realtime');
+	disconnectJobsRealtime();
+	scheduleJobsRealtimeReconnect(400);
+
+	return { authData: { record: pbUser, token }, localUser: fresh };
+}
+
 // Email Login — returns merged Dexie user (PB is source of truth for auth fields).
 export async function loginWithEmail(
 	email: string,
@@ -90,61 +143,55 @@ export async function loginWithEmail(
 	try {
 		const normalizedEmail = (email || '').trim().toLowerCase();
 		const authData = await pb.collection('users').authWithPassword(normalizedEmail, password);
-		const pbUser = authData.record as PbUserRecord;
-
-		// Enforce the app-level "active" flag at login time.
-		if (pbUser.active === false) {
-			pb.authStore.clear();
-			throw new Error('Your account has been deactivated. Please contact an administrator.');
-		}
-
-		let existing = await findLocalUserForPbRecord({ ...pbUser, email: normalizedEmail });
-		if (!existing) {
-			const guess = normalizedEmail.split('@')[0];
-			existing =
-				(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
-				(await db.users.where('name').equalsIgnoreCase(guess).first());
-		}
-
-		const localUser = mergeAuthUserIntoLocal(pbUser, normalizedEmail, existing);
-		await db.users.put(localUser);
-		await deleteDuplicateUserRows(localUser.id!, {
-			pbId: localUser.pbId,
-			email: localUser.email
-		});
-		await cleanupDuplicateUsers();
-
-		setCurrentUser(localUser);
-		console.log('✅ PB user synced to Dexie:', localUser.name, 'pbId:', localUser.pbId);
-
-		await pullJobsFromServer();
-		await pullClientsFromServer();
-		await pullInvoicesFromServer();
-		if (localUser.role === 'admin') {
-			await pullUsersFromServer();
-		}
-
-		if (navigator.onLine) {
-			await processSyncQueue();
-		}
-
-		// Re-read after pull/queue so caller gets fresh pbId + verified.
-		const fresh = (await db.users.get(localUser.id!)) || localUser;
-		setCurrentUser(fresh);
-		console.log('✅ Login complete + sync queue processed');
-
-		// Fresh auth token — reset realtime so subscribe uses a new PB client id.
-		const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
-			'$lib/db/realtime'
+		return completeLoginFromPbRecord(
+			authData.record as PbUserRecord,
+			normalizedEmail,
+			authData.token
 		);
-		disconnectJobsRealtime();
-		scheduleJobsRealtimeReconnect(400);
-
-		return { authData, localUser: fresh };
 	} catch (err) {
 		console.error('Email login failed:', err);
 		throw err;
 	}
+}
+
+/** Passkey / biometric login — returns merged Dexie user after WebAuthn verification. */
+export async function loginWithPasskey(
+	email: string
+): Promise<{ authData: { record: PbUserRecord; token: string }; localUser: User }> {
+	const { startAuthentication } = await import('@simplewebauthn/browser');
+	const normalizedEmail = (email || '').trim().toLowerCase();
+	if (!normalizedEmail) throw new Error('Email is required for passkey sign-in');
+
+	const optionsRes = await fetch('/api/auth/webauthn/login/options', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email: normalizedEmail })
+	});
+	if (!optionsRes.ok) {
+		const data = await optionsRes.json().catch(() => ({}));
+		throw new Error(data.error || 'Could not start passkey sign-in');
+	}
+
+	const { options, challengeToken } = await optionsRes.json();
+	const assertion = await startAuthentication({ optionsJSON: options });
+
+	const verifyRes = await fetch('/api/auth/webauthn/login/verify', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			email: normalizedEmail,
+			response: assertion,
+			challengeToken
+		})
+	});
+
+	if (!verifyRes.ok) {
+		const data = await verifyRes.json().catch(() => ({}));
+		throw new Error(data.error || 'Passkey sign-in failed');
+	}
+
+	const { token, record } = await verifyRes.json();
+	return completeLoginFromPbRecord(record as PbUserRecord, normalizedEmail, token);
 }
 
 // )=- Batch A (PLAN.md): normalize updatedAt for last-write-wins merge (Date vs ISO string).

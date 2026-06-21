@@ -13,6 +13,20 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db, updateUser, getUserPhotoSrc } from '$lib/db';
 	import { pb } from '$lib/db/pb';
+	import {
+		disableQuickUnlock,
+		enableQuickUnlock,
+		getDeviceAuthSettings,
+		isPlatformAuthenticatorAvailable,
+		isQuickUnlockEnabled,
+		validatePinFormat
+	} from '$lib/auth/deviceUnlock';
+	import {
+		canUsePasskeys,
+		listPasskeys,
+		registerPasskey,
+		removePasskey
+	} from '$lib/auth/passkeys';
 
 	let loading = $state(false);
 	let error = $state('');
@@ -41,6 +55,14 @@
 	// )=- Track pending email change (from requestEmailChange) so we can show "pending confirmation" pill + resend in the badge.
 	// Cleared on reload or when a new request overwrites it. Local email is already optimistically set to the pending value.
 	let pendingEmailChange = $state<string | null>(null);
+
+	let quickUnlockOn = $state(false);
+	let passkeyItems = $state<Array<{ credentialId: string; deviceName: string }>>([]);
+	let setupPin = $state('');
+	let setupPinConfirm = $state('');
+	let setupUseBiometric = $state(true);
+	let biometricAvailable = $state(false);
+	const passkeysSupported = $derived(canUsePasskeys());
 
 	function startEditing(section: 'password' | 'name' | 'email') {
 		editing = section;
@@ -73,6 +95,100 @@
 			}
 		}
 	});
+
+	async function refreshDeviceAuthUi() {
+		quickUnlockOn = await isQuickUnlockEnabled();
+		biometricAvailable = await isPlatformAuthenticatorAvailable();
+		if (passkeysSupported && pb.authStore.isValid) {
+			passkeyItems = await listPasskeys();
+		}
+	}
+
+	$effect(() => {
+		if (auth.currentUser) void refreshDeviceAuthUi();
+	});
+
+	async function saveQuickUnlock() {
+		if (!auth.currentUser) return;
+		error = '';
+		success = '';
+		const wantsPin = setupPin.length > 0;
+		if (wantsPin) {
+			const pinErr = validatePinFormat(setupPin);
+			if (pinErr) {
+				error = pinErr;
+				return;
+			}
+			if (setupPin !== setupPinConfirm) {
+				error = 'PINs do not match';
+				return;
+			}
+		}
+		if (!wantsPin && !(setupUseBiometric && biometricAvailable)) {
+			error = 'Set a PIN and/or enable biometric unlock';
+			return;
+		}
+		loading = true;
+		try {
+			await enableQuickUnlock({
+				userId: String(auth.currentUser.id),
+				email: (auth.currentUser.email || '').trim().toLowerCase(),
+				displayName: auth.currentUser.name || auth.currentUser.email || 'User',
+				pin: wantsPin ? setupPin : undefined,
+				enableBiometric: setupUseBiometric && biometricAvailable
+			});
+			setupPin = '';
+			setupPinConfirm = '';
+			success = 'Quick unlock enabled for this device';
+			await refreshDeviceAuthUi();
+		} catch (e: any) {
+			error = e?.message || 'Could not enable quick unlock';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function turnOffQuickUnlock() {
+		loading = true;
+		try {
+			await disableQuickUnlock();
+			quickUnlockOn = false;
+			success = 'Quick unlock disabled on this device';
+		} catch (e: any) {
+			error = e?.message || 'Could not disable quick unlock';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function addPasskey() {
+		loading = true;
+		error = '';
+		success = '';
+		try {
+			await registerPasskey();
+			passkeyItems = await listPasskeys();
+			success = 'Passkey added for this device';
+		} catch (e: any) {
+			error = e?.message || 'Could not add passkey';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function deletePasskey(credentialId: string) {
+		loading = true;
+		error = '';
+		try {
+			await removePasskey(credentialId);
+			passkeyItems = await listPasskeys();
+			success = 'Passkey removed';
+		} catch (e: any) {
+			error = e?.message || 'Could not remove passkey';
+		} finally {
+			loading = false;
+		}
+	}
 
 	// Handle camera photo upload (phone-friendly capture="user"). Triggered directly by pencil next to avatar.
 	async function handlePhoto(e: Event) {
@@ -618,6 +734,89 @@
          Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
 		<div class="profile__security">
+			<div class="profile__security-item profile__security-item--stacked">
+				<span class="profile__security-label">Quick unlock (this device)</span>
+				<p class="profile__security-hint">
+					PIN or fingerprint when reopening the app. Does not replace your account password.
+				</p>
+				{#if quickUnlockOn}
+					<p class="profile__security-status">Enabled on this device</p>
+					<button
+						type="button"
+						class="profile__secondary-btn"
+						onclick={turnOffQuickUnlock}
+						disabled={loading}
+					>
+						Disable quick unlock
+					</button>
+				{:else}
+					{#if biometricAvailable}
+						<label class="profile__security-check">
+							<input type="checkbox" bind:checked={setupUseBiometric} disabled={loading} />
+							Use fingerprint / Face ID
+						</label>
+					{/if}
+					<input
+						class="profile__input profile__input--compact"
+						type="password"
+						inputmode="numeric"
+						placeholder="Quick PIN (4–8 digits, optional)"
+						bind:value={setupPin}
+						disabled={loading}
+					/>
+					<input
+						class="profile__input profile__input--compact"
+						type="password"
+						inputmode="numeric"
+						placeholder="Confirm PIN"
+						bind:value={setupPinConfirm}
+						disabled={loading}
+					/>
+					<button
+						type="button"
+						class="profile__secondary-btn"
+						onclick={saveQuickUnlock}
+						disabled={loading}
+					>
+						Enable quick unlock
+					</button>
+				{/if}
+			</div>
+
+			{#if passkeysSupported}
+				<div class="profile__security-item profile__security-item--stacked">
+					<span class="profile__security-label">Passkeys (sign in)</span>
+					<p class="profile__security-hint">
+						Register this phone for passwordless sign-in with fingerprint or Face ID.
+					</p>
+					{#if passkeyItems.length > 0}
+						<ul class="profile__passkey-list">
+							{#each passkeyItems as pk (pk.credentialId)}
+								<li class="profile__passkey-row">
+									<span>{pk.deviceName}</span>
+									<button
+										type="button"
+										class="profile__link-btn"
+										onclick={() => deletePasskey(pk.credentialId)}
+										disabled={loading}
+									>
+										Remove
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					<button
+						type="button"
+						class="profile__secondary-btn"
+						onclick={addPasskey}
+						disabled={loading || !pb.authStore.isValid}
+					>
+						Add passkey on this device
+					</button>
+				</div>
+			{/if}
+
 			<div class="profile__security-item">
 				<span class="profile__security-label">Update Password</span>
 				<button
@@ -959,6 +1158,73 @@
 		font-weight: var(--font-weight-medium);
 		color: var(--color-text-muted);
 		letter-spacing: 0.2px;
+	}
+
+	.profile__security-item--stacked {
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--space-2);
+		padding: var(--space-2) 0;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.profile__security-hint {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		line-height: 1.4;
+	}
+
+	.profile__security-status {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-primary);
+	}
+
+	.profile__security-check {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+	}
+
+	.profile__secondary-btn {
+		align-self: flex-start;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+		color: var(--color-text);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+	}
+
+	.profile__input--compact {
+		max-width: 280px;
+	}
+
+	.profile__passkey-list {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.profile__passkey-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		padding: var(--space-1) 0;
+	}
+
+	.profile__link-btn {
+		border: none;
+		background: none;
+		color: var(--color-danger);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	/* === FORMS (compact, appear under security when a pencil is activated) === */
