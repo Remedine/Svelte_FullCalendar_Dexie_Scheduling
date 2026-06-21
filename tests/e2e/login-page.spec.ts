@@ -20,6 +20,34 @@ test('login page renders email/password form', async ({ page }) => {
 	// Basic a11y / structure check
 	const form = page.locator('form');
 	await expect(form).toBeVisible();
+	await expect(page.locator('button:has-text("Forgot password?")')).toBeVisible();
+});
+
+test('forgot password flow requests reset email', async ({ page }) => {
+	await page.goto('/login');
+
+	await page.route('**/api/auth/request-password-reset', async (route) => {
+		if (route.request().method() === 'POST') {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ success: true })
+			});
+		} else {
+			await route.continue();
+		}
+	});
+
+	await page.fill('input[type="email"]', 'crew@example.com');
+	await page.click('button:has-text("Forgot password?")');
+
+	await expect(page.locator('h1')).toContainText('CapitalCity Windows');
+	await expect(page.getByText('Reset Password')).toBeVisible();
+	await expect(page.locator('#forgot-email')).toHaveValue('crew@example.com');
+
+	await page.click('button:has-text("Send reset link")');
+
+	await expect(page.getByText(/receive reset instructions shortly/i)).toBeVisible();
 });
 
 test('can submit login form with mocked PB success and see app state update', async ({ page }) => {

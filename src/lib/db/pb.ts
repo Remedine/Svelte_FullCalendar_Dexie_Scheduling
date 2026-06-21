@@ -63,6 +63,25 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
+/** Request a password-reset email via the app server (Brevo + PB internal token). */
+export async function requestPasswordReset(email: string): Promise<void> {
+	const normalizedEmail = (email || '').trim().toLowerCase();
+	if (!normalizedEmail) {
+		throw new Error('Email is required');
+	}
+
+	const res = await fetch('/api/auth/request-password-reset', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email: normalizedEmail })
+	});
+
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		throw new Error(data.error || 'Failed to send reset email');
+	}
+}
+
 // Email Login — returns merged Dexie user (PB is source of truth for auth fields).
 export async function loginWithEmail(
 	email: string,

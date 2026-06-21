@@ -1,6 +1,6 @@
 <!-- src/routes/login/+page.svelte -->
 <script lang="ts">
-	import { loginWithEmail } from '$lib/db/pb';
+	import { loginWithEmail, requestPasswordReset } from '$lib/db/pb';
 	import { goto } from '$app/navigation';
 	import { db } from '$lib/db';
 	import type { User } from '$lib/db';
@@ -11,6 +11,11 @@
 	let password = $state('');
 	let isLoading = $state(false);
 	let error = $state('');
+	let showForgotPassword = $state(false);
+	let forgotEmail = $state('');
+	let forgotLoading = $state(false);
+	let forgotError = $state('');
+	let forgotSuccess = $state(false);
 	let showWelcome = $state(false);
 	let welcomeUser = $state<User | null>(null);
 
@@ -23,6 +28,35 @@
 		if (!user.forcePhotoUpdate) return false;
 		const photo = user.photo?.trim();
 		return !photo;
+	}
+
+	function openForgotPassword() {
+		forgotEmail = (email || '').trim().toLowerCase();
+		forgotError = '';
+		forgotSuccess = false;
+		showForgotPassword = true;
+	}
+
+	function closeForgotPassword() {
+		showForgotPassword = false;
+		forgotError = '';
+		forgotSuccess = false;
+	}
+
+	async function handleForgotPassword() {
+		forgotLoading = true;
+		forgotError = '';
+		forgotSuccess = false;
+
+		try {
+			await requestPasswordReset(forgotEmail);
+			forgotSuccess = true;
+		} catch (err: any) {
+			forgotError = err?.message || 'Failed to send reset email. Please try again.';
+			console.error('Password reset request failed:', err);
+		} finally {
+			forgotLoading = false;
+		}
 	}
 
 	async function handleLogin() {
@@ -91,51 +125,118 @@
 	{#if !showWelcome && !showForcePhoto}
 		<div class="login-card">
 			<h1 class="login-card__title">CapitalCity Windows</h1>
-			<p class="login-card__subtitle">Crew Login</p>
+			<p class="login-card__subtitle">
+				{showForgotPassword ? 'Reset Password' : 'Crew Login'}
+			</p>
 
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					handleLogin();
-				}}
-				class="login-form"
-			>
-				<div class="login-form__field">
-					<label for="login-email" class="login-form__label">Email</label>
-					<input
-						id="login-email"
-						type="email"
-						class="login-form__input"
-						bind:value={email}
-						placeholder="you@company.com"
-						autocomplete="email"
-						required
-					/>
-				</div>
+			{#if showForgotPassword}
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						handleForgotPassword();
+					}}
+					class="login-form"
+				>
+					<p class="login-forgot__intro">
+						Enter your email and we'll send you a link to reset your password.
+					</p>
 
-				<div class="login-form__field">
-					<label for="login-password" class="login-form__label">Password</label>
-					<input
-						id="login-password"
-						type="password"
-						class="login-form__input"
-						bind:value={password}
-						placeholder="••••••••"
-						autocomplete="current-password"
-						required
-					/>
-				</div>
+					<div class="login-form__field">
+						<label for="forgot-email" class="login-form__label">Email</label>
+						<input
+							id="forgot-email"
+							type="email"
+							class="login-form__input"
+							bind:value={forgotEmail}
+							placeholder="you@company.com"
+							autocomplete="email"
+							required
+							disabled={forgotLoading || forgotSuccess}
+						/>
+					</div>
 
-				{#if error}
-					<p class="login-form__error">{error}</p>
-				{/if}
+					{#if forgotError}
+						<p class="login-form__error">{forgotError}</p>
+					{/if}
 
-				<button type="submit" class="login-form__btn" disabled={isLoading}>
-					{isLoading ? 'Logging in...' : 'Login'}
-				</button>
-			</form>
+					{#if forgotSuccess}
+						<p class="login-forgot__success">
+							If an account exists for that email, you'll receive reset instructions shortly.
+							Check your inbox and spam folder.
+						</p>
+					{/if}
 
-			<p class="login-card__help">Sign in with your email and password.</p>
+					<button
+						type="submit"
+						class="login-form__btn"
+						disabled={forgotLoading || forgotSuccess}
+					>
+						{forgotLoading ? 'Sending...' : 'Send reset link'}
+					</button>
+
+					<button
+						type="button"
+						class="login-forgot__back"
+						onclick={closeForgotPassword}
+						disabled={forgotLoading}
+					>
+						Back to login
+					</button>
+				</form>
+			{:else}
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						handleLogin();
+					}}
+					class="login-form"
+				>
+					<div class="login-form__field">
+						<label for="login-email" class="login-form__label">Email</label>
+						<input
+							id="login-email"
+							type="email"
+							class="login-form__input"
+							bind:value={email}
+							placeholder="you@company.com"
+							autocomplete="email"
+							required
+						/>
+					</div>
+
+					<div class="login-form__field">
+						<div class="login-form__label-row">
+							<label for="login-password" class="login-form__label">Password</label>
+							<button
+								type="button"
+								class="login-form__forgot-link"
+								onclick={openForgotPassword}
+							>
+								Forgot password?
+							</button>
+						</div>
+						<input
+							id="login-password"
+							type="password"
+							class="login-form__input"
+							bind:value={password}
+							placeholder="••••••••"
+							autocomplete="current-password"
+							required
+						/>
+					</div>
+
+					{#if error}
+						<p class="login-form__error">{error}</p>
+					{/if}
+
+					<button type="submit" class="login-form__btn" disabled={isLoading}>
+						{isLoading ? 'Logging in...' : 'Login'}
+					</button>
+				</form>
+
+				<p class="login-card__help">Sign in with your email and password.</p>
+			{/if}
 		</div>
 	{/if}
 
@@ -213,6 +314,75 @@
 		margin-bottom: var(--space-2);
 		font-weight: var(--font-weight-medium);
 		color: var(--color-text-muted);
+	}
+
+	.login-form__label-row {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: var(--space-2);
+		margin-bottom: var(--space-2);
+	}
+
+	.login-form__label-row .login-form__label {
+		margin-bottom: 0;
+	}
+
+	.login-form__forgot-link {
+		border: none;
+		background: none;
+		padding: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-primary);
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.login-form__forgot-link:hover {
+		color: var(--color-primary-hover);
+	}
+
+	.login-forgot__intro {
+		margin: 0 0 var(--space-5);
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		line-height: 1.5;
+		text-align: left;
+	}
+
+	.login-forgot__success {
+		margin: var(--space-3) 0;
+		padding: var(--space-3);
+		border-radius: var(--radius-md);
+		background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+		color: var(--color-text);
+		font-size: var(--font-size-sm);
+		line-height: 1.5;
+		text-align: left;
+	}
+
+	.login-forgot__back {
+		display: block;
+		width: 100%;
+		margin-top: var(--space-4);
+		padding: var(--space-2);
+		border: none;
+		background: none;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.login-forgot__back:hover:not(:disabled) {
+		color: var(--color-text);
+	}
+
+	.login-forgot__back:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.login-form__input {

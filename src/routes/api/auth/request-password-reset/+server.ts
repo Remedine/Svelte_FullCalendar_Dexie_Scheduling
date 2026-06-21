@@ -22,7 +22,8 @@ export async function POST({ request }: { request: Request }) {
 	if (!pbRes.ok) {
 		const errText = await pbRes.text();
 		console.error('PB internal password reset request failed:', errText);
-		return json({ error: 'Failed to generate reset link' }, { status: 500 });
+		// Do not reveal whether the email exists (standard forgot-password behavior).
+		return json({ success: true });
 	}
 
 	const { link } = await pbRes.json();
