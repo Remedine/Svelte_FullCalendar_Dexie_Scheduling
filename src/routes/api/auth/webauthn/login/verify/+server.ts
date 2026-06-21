@@ -12,8 +12,12 @@ export async function POST({ request }: { request: Request }) {
 		const auth = await issueAuthTokenForUser(userId);
 		return json({ token: auth.token, record: auth.record });
 	} catch (err: any) {
-		console.error('[webauthn/login/verify]', err);
-		// Generic message — do not reveal whether email/passkey exists
-		return json({ error: 'Passkey sign-in failed. Try email and password instead.' }, { status: 401 });
+		const message = err?.message || String(err);
+		console.error('[webauthn/login/verify]', message);
+		const hint =
+			message.includes('Unknown passkey') || message.includes('not found')
+				? 'No passkey found for this account. Sign in with email, then add a passkey in Profile.'
+				: 'Passkey sign-in failed. Try email and password instead.';
+		return json({ error: hint }, { status: 401 });
 	}
 }

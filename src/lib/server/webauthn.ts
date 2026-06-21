@@ -8,6 +8,7 @@ import {
 	type VerifiedAuthenticationResponse,
 	type VerifiedRegistrationResponse
 } from '@simplewebauthn/server';
+import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
 
@@ -27,12 +28,18 @@ export type WebAuthnConfig = {
 	origin: string;
 };
 
+export function normalizeCredentialId(id: string): string {
+	return isoBase64URL.trimPadding(id);
+}
+
 export function getWebAuthnConfig(request: Request): WebAuthnConfig {
-	const origin =
-		request.headers.get('origin') ||
-		(request.headers.get('x-forwarded-proto') && request.headers.get('host')
-			? `${request.headers.get('x-forwarded-proto')}://${request.headers.get('host')}`
-			: `https://${request.headers.get('host') || 'localhost'}`);
+	const originHeader = request.headers.get('origin');
+	const proto = request.headers.get('x-forwarded-proto') || 'https';
+	const host =
+		request.headers.get('x-forwarded-host') ||
+		request.headers.get('host') ||
+		'localhost';
+	const origin = originHeader || `${proto}://${host}`;
 
 	const { hostname, origin: resolvedOrigin } = new URL(origin);
 
@@ -112,9 +119,10 @@ export async function findPasskeyByCredentialId(
 ): Promise<PasskeyRecord | null> {
 	try {
 		return await pbInternal<PasskeyRecord>('/api/internal/passkeys/by-credential', {
-			credentialId
+			credentialId: normalizeCredentialId(credentialId)
 		});
-	} catch {
+	} catch (err) {
+		console.error('[webauthn] passkey lookup failed:', err);
 		return null;
 	}
 }
@@ -129,7 +137,7 @@ export async function listPasskeysForUser(userId: string): Promise<PasskeyRecord
 export async function savePasskey(record: PasskeyRecord): Promise<void> {
 	await pbInternal('/api/internal/passkeys/save', {
 		userId: record.userId,
-		credentialId: record.credentialId,
+		credentialId: normalizeCredentialId(record.credentialId),
 		publicKey: record.publicKey,
 		counter: record.counter,
 		transports: record.transports || [],
@@ -138,11 +146,16 @@ export async function savePasskey(record: PasskeyRecord): Promise<void> {
 }
 
 export async function updatePasskeyCounter(credentialId: string, counter: number): Promise<void> {
-	await pbInternal('/api/internal/passkeys/update-counter', { credentialId, counter });
+	await pbInternal('/api/internal/passkeys/update-counter', {
+		credentialId: normalizeCredentialId(credentialId),
+		counter
+	});
 }
 
 export async function deletePasskey(credentialId: string): Promise<void> {
-	await pbInternal('/api/internal/passkeys/delete', { credentialId });
+	await pbInternal('/api/internal/passkeys/delete', {
+		credentialId: normalizeCredentialId(credentialId)
+	});
 }
 
 export async function issueAuthTokenForUser(userId: string): Promise<{
@@ -160,18 +173,13 @@ export async function findUserByEmail(email: string): Promise<{
 	name?: string;
 } | null> {
 	const normalized = email.trim().toLowerCase();
-	const filter = `(email='${normalized.replace(/'/g, "\\'")}')`;
-	const res = await fetch(
-		`${PUBLIC_PB_URL}/api/collections/users/records?filter=${encodeURIComponent(filter)}&perPage=1`,
-		{
-			headers: { 'X-Internal-Secret': INTERNAL_SECRET }
-		}
-	);
-	if (!res.ok) return null;
-	const data = await res.json();
-	const item = data.items?.[0];
-	if (!item) return null;
-	return item;
+	if (!normalized) return null;
+
+	try {
+		return await pbInternal('/api/internal/user-by-email', { email: normalized });
+	} catch {
+		return null;
+	}
 }
 
 export async function buildRegistrationOptions(
@@ -190,7 +198,7 @@ export async function buildRegistrationOptions(
 		userID: new TextEncoder().encode(user.id),
 		attestationType: 'none',
 		excludeCredentials: existing.map((pk) => ({
-			id: pk.credentialId,
+			id: normalizeCredentialId(pk.credentialId),
 			transports: pk.transports
 		})),
 		authenticatorSelection: {
@@ -236,7 +244,7 @@ export async function verifyRegistration(
 
 	await savePasskey({
 		userId: payload.userId,
-		credentialId: credential.id,
+		credentialId: normalizeCredentialId(credential.id),
 		publicKey: Buffer.from(credential.publicKey).toString('base64url'),
 		counter: credential.counter,
 		transports: credential.transports,
@@ -268,13 +276,12 @@ export async function buildAuthenticationOptions(request: Request, email: string
 
 	const passkeys = await listPasskeysForUser(user.id);
 	const config = getWebAuthnConfig(request);
-	const challenge = newChallenge();
 
 	const options = await generateAuthenticationOptions({
 		rpID: config.rpID,
 		userVerification: 'preferred',
 		allowCredentials: passkeys.map((pk) => ({
-			id: pk.credentialId,
+			id: normalizeCredentialId(pk.credentialId),
 			transports: pk.transports
 		}))
 	});
@@ -300,7 +307,8 @@ export async function verifyAuthentication(
 	const credentialId = (response as { id?: string })?.id;
 	if (!credentialId) throw new Error('Missing credential id');
 
-	const passkey = await findPasskeyByCredentialId(credentialId);
+	const normalizedCredentialId = normalizeCredentialId(credentialId);
+	const passkey = await findPasskeyByCredentialId(normalizedCredentialId);
 	if (!passkey) throw new Error('Unknown passkey');
 
 	if (payload.userId && passkey.userId !== payload.userId) {
@@ -315,9 +323,9 @@ export async function verifyAuthentication(
 		expectedRPID: config.rpID,
 		requireUserVerification: false,
 		credential: {
-			id: passkey.credentialId,
-			publicKey: Buffer.from(passkey.publicKey, 'base64url'),
-			counter: passkey.counter,
+			id: normalizeCredentialId(passkey.credentialId),
+			publicKey: isoBase64URL.toBuffer(passkey.publicKey),
+			counter: Math.max(0, Math.floor(passkey.counter)),
 			transports: passkey.transports
 		}
 	});

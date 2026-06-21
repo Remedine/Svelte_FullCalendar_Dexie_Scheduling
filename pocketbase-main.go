@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -210,6 +211,28 @@ func main() {
 			return nil
 		}
 
+		normalizeCredentialId := func(id string) string {
+			return strings.ReplaceAll(id, "=", "")
+		}
+
+		findPasskeyByCredentialId := func(app core.App, credentialId string) (*core.Record, error) {
+			normalized := normalizeCredentialId(credentialId)
+			record, err := app.FindFirstRecordByFilter(
+				"passkeys",
+				fmt.Sprintf("credentialId = '%s'", normalized),
+			)
+			if err == nil {
+				return record, nil
+			}
+			if normalized != credentialId {
+				return app.FindFirstRecordByFilter(
+					"passkeys",
+					fmt.Sprintf("credentialId = '%s'", credentialId),
+				)
+			}
+			return nil, err
+		}
+
 		se.Router.POST("/api/internal/request-verification", func(e *core.RequestEvent) error {
 			if err := checkSecret(e); err != nil {
 				return err
@@ -248,6 +271,29 @@ func main() {
 			}
 			link := fmt.Sprintf("%s/_/#/auth/confirm-password-reset/%s", pbPublicURL, token)
 			return e.JSON(http.StatusOK, map[string]string{"link": link})
+		})
+
+		se.Router.POST("/api/internal/user-by-email", func(e *core.RequestEvent) error {
+			if err := checkSecret(e); err != nil {
+				return err
+			}
+			var body struct {
+				Email string `json:"email"`
+			}
+			if err := e.BindBody(&body); err != nil {
+				return err
+			}
+			record, err := e.App.FindAuthRecordByEmail("users", strings.TrimSpace(body.Email))
+			if err != nil {
+				return apis.NewNotFoundError("user not found", err)
+			}
+			return e.JSON(http.StatusOK, map[string]any{
+				"id":        record.Id,
+				"email":     record.Email(),
+				"firstName": record.GetString("firstName"),
+				"lastName":  record.GetString("lastName"),
+				"name":      record.GetString("name"),
+			})
 		})
 
 		// Full user roster for admin Dexie sync (includes emails hidden from client list rules).
@@ -306,10 +352,7 @@ func main() {
 			if err := e.BindBody(&body); err != nil {
 				return err
 			}
-			record, err := e.App.FindFirstRecordByFilter(
-				"passkeys",
-				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
-			)
+			record, err := findPasskeyByCredentialId(e.App, body.CredentialId)
 			if err != nil {
 				return apis.NewNotFoundError("passkey not found", err)
 			}
@@ -379,10 +422,8 @@ func main() {
 			if err != nil {
 				return err
 			}
-			existing, findErr := e.App.FindFirstRecordByFilter(
-				"passkeys",
-				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
-			)
+			normalizedCredentialId := normalizeCredentialId(body.CredentialId)
+			existing, findErr := findPasskeyByCredentialId(e.App, body.CredentialId)
 			var rec *core.Record
 			if findErr != nil {
 				rec = core.NewRecord(col)
@@ -390,7 +431,7 @@ func main() {
 				rec = existing
 			}
 			rec.Set("userId", body.UserId)
-			rec.Set("credentialId", body.CredentialId)
+			rec.Set("credentialId", normalizedCredentialId)
 			rec.Set("publicKey", body.PublicKey)
 			rec.Set("counter", body.Counter)
 			rec.Set("transports", body.Transports)
@@ -412,10 +453,7 @@ func main() {
 			if err := e.BindBody(&body); err != nil {
 				return err
 			}
-			record, err := e.App.FindFirstRecordByFilter(
-				"passkeys",
-				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
-			)
+			record, err := findPasskeyByCredentialId(e.App, body.CredentialId)
 			if err != nil {
 				return apis.NewNotFoundError("passkey not found", err)
 			}
@@ -436,10 +474,7 @@ func main() {
 			if err := e.BindBody(&body); err != nil {
 				return err
 			}
-			record, err := e.App.FindFirstRecordByFilter(
-				"passkeys",
-				fmt.Sprintf("credentialId = '%s'", body.CredentialId),
-			)
+			record, err := findPasskeyByCredentialId(e.App, body.CredentialId)
 			if err != nil {
 				return apis.NewNotFoundError("passkey not found", err)
 			}

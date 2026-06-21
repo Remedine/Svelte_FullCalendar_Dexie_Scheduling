@@ -283,7 +283,7 @@
 			</form>
 
 			<p class="login-card__help">
-				Sign in with email and password{#if passkeysAvailable}, or use a passkey on this device{/if}.
+				Sign in with email and password{#if passkeysAvailable}, or use a passkey registered in Profile (not the same as quick-unlock PIN){/if}.
 			</p>
 			{/if}
 		</div>
