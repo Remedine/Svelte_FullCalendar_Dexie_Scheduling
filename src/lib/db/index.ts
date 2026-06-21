@@ -178,6 +178,12 @@ export interface User {
 	updatedAt: Date;
 }
 
+/** Durable session marker (IndexedDB) — survives iOS PWA localStorage eviction better than localStorage alone. */
+export interface AppSession {
+	id: 'current';
+	currentUserId: string;
+}
+
 export interface AppOptions {
 	id: string;
 	taxRate: number;
@@ -299,6 +305,7 @@ const db = new Dexie('CapitalCityWindows') as Dexie & {
 		import('$lib/notifications/crewSchedule').CrewNotificationPending,
 		'id'
 	>;
+	appSession: EntityTable<AppSession, 'id'>;
 };
 
 // )=- Bumped to version 21 (was 20) to force schema upgrade on all clients for the *assignedCrew
@@ -342,6 +349,32 @@ db.version(23).stores({
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
 	crewNotifications: 'id, jobId, scheduledFor, crewName'
 });
+
+// v24: durable session marker for PWA restore when localStorage is evicted
+db.version(24).stores({
+	clients: 'id, name, areaOfTown, email, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName',
+	appSession: 'id'
+});
+
+export async function persistSessionUserId(userId: string | null): Promise<void> {
+	if (userId) {
+		await db.appSession.put({ id: 'current', currentUserId: userId });
+	} else {
+		await db.appSession.delete('current').catch(() => {});
+	}
+}
+
+export async function readPersistedSessionUserId(): Promise<string | null> {
+	const row = await db.appSession.get('current');
+	return row?.currentUserId?.trim() || null;
+}
 
 /**
  * Safe query for jobs assigned to a specific crew member (by the string name stored in assignedCrew arrays).

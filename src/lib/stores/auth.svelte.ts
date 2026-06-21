@@ -7,6 +7,108 @@ export const auth = $state({
 	loading: true
 });
 
+async function resolveUserFromPbSession(db: typeof import('$lib/db').db): Promise<any | null> {
+	const { pb, refreshPbAuthIfNeeded } = await import('$lib/db/pb');
+
+	if (!pb.authStore.token) return null;
+
+	await refreshPbAuthIfNeeded();
+
+	const m = pb.authStore.model;
+	if (!m?.id && !m?.email) return null;
+
+	let user =
+		(m.id && (await db.users.where('pbId').equals(m.id).first())) ||
+		(m.id && (await db.users.get(m.id))) ||
+		null;
+
+	if (!user && m.email) {
+		user = await db.users.where('email').equalsIgnoreCase(m.email).first();
+	}
+
+	if (!user && m) {
+		user = {
+			id: m.id,
+			pbId: m.id,
+			email: m.email || '',
+			name: m.name || '',
+			firstName: m.firstName || '',
+			lastName: m.lastName || '',
+			role: m.role || 'crew',
+			active: m.active ?? true,
+			verified: !!m.verified,
+			forcePhotoUpdate: !!m.forcePhotoUpdate,
+			photo: m.photo || undefined,
+			createdAt: new Date(m.created || Date.now()),
+			updatedAt: new Date(m.updated || Date.now())
+		};
+		await db.users.put(user);
+	}
+
+	return user;
+}
+
+/** Restore session from Dexie + PocketBase (called once on client startup). */
+export async function restoreSession(): Promise<void> {
+	let user: any = null;
+
+	try {
+		const { db, persistSessionUserId, readPersistedSessionUserId } = await import('$lib/db');
+		const { refreshPbAuthIfNeeded, registerAuthRefreshOnVisibility } = await import('$lib/db/pb');
+
+		registerAuthRefreshOnVisibility();
+
+		const savedId =
+			localStorage.getItem('currentUserId') || (await readPersistedSessionUserId());
+
+		if (savedId) {
+			user = await db.users.get(savedId);
+		}
+
+		if (!user) {
+			try {
+				user = await resolveUserFromPbSession(db);
+			} catch (pbErr) {
+				console.warn('[auth] PB fallback during restore failed', pbErr);
+			}
+		}
+
+		if (user && user.active !== false) {
+			auth.currentUser = user;
+			auth.isAuthenticated = true;
+
+			if (user.id) {
+				const id = String(user.id);
+				localStorage.setItem('currentUserId', id);
+				await persistSessionUserId(id);
+			}
+
+			// Keep API/realtime working after a cold PWA open with an expired JWT.
+			void refreshPbAuthIfNeeded();
+		} else {
+			auth.currentUser = null;
+			auth.isAuthenticated = false;
+
+			try {
+				const { pb } = await import('$lib/db/pb');
+				if (pb.authStore.isValid) {
+					pb.authStore.clear();
+				}
+				localStorage.removeItem('currentUserId');
+				await persistSessionUserId(null);
+			} catch {
+				localStorage.removeItem('currentUserId');
+			}
+		}
+	} catch (e) {
+		console.warn('[auth] restore failed', e);
+		auth.currentUser = null;
+		auth.isAuthenticated = false;
+	} finally {
+		auth.loading = false;
+	}
+}
+
 export async function logout() {
 	// )=- Unified logout: clears central store (used by UI/guards) + localStorage.
 	// Also clears PocketBase authStore and wipes local Dexie data (jobs, clients, invoices, queue).
@@ -22,7 +124,7 @@ export async function logout() {
 	} catch {}
 
 	try {
-		const { db, processSyncQueue } = await import('$lib/db');
+		const { db, processSyncQueue, persistSessionUserId } = await import('$lib/db');
 		if (navigator.onLine) {
 			try {
 				await processSyncQueue();
@@ -38,6 +140,7 @@ export async function logout() {
 		}
 		await db.delete();
 		await db.open();
+		await persistSessionUserId(null);
 	} catch (err) {
 		console.warn('[auth] Failed to clear local Dexie data on logout', err);
 	}
@@ -48,9 +151,12 @@ export function setCurrentUser(user: any | null) {
 	auth.isAuthenticated = !!user;
 
 	if (user?.id) {
-		localStorage.setItem('currentUserId', user.id.toString());
+		const id = user.id.toString();
+		localStorage.setItem('currentUserId', id);
+		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(id));
 	} else {
 		localStorage.removeItem('currentUserId');
+		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(null));
 	}
 }
 
@@ -59,93 +165,7 @@ export function setCurrentUser(user: any | null) {
 // find the exact savedId after pullUsersFromServer / cleanupDuplicateUsers deleted a
 // duplicate record, causing loading=false + !authenticated → unwanted redirect to login.
 if (browser) {
-	(async () => {
-		let user: any = null;
-		const savedId = localStorage.getItem('currentUserId');
-
-		try {
-			const { db } = await import('$lib/db');
-
-			if (savedId) {
-				user = await db.users.get(savedId);
-			}
-
-			if (!user) {
-				// Fallback: use PocketBase session (cookie/auth token is the real source of "logged in")
-				// as the truth on refresh. Lookup by pbId or email so we survive id changes from dedup.
-				try {
-					const { pb } = await import('$lib/db/pb');
-					if (pb.authStore.isValid) {
-						const m = pb.authStore.model;
-						if (m?.id) {
-							user =
-								(await db.users.where('pbId').equals(m.id).first()) ||
-								(await db.users.get(m.id));
-						}
-						if (!user && m?.email) {
-							user = await db.users.where('email').equalsIgnoreCase(m.email).first();
-						}
-						// As last resort, synthesize a minimal user from PB so guard doesn't redirect.
-						// The next pull on calendar load will enrich the Dexie record.
-						if (!user && m) {
-							user = {
-								id: m.id,
-								pbId: m.id,
-								email: m.email || '',
-								name: m.name || '',
-								firstName: m.firstName || '',
-								lastName: m.lastName || '',
-								role: m.role || 'crew',
-								active: m.active ?? true,
-								verified: !!m.verified,
-								forcePhotoUpdate: !!m.forcePhotoUpdate,
-								photo: m.photo || undefined,
-								createdAt: new Date(m.created || Date.now()),
-								updatedAt: new Date(m.updated || Date.now())
-							};
-							// Persist it so future restores and UI have a Dexie record
-							await db.users.put(user);
-						}
-					}
-				} catch (pbErr) {
-					// PB not available yet or error — fall through
-					console.warn('[auth] PB fallback during restore failed', pbErr);
-				}
-			}
-
-			if (user && user.active !== false) {
-				auth.currentUser = user;
-				auth.isAuthenticated = true;
-				// Ensure localStorage points at the surviving Dexie id (important after dedups)
-				if (user.id) {
-					localStorage.setItem('currentUserId', String(user.id));
-				}
-			} else {
-				auth.currentUser = null;
-				auth.isAuthenticated = false;
-
-				// When we reach here it means either no user record was found, or the record has active=false
-				// (deactivated via PB admin or the app's Crew management).
-				// In the inactive case we must clear any lingering PB token so the account is fully unusable
-				// until reactivated. We also remove the currentUserId to avoid the restore loop.
-				try {
-					const { pb } = await import('$lib/db/pb');
-					if (pb.authStore.isValid) {
-						pb.authStore.clear();
-					}
-					localStorage.removeItem('currentUserId');
-				} catch {
-					localStorage.removeItem('currentUserId');
-				}
-			}
-		} catch (e) {
-			console.warn('[auth] restore failed', e);
-			auth.currentUser = null;
-			auth.isAuthenticated = false;
-		} finally {
-			auth.loading = false;
-		}
-	})();
+	void restoreSession();
 } else {
 	auth.loading = false;
 	auth.isAuthenticated = false;

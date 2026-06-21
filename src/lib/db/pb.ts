@@ -31,6 +31,34 @@ if (!PUBLIC_POCKETBASE_URL) {
 
 export const pb = new PocketBase(PUBLIC_POCKETBASE_URL);
 
+let visibilityRefreshBound = false;
+
+/** Refresh an expired JWT using the stored token (PocketBase auth-refresh). */
+export async function refreshPbAuthIfNeeded(): Promise<boolean> {
+	if (!pb.authStore.token) return false;
+	if (pb.authStore.isValid) return true;
+	if (!navigator.onLine) return false;
+
+	try {
+		await pb.collection('users').authRefresh();
+		return pb.authStore.isValid;
+	} catch (err) {
+		console.warn('[auth] PocketBase token refresh failed', err);
+		return false;
+	}
+}
+
+/** Re-validate the PB session when the PWA returns to the foreground. */
+export function registerAuthRefreshOnVisibility(): void {
+	if (visibilityRefreshBound || typeof document === 'undefined') return;
+	visibilityRefreshBound = true;
+
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState !== 'visible' || !navigator.onLine) return;
+		void refreshPbAuthIfNeeded();
+	});
+}
+
 export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
