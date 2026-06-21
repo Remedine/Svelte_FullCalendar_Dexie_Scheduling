@@ -31,7 +31,76 @@ if (!PUBLIC_POCKETBASE_URL) {
 
 export const pb = new PocketBase(PUBLIC_POCKETBASE_URL);
 
+const AUTH_TIMEOUT_MS = 30_000;
+const DEXIE_OP_TIMEOUT_MS = 8_000;
+
 let visibilityRefreshBound = false;
+let postLoginSyncInFlight: Promise<void> | null = null;
+
+async function withTimeout<T>(
+	promise: Promise<T>,
+	ms: number,
+	message: string
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(message)), ms);
+	});
+	try {
+		return await Promise.race([promise, timeout]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** Best-effort Dexie cleanup — never block login if IndexedDB is blocked (e.g. another tab). */
+async function safeLoginUserDedup(keepId: string, opts: { pbId?: string; email?: string }): Promise<void> {
+	try {
+		await withTimeout(
+			(async () => {
+				await deleteDuplicateUserRows(keepId, opts);
+				await cleanupDuplicateUsers();
+			})(),
+			DEXIE_OP_TIMEOUT_MS,
+			'Local profile cleanup timed out'
+		);
+	} catch (err) {
+		console.warn('[login] Skipping user dedup (non-fatal):', err);
+	}
+}
+
+async function runPostLoginSync(localUser: User): Promise<void> {
+	try {
+		await pullJobsFromServer();
+		await pullClientsFromServer();
+		await pullInvoicesFromServer();
+		if (localUser.role === 'admin') {
+			await pullUsersFromServer();
+		}
+		if (navigator.onLine) {
+			await processSyncQueue();
+		}
+
+		const fresh = (await db.users.get(localUser.id!)) || localUser;
+		setCurrentUser(fresh);
+		console.log('✅ Background login sync complete');
+
+		const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
+			'$lib/db/realtime'
+		);
+		disconnectJobsRealtime();
+		scheduleJobsRealtimeReconnect(400);
+	} catch (err) {
+		console.warn('[login] Background sync failed (will retry on next page load):', err);
+	}
+}
+
+function schedulePostLoginSync(localUser: User): void {
+	if (postLoginSyncInFlight) return;
+	postLoginSyncInFlight = runPostLoginSync(localUser).finally(() => {
+		postLoginSyncInFlight = null;
+	});
+}
 
 /** Refresh an expired JWT using the stored token (PocketBase auth-refresh). */
 export async function refreshPbAuthIfNeeded(): Promise<boolean> {
@@ -104,35 +173,18 @@ async function completeLoginFromPbRecord(
 
 	const localUser = mergeAuthUserIntoLocal(pbUser, normalizedEmail, existing);
 	await db.users.put(localUser);
-	await deleteDuplicateUserRows(localUser.id!, {
+	await safeLoginUserDedup(localUser.id!, {
 		pbId: localUser.pbId,
 		email: localUser.email
 	});
-	await cleanupDuplicateUsers();
 
 	setCurrentUser(localUser);
 	console.log('✅ PB user synced to Dexie:', localUser.name, 'pbId:', localUser.pbId);
 
-	await pullJobsFromServer();
-	await pullClientsFromServer();
-	await pullInvoicesFromServer();
-	if (localUser.role === 'admin') {
-		await pullUsersFromServer();
-	}
+	// Do not block the login UI on full roster sync — especially slow on mobile networks.
+	schedulePostLoginSync(localUser);
 
-	if (navigator.onLine) {
-		await processSyncQueue();
-	}
-
-	const fresh = (await db.users.get(localUser.id!)) || localUser;
-	setCurrentUser(fresh);
-	console.log('✅ Login complete + sync queue processed');
-
-	const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import('$lib/db/realtime');
-	disconnectJobsRealtime();
-	scheduleJobsRealtimeReconnect(400);
-
-	return { authData: { record: pbUser, token }, localUser: fresh };
+	return { authData: { record: pbUser, token }, localUser };
 }
 
 // Email Login — returns merged Dexie user (PB is source of truth for auth fields).
@@ -142,7 +194,11 @@ export async function loginWithEmail(
 ): Promise<{ authData: { record: PbUserRecord; token: string }; localUser: User }> {
 	try {
 		const normalizedEmail = (email || '').trim().toLowerCase();
-		const authData = await pb.collection('users').authWithPassword(normalizedEmail, password);
+		const authData = await withTimeout(
+			pb.collection('users').authWithPassword(normalizedEmail, password),
+			AUTH_TIMEOUT_MS,
+			'Sign-in timed out. Check your connection and try again.'
+		);
 		return completeLoginFromPbRecord(
 			authData.record as PbUserRecord,
 			normalizedEmail,

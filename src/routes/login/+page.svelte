@@ -87,18 +87,30 @@
 	async function handlePasskeyLogin() {
 		isLoading = true;
 		error = '';
+
+		const loginUiTimeout = setTimeout(() => {
+			if (isLoading) {
+				isLoading = false;
+				error = 'Passkey sign-in is taking too long. Try email and password instead.';
+			}
+		}, 45_000);
+
 		try {
 			const normalizedEmail = (email || '').trim().toLowerCase();
 			if (!normalizedEmail) {
+				clearTimeout(loginUiTimeout);
 				error = 'Enter your email, then use passkey sign-in';
+				isLoading = false;
 				return;
 			}
 			const { localUser } = await loginWithPasskey(normalizedEmail);
+			clearTimeout(loginUiTimeout);
 			email = normalizedEmail;
+			isLoading = false;
 			await continueAfterAuth(localUser);
 		} catch (err: any) {
+			clearTimeout(loginUiTimeout);
 			error = err?.message || 'Passkey sign-in failed';
-		} finally {
 			isLoading = false;
 		}
 	}
@@ -107,10 +119,20 @@
 		isLoading = true;
 		error = '';
 
+		const loginUiTimeout = setTimeout(() => {
+			if (isLoading) {
+				isLoading = false;
+				error =
+					'Login is taking too long. Check your mobile connection and try again.';
+			}
+		}, 45_000);
+
 		try {
 			const normalizedEmail = (email || '').trim().toLowerCase();
 			const { localUser } = await loginWithEmail(normalizedEmail, password);
+			clearTimeout(loginUiTimeout);
 			email = normalizedEmail;
+			isLoading = false;
 
 			// Separate gates:
 			// - !verified → WelcomeModal (temp password → real password + verified flag)
@@ -119,10 +141,10 @@
 			// when PB has not yet marked the account verified (temp-password first login).
 			await continueAfterAuth(localUser);
 		} catch (err: any) {
+			clearTimeout(loginUiTimeout);
 			const pbData = err?.response?.data;
 			error = pbData?.password?.message || pbData?.email?.message || err?.message || 'Login failed';
 			console.error('Login attempt failed:', err);
-		} finally {
 			isLoading = false;
 		}
 	}
