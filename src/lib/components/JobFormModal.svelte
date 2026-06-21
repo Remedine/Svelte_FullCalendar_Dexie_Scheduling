@@ -208,6 +208,47 @@
 		return `${year}-${month}-${day}T${hours}:${minutes}`;
 	}
 
+	function formatDurationLabel(start: Date, end: Date): string {
+		const totalMins = Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+		const hours = Math.floor(totalMins / 60);
+		const mins = totalMins % 60;
+		if (hours === 0) return `${mins} min`;
+		if (mins === 0) return `${hours} hr`;
+		return `${hours} hr ${mins} min`;
+	}
+
+	const durationLabel = $derived.by(() => {
+		const start =
+			currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start);
+		const end = currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end);
+		if (isNaN(start.getTime()) || isNaN(end.getTime())) return '—';
+		return formatDurationLabel(start, end);
+	});
+
+	const activeDurationHours = $derived.by(() => {
+		const start =
+			currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start);
+		const end = currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end);
+		if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+		const hours = (end.getTime() - start.getTime()) / (60 * 60 * 1000);
+		return Math.round(hours * 4) / 4;
+	});
+
+	function adjustDurationByMinutes(deltaMinutes: number) {
+		const start =
+			currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start);
+		const end = currentJob.end instanceof Date ? currentJob.end : new Date(currentJob.end);
+		const minEnd = new Date(start.getTime() + 15 * 60 * 1000);
+		const newEnd = new Date(end.getTime() + deltaMinutes * 60 * 1000);
+		currentJob.end = newEnd < minEnd ? minEnd : newEnd;
+	}
+
+	function setDurationHours(hours: number) {
+		const start =
+			currentJob.start instanceof Date ? currentJob.start : new Date(currentJob.start);
+		currentJob.end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+	}
+
 	function addBillableItem() {
 		currentJob.billableItems = [
 			...currentJob.billableItems,
@@ -446,6 +487,42 @@
 								>■ {option.label}</option>
 							{/each}
 						</select>
+					</div>
+				</div>
+
+				<!-- Duration quick-adjust: easier than drag-resize on mobile -->
+				<div class="new-job-modal__duration">
+					<span class="new-job-modal__label label">Duration</span>
+					<div class="new-job-modal__duration-controls">
+						<button
+							type="button"
+							class="new-job-modal__duration-btn button"
+							aria-label="Shorten by 30 minutes"
+							onclick={() => adjustDurationByMinutes(-30)}
+						>
+							−30m
+						</button>
+						<span class="new-job-modal__duration-value" aria-live="polite">{durationLabel}</span>
+						<button
+							type="button"
+							class="new-job-modal__duration-btn button"
+							aria-label="Extend by 30 minutes"
+							onclick={() => adjustDurationByMinutes(30)}
+						>
+							+30m
+						</button>
+					</div>
+					<div class="new-job-modal__duration-presets" role="group" aria-label="Duration presets">
+						{#each [1, 2, 3, 4] as hours (hours)}
+							<button
+								type="button"
+								class="new-job-modal__duration-preset button"
+								class:new-job-modal__duration-preset--active={activeDurationHours === hours}
+								onclick={() => setDurationHours(hours)}
+							>
+								{hours}h
+							</button>
+						{/each}
 					</div>
 				</div>
 
@@ -733,6 +810,63 @@
 		display: grid;
 		grid-template-columns: 1fr;
 		gap: var(--space-4);
+	}
+
+	.new-job-modal__duration {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-surface-alt);
+	}
+
+	.new-job-modal__duration-controls {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-3);
+	}
+
+	.new-job-modal__duration-btn {
+		min-width: 64px;
+		min-height: 44px;
+		padding: var(--space-2) var(--space-3);
+		font-weight: var(--font-weight-semibold);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+	}
+
+	.new-job-modal__duration-value {
+		min-width: 6rem;
+		text-align: center;
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+
+	.new-job-modal__duration-presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		justify-content: center;
+	}
+
+	.new-job-modal__duration-preset {
+		min-width: 52px;
+		min-height: 40px;
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		color: var(--color-text-muted);
+	}
+
+	.new-job-modal__duration-preset--active {
+		border-color: var(--color-primary);
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+		font-weight: var(--font-weight-semibold);
 	}
 
 	/* .new-job-modal__label now relies entirely on the .label primitive from globals.css */

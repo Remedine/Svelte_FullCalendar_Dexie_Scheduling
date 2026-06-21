@@ -582,6 +582,8 @@
 				nowIndicator: true,
 				expandRows: false,
 				editable: true,
+				// On mobile, allow resizing from both top and bottom edges — doubles the touch targets.
+				eventResizableFromStart: isMobile,
 				dragScroll: true,   /* enable auto-scroll of the time grid when dragging an event near top/bottom edges on mobile */
 				eventDragMinDistance: 10,
 				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
@@ -619,6 +621,16 @@
 
 					// Only create the drag handle once per event element (idempotent).
 					// Previously this + avatars were recreated on every refetch, contributing to "refreshing" feel and memory churn.
+					// Mobile time-grid: visible bottom grip so users know where to drag after long-press.
+					const isTimeGrid =
+						info.view.type === 'timeGridDay' || info.view.type === 'timeGridWeek';
+					if (isMobile && isTimeGrid && !info.el.querySelector('.fc-event__resize-grip')) {
+						const grip = document.createElement('div');
+						grip.className = 'fc-event__resize-grip';
+						grip.setAttribute('aria-hidden', 'true');
+						info.el.appendChild(grip);
+					}
+
 					if (!info.el.querySelector('.fc-event__drag-handle')) {
 						const handle = document.createElement('div');
 						handle.className = 'fc-event__drag-handle';
@@ -1550,21 +1562,48 @@
 		}
 
 		/* Touch-friendly event resizing on mobile.
-		   FullCalendar supports changing event duration (length) on touch devices via:
-		     1. Long-press the event (uses the eventLongPressDelay we set to 280ms).
-		     2. Then drag the resize handle at the bottom of the event up/down.
-		   This calls our eventResize handler which does optimistic update + updateJobDates.
-		   See https://fullcalendar.io/docs/event-dragging-resizing (Touch Support section).
-		   By default the resizer is very small, making it hard to target on touch.
-		   We enlarge it here + add subtle visual feedback, similar to how we improved the drag handle.
+		   FullCalendar flow: long-press (280ms) → drag top or bottom resize edge.
+		   Crew avatars move to top-left so the bottom edge stays clear for resizing.
 		*/
+		:global(.fc-timegrid-event .fc-event__crew-avatars) {
+			top: 3px;
+			bottom: auto;
+			left: 3px;
+			right: auto;
+		}
+
+		:global(.fc-timegrid-event .fc-event-title) {
+			padding-bottom: 10px;
+			padding-top: 28px;
+		}
+
 		:global(.fc-event-resizer) {
-			height: 22px; /* significantly larger touch target than the default ~4-8px */
-			bottom: -2px;
-			background-color: rgba(255, 255, 255, 0.3);
+			height: 44px;
+			z-index: 20;
+			background-color: rgba(255, 255, 255, 0.4);
+			border-radius: 4px;
+		}
+
+		:global(.fc-event-resizer-end) {
+			bottom: -6px;
+		}
+
+		:global(.fc-event-resizer-start) {
+			top: -6px;
+		}
+
+		:global(.fc-event__resize-grip) {
+			position: absolute;
+			bottom: 6px;
+			left: 50%;
+			transform: translateX(-50%);
+			width: 40px;
+			height: 5px;
 			border-radius: 3px;
-			/* Make sure it doesn't get hidden by our bottom avatars */
-			z-index: 5;
+			background: rgba(255, 255, 255, 0.9);
+			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+			pointer-events: none;
+			z-index: 6;
 		}
 	}
 
