@@ -7,6 +7,9 @@ import {
 	getUserPhotoSrc,
 	getJobsForRange,
 	getUpcomingJobs,
+	updateJobDates,
+	repairJobDateFields,
+	coerceJobDate,
 	getInvoiceForJob,
 	getInvoicesForClient,
 	getPaginatedJobsForClient,
@@ -282,6 +285,105 @@ describe('Dexie-backed query helpers (smoke with fake-indexeddb)', () => {
 		// Explicit includeCancelled
 		const withCancelled = await getJobsForRange(rangeStart, rangeEnd, true);
 		expect(withCancelled.map((j) => j.id)).toContain('job-cancelled');
+	});
+
+	it('getJobsForRange finds jobs after drag-and-drop even when start was stored as ISO string', async () => {
+		const now = new Date();
+		const movedStart = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+		const movedEnd = new Date(movedStart.getTime() + 2 * 60 * 60 * 1000);
+
+		await db.jobs.add({
+			id: 'job-dragged',
+			pbId: 'job-dragged',
+			clientId: 'client-1',
+			title: 'Dragged Job',
+			// Simulate legacy safeClone write that stringified the indexed start field.
+			start: movedStart.toISOString() as unknown as Date,
+			end: movedEnd.toISOString() as unknown as Date,
+			assignedCrew: [],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: '',
+			createdAt: now,
+			updatedAt: now
+		} as Job);
+
+		const rangeStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+		const rangeEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+		const results = await getJobsForRange(rangeStart, rangeEnd);
+		expect(results.map((j) => j.id)).toContain('job-dragged');
+		expect(coerceJobDate(results[0].start)?.toISOString()).toBe(movedStart.toISOString());
+	});
+
+	it('updateJobDates stores Date objects in Dexie so calendar reloads find moved jobs', async () => {
+		const now = new Date();
+		const originalStart = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+		const originalEnd = new Date(originalStart.getTime() + 2 * 60 * 60 * 1000);
+
+		await db.jobs.add({
+			id: 'job-move-me',
+			pbId: 'job-move-me',
+			clientId: 'client-1',
+			title: 'Move Me',
+			start: originalStart,
+			end: originalEnd,
+			assignedCrew: [],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: '',
+			createdAt: now,
+			updatedAt: now
+		} as Job);
+
+		const newStart = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+		const newEnd = new Date(newStart.getTime() + 2 * 60 * 60 * 1000);
+
+		await updateJobDates('job-move-me', newStart, newEnd);
+
+		const stored = await db.jobs.get('job-move-me');
+		expect(stored?.start).toBeInstanceOf(Date);
+		expect((stored?.start as Date).toISOString()).toBe(newStart.toISOString());
+
+		const rangeStart = new Date(now.getTime());
+		const rangeEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+		const results = await getJobsForRange(rangeStart, rangeEnd);
+		expect(results.map((j) => j.id)).toContain('job-move-me');
+	});
+
+	it('repairJobDateFields rewrites legacy ISO-string date fields back to Date', async () => {
+		const now = new Date();
+		await db.jobs.add({
+			id: 'job-repair',
+			clientId: 'client-1',
+			title: 'Repair Me',
+			start: now.toISOString() as unknown as Date,
+			end: now.toISOString() as unknown as Date,
+			assignedCrew: [],
+			status: 'scheduled',
+			billableItems: [],
+			subtotal: 0,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 0,
+			areaOfTown: '',
+			createdAt: now,
+			updatedAt: now
+		} as Job);
+
+		const fixed = await repairJobDateFields();
+		expect(fixed).toBe(1);
+
+		const stored = await db.jobs.get('job-repair');
+		expect(stored?.start).toBeInstanceOf(Date);
 	});
 
 	it('getUpcomingJobs excludes cancelled and only returns future jobs', async () => {

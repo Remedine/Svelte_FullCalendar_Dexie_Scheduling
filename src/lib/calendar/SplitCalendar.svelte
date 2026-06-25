@@ -5,7 +5,7 @@
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs } from '$lib/db/index';
+	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs, repairJobDateFields } from '$lib/db/index';
 	import { pullJobsFromServer, applyServerJobRecord, pb } from '$lib/db/pb';
 	import { onJobsRealtime } from '$lib/db/realtime';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
@@ -423,6 +423,7 @@
 		const end = new Date();
 		end.setMonth(end.getMonth() + 2);
 
+		await repairJobDateFields();
 		jobs = await getJobsForRange(start, end, includeCancelled);
 	}
 

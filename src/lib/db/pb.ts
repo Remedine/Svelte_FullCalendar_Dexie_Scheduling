@@ -71,6 +71,8 @@ async function safeLoginUserDedup(keepId: string, opts: { pbId?: string; email?:
 
 async function runPostLoginSync(localUser: User): Promise<void> {
 	try {
+		const { repairJobDateFields } = await import('$lib/db');
+		await repairJobDateFields();
 		await pullJobsFromServer();
 		await pullClientsFromServer();
 		await pullInvoicesFromServer();

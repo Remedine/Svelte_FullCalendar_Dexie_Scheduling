@@ -56,13 +56,8 @@ export default defineConfig({
 			transformIndexHtml: {
 				order: 'post',
 				handler(html) {
-					let out = html.replace(
-						/<link([^>]*?)rel=["'](modulepreload|preload)["']([^>]*?)>/gi,
-						(match, before, rel, after) => {
-							if (/crossorigin/i.test(before) || /crossorigin/i.test(after)) return match;
-							return `<link${before}rel="${rel}" crossorigin="anonymous"${after}>`;
-						}
-					);
+					// Do not add crossorigin to modulepreload — same-origin modules load without it.
+					let out = html;
 					// Font preloads require crossorigin to avoid CORS + warning.
 					out = out.replace(
 						/<link([^>]*?)rel=["']preload["']([^>]*?)as=["']font["']([^>]*?)>/gi,

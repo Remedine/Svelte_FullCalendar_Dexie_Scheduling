@@ -6,13 +6,18 @@
 		if (!browser) return;
 
 		const fixPreloadLinks = () => {
-			document
-				.querySelectorAll('link[rel="modulepreload"], link[rel="preload"]')
-				.forEach((link) => {
-					if (!link.getAttribute('crossorigin')) {
-						link.setAttribute('crossorigin', 'anonymous');
-					}
-				});
+			document.querySelectorAll('link[rel="modulepreload"]').forEach((link) => {
+				// Same-origin module scripts load without crossorigin; preloads must match or the browser
+				// warns "request credentials mode does not match" and discards the preload.
+				if (link.hasAttribute('crossorigin')) {
+					link.removeAttribute('crossorigin');
+				}
+			});
+			document.querySelectorAll('link[rel="preload"][as="font"]').forEach((link) => {
+				if (!link.getAttribute('crossorigin')) {
+					link.setAttribute('crossorigin', 'anonymous');
+				}
+			});
 		};
 
 		fixPreloadLinks();

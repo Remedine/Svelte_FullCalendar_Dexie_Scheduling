@@ -75,6 +75,60 @@ export function safeClone<T>(obj: T): T {
 	}
 }
 
+const JOB_DATE_FIELDS = ['start', 'end', 'createdAt', 'updatedAt', 'cancelledAt'] as const;
+
+/** Coerce PocketBase / Dexie / ISO-string values into a valid Date (or undefined). */
+export function coerceJobDate(
+	value: Date | string | number | null | undefined
+): Date | undefined {
+	if (value == null) return undefined;
+	if (value instanceof Date) return isNaN(value.getTime()) ? undefined : value;
+	const d = new Date(value);
+	return isNaN(d.getTime()) ? undefined : d;
+}
+
+/** Normalize job date fields to Date instances for FullCalendar + Dexie consumers. */
+export function normalizeJobDates(job: Job): Job {
+	const out = { ...job };
+	for (const field of JOB_DATE_FIELDS) {
+		const coerced = coerceJobDate(job[field]);
+		if (coerced) (out as Record<string, unknown>)[field] = coerced;
+	}
+	return out;
+}
+
+/**
+ * Build a Dexie patch that keeps Date instances on indexed date fields.
+ * safeClone stringifies dates (ISO), which breaks Dexie's `start` index and between()/aboveOrEqual() queries.
+ * Use safeClone only for sync-queue payloads destined for PocketBase.
+ */
+function dexieJobPatch(patch: Partial<Job>): Partial<Job> {
+	const out: Partial<Job> = { ...patch };
+	for (const field of JOB_DATE_FIELDS) {
+		if (patch[field] != null) {
+			const coerced = coerceJobDate(patch[field]);
+			if (coerced) (out as Record<string, unknown>)[field] = coerced;
+		}
+	}
+	return out;
+}
+
+/** Rewrite any legacy ISO-string date fields back to Date objects in Dexie (one row at a time). */
+export async function repairJobDateFields(): Promise<number> {
+	const all = await db.jobs.toArray();
+	let fixed = 0;
+	for (const job of all) {
+		const needsFix = JOB_DATE_FIELDS.some((field) => {
+			const val = job[field];
+			return val != null && !(val instanceof Date);
+		});
+		if (!needsFix) continue;
+		await db.jobs.put(normalizeJobDates(job));
+		fixed++;
+	}
+	return fixed;
+}
+
 // )=- Helper to convert data URL (from camera FileReader) back to Blob for proper PocketBase file field upload.
 // PB file fields (like 'photo' on users) expect Blob/File in the update payload, not raw base64 data URLs.
 // Without this, we get "validation_invalid_file" 400 on photo updates from profile page.
@@ -516,7 +570,7 @@ export async function createJob(jobData: any): Promise<string> {
 	const optionsRecord = await db.options.get('1');
 	const taxRate = normalizeTaxRateToPercent(optionsRecord?.taxRate);
 
-	const newJob = safeClone({
+	const newJob: Job = {
 		id: newId,
 		clientId: realClientId,
 		title: String(jobData.title),
@@ -535,7 +589,7 @@ export async function createJob(jobData: any): Promise<string> {
 		taxRate,
 		taxAmount: jobData.taxAmount || 0,
 		totalAmount: jobData.totalAmount || 0
-	});
+	};
 
 	const id = await db.jobs.add(newJob);
 	console.log(`✅ Job created locally (optimistic): ${id}`);
@@ -544,7 +598,7 @@ export async function createJob(jobData: any): Promise<string> {
 		type: 'create',
 		collection: 'jobs',
 		recordId: String(id),
-		data: newJob
+		data: safeClone(newJob)
 	});
 
 	if (navigator.onLine) await processSyncQueue();
@@ -570,8 +624,8 @@ export async function updateJob(
 		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId);
 	}
 
-	const safeUpdates = safeClone({ ...resolvedUpdates, updatedAt: new Date() });
-	await db.jobs.update(jobId, safeUpdates);
+	const dexieUpdates = dexieJobPatch({ ...resolvedUpdates, updatedAt: new Date() });
+	await db.jobs.update(jobId, dexieUpdates);
 
 	const updatedJob = await db.jobs.get(jobId);
 	if (updatedJob) {
@@ -579,7 +633,7 @@ export async function updateJob(
 			type: 'update',
 			collection: 'jobs',
 			recordId: jobId,
-			data: safeUpdates
+			data: safeClone(dexieUpdates)
 		});
 	}
 
@@ -605,7 +659,7 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 	}
 
 	// )=- Batch B: cancelNotes is separate from job notes (was incorrectly overwriting notes).
-	const updates = safeClone({
+	const updates = dexieJobPatch({
 		status: 'cancelled' as const,
 		cancelReason,
 		cancelledAt: new Date(),
@@ -620,7 +674,7 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 		type: 'update',
 		collection: 'jobs',
 		recordId: jobId,
-		data: updates
+		data: safeClone(updates)
 	});
 
 	if (navigator.onLine) await processSyncQueue();
@@ -646,17 +700,18 @@ export async function rescheduleCancelledJob(jobId: string, jobData: Partial<Job
 		safeClone({ ...item })
 	);
 
-	// safeClone strips Svelte proxies before IndexedDB put (same pattern as createJob / updateJob).
-	const nextJob = safeClone({
-		...existing,
-		...resolved,
-		assignedCrew: [...(resolved.assignedCrew ?? existing.assignedCrew ?? [])],
-		billableItems,
-		start: new Date(resolved.start ?? existing.start),
-		end: new Date(resolved.end ?? existing.end),
-		status: 'scheduled' as const,
-		updatedAt: new Date()
-	});
+	const nextJob = normalizeJobDates(
+		dexieJobPatch({
+			...existing,
+			...resolved,
+			assignedCrew: [...(resolved.assignedCrew ?? existing.assignedCrew ?? [])],
+			billableItems,
+			start: new Date(resolved.start ?? existing.start),
+			end: new Date(resolved.end ?? existing.end),
+			status: 'scheduled' as const,
+			updatedAt: new Date()
+		}) as Job
+	);
 	delete (nextJob as Record<string, unknown>).cancelReason;
 	delete (nextJob as Record<string, unknown>).cancelNotes;
 	delete (nextJob as Record<string, unknown>).cancelledAt;
@@ -705,7 +760,7 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 	const resolvedClientId = job.clientId ? await resolveClientPbId(job.clientId) : undefined;
 	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000);
 
-	const updates = safeClone({
+	const dexieUpdates = dexieJobPatch({
 		start: newStart,
 		end: finalEnd,
 		...(resolvedClientId && { clientId: resolvedClientId }),
@@ -720,26 +775,32 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 			if (sibling.id) siblingIds.add(sibling.id);
 		}
 	}
-	await Promise.all([...siblingIds].map((id) => db.jobs.update(id, updates)));
+	await Promise.all([...siblingIds].map((id) => db.jobs.update(id, dexieUpdates)));
 
 	await addToSyncQueue({
 		type: 'update',
 		collection: 'jobs',
 		recordId: job.id,
-		data: updates
+		data: safeClone(dexieUpdates)
 	});
 
 	if (navigator.onLine) await processSyncQueue();
 }
 
 export async function getUpcomingJobs(limit = 10): Promise<Job[]> {
-	const now = new Date();
-	return await db.jobs
-		.where('start')
-		.aboveOrEqual(now)
-		.and((job) => job.status !== 'cancelled')
-		.limit(limit)
+	const nowMs = Date.now();
+	const raw = await db.jobs
+		.filter((job) => {
+			if (job.status === 'cancelled') return false;
+			const start = coerceJobDate(job.start);
+			return !!start && start.getTime() >= nowMs;
+		})
 		.toArray();
+
+	return raw
+		.map(normalizeJobDates)
+		.sort((a, b) => coerceJobDate(a.start)!.getTime() - coerceJobDate(b.start)!.getTime())
+		.slice(0, limit);
 }
 
 export async function getJobsForRange(
@@ -747,16 +808,22 @@ export async function getJobsForRange(
 	end: Date,
 	includeCancelled = false
 ): Promise<Job[]> {
+	const startMs = start.getTime();
+	const endMs = end.getTime();
+
+	// Filter in JS so jobs remain discoverable even when legacy safeClone writes left ISO strings
+	// on the indexed `start` field (breaks Dexie between()/aboveOrEqual() index lookups).
 	const raw = await db.jobs
-		.where('start')
-		.between(start, end, true, true)
-		.and((job) => {
-			if (includeCancelled) return true;
-			return job.status !== 'cancelled';
+		.filter((job) => {
+			if (!includeCancelled && job.status === 'cancelled') return false;
+			const jobStart = coerceJobDate(job.start);
+			if (!jobStart) return false;
+			const t = jobStart.getTime();
+			return t >= startMs && t <= endMs;
 		})
 		.toArray();
 
-	return dedupJobs(raw);
+	return dedupJobs(raw.map(normalizeJobDates));
 }
 
 /**
