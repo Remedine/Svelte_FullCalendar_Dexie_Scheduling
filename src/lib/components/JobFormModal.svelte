@@ -596,56 +596,65 @@
 	</div>
 {/if}
 
-<!-- Cancel Confirmation -->
+<!-- Cancel Confirmation (stacked above the job form modal) -->
 {#if showCancelConfirm}
 	<div class="modal-overlay cancel-confirm-modal" role="presentation" onclick={closeCancelConfirm}>
-		<div class="modal-content cancel-confirm-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
+		<div
+			class="modal-content cancel-confirm-modal__content"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="cancel-confirm-title"
+			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => {
 				if (e.key === 'Escape') {
 					e.stopPropagation();
 					closeCancelConfirm();
 				}
-			}}>
-			<h3 class="cancel-confirm-modal__title">
-				{isUpdatingCancelReason ? 'Update cancel reason' : 'Cancel Job?'}
-			</h3>
-			<p class="cancel-confirm-modal__subtitle">Please select a reason:</p>
+			}}
+		>
+			<div class="cancel-confirm-modal__body">
+				<h3 id="cancel-confirm-title" class="cancel-confirm-modal__title">
+					{isUpdatingCancelReason ? 'Update cancel reason' : 'Cancel Job?'}
+				</h3>
+				<p class="cancel-confirm-modal__subtitle">Please select a reason:</p>
 
-			<div class="cancel-reasons">
-				{#each cancelReasons as reason}
-					<label class="reason-option">
-						<input
-							type="radio"
-							name="cancelReason"
-							value={reason}
-							bind:group={selectedCancelReason}
-						/>
-						{reason}
-					</label>
-				{/each}
-			</div>
+				<div class="cancel-confirm-modal__reasons" role="radiogroup" aria-label="Cancellation reason">
+					{#each cancelReasons as reason (reason)}
+						<label class="cancel-confirm-modal__reason-option">
+							<input
+								type="radio"
+								name="cancelReason"
+								value={reason}
+								bind:group={selectedCancelReason}
+							/>
+							<span class="cancel-confirm-modal__reason-label">{reason}</span>
+						</label>
+					{/each}
+				</div>
 
-			<div class="new-job-modal__field">
-				<label class="new-job-modal__label">
-					Additional notes (optional)
+				<div class="cancel-confirm-modal__notes-field">
+					<label for="cancel-notes" class="label">Additional notes (optional)</label>
 					<textarea
-						class="new-job-modal__input"
+						id="cancel-notes"
+						class="input cancel-confirm-modal__notes-input"
 						rows="3"
 						bind:value={currentJob.cancelNotes}
 						placeholder="Any extra details..."
 					></textarea>
-				</label>
+				</div>
 			</div>
 
 			<div class="cancel-confirm-modal__footer">
 				<button
-					class="new-job-modal__btn new-job-modal__btn--cancel button button--ghost"
+					type="button"
+					class="cancel-confirm-modal__btn cancel-confirm-modal__btn--dismiss button button--ghost"
 					onclick={closeCancelConfirm}
 				>
 					Nevermind
 				</button>
 				<button
-					class="new-job-modal__btn new-job-modal__btn--cancel-job button"
+					type="button"
+					class="cancel-confirm-modal__btn cancel-confirm-modal__btn--confirm button"
 					onclick={confirmCancel}
 					disabled={!selectedCancelReason}
 				>
@@ -864,19 +873,123 @@
 		background: var(--color-surface);
 	}
 
-	/* cancel-confirm uses global modal shell now; only its specific BEM kept. */
+	/* Cancel confirmation — stacked above the job form modal (global shell + BEM extensions). */
+	.cancel-confirm-modal {
+		z-index: calc(var(--z-modal-backdrop) + 100);
+	}
+
+	.cancel-confirm-modal__content {
+		max-width: 420px;
+		padding: 0;
+	}
+
+	.cancel-confirm-modal__body {
+		flex: 1;
+		overflow-y: auto;
+		padding: var(--space-5);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+	}
+
+	.cancel-confirm-modal__title {
+		margin: 0;
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+
+	.cancel-confirm-modal__subtitle {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+
+	.cancel-confirm-modal__reasons {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.cancel-confirm-modal__reason-option {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		min-height: 48px;
+		padding: var(--space-3) var(--space-4);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		cursor: pointer;
+		transition:
+			border-color var(--transition-fast),
+			background var(--transition-fast);
+	}
+
+	.cancel-confirm-modal__reason-option:has(input:checked) {
+		border-color: var(--color-primary);
+		background: var(--color-primary-soft);
+	}
+
+	.cancel-confirm-modal__reason-option input[type='radio'] {
+		width: 1.125rem;
+		height: 1.125rem;
+		flex-shrink: 0;
+		margin: 0;
+		accent-color: var(--color-primary);
+	}
+
+	.cancel-confirm-modal__reason-label {
+		font-size: var(--font-size-base);
+		color: var(--color-text);
+		line-height: 1.35;
+	}
+
+	.cancel-confirm-modal__notes-field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.cancel-confirm-modal__notes-input {
+		width: 100%;
+		min-height: 5.5rem;
+		resize: vertical;
+	}
 
 	.cancel-confirm-modal__footer {
 		position: sticky;
 		bottom: 0;
 		background: var(--color-surface);
 		padding: var(--space-4) var(--space-5);
+		padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
 		border-top: 1px solid var(--color-border);
 		display: flex;
 		gap: var(--space-3);
 		justify-content: flex-end;
 		z-index: 10;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+	}
+
+	.cancel-confirm-modal__btn {
+		padding: var(--space-3) var(--space-5);
+		min-height: 44px;
+	}
+
+	.cancel-confirm-modal__btn--confirm {
+		background: var(--color-danger);
+		color: white;
+		border-color: var(--color-danger);
+	}
+
+	.cancel-confirm-modal__btn--confirm:hover:not(:disabled) {
+		background: var(--color-danger-emphasis);
+		border-color: var(--color-danger-emphasis);
+	}
+
+	.cancel-confirm-modal__btn--confirm:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.cancel-job-text {
@@ -962,6 +1075,39 @@
 
 		.new-job-modal__form {
 			margin-top: var(--space-2);
+		}
+
+		.cancel-confirm-modal__content {
+			max-width: 100%;
+			max-height: 90vh;
+		}
+
+		.cancel-confirm-modal__body {
+			padding: var(--space-4) var(--space-3) var(--space-2);
+			gap: var(--space-3);
+		}
+
+		.cancel-confirm-modal__title {
+			font-size: var(--font-size-lg);
+		}
+
+		.cancel-confirm-modal__reason-option {
+			min-height: 52px;
+			padding: var(--space-3);
+		}
+
+		.cancel-confirm-modal__footer {
+			flex-direction: column-reverse;
+			align-items: stretch;
+			padding: var(--space-3);
+			padding-bottom: max(var(--space-3), env(safe-area-inset-bottom, 0px));
+			gap: var(--space-2);
+		}
+
+		.cancel-confirm-modal__btn {
+			width: 100%;
+			text-align: center;
+			min-height: 48px;
 		}
 	}
 </style>
