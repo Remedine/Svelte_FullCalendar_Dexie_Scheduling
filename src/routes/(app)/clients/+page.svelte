@@ -3,6 +3,7 @@
 	import {
 		db,
 		type Client,
+		type Invoice,
 		getPaginatedJobsForClient,
 		type Job,
 		getInvoiceForJob,
@@ -10,7 +11,7 @@
 		dedupJobs
 	} from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getDisplayAreaColor, getAccentAreaColor } from '$lib/utils/colors';
+	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import ClientForm from '$lib/components/ClientForm.svelte';
@@ -28,8 +29,44 @@
 	let searchTerm = $state('');
 	let sortMode = $state<'alpha' | 'recent' | 'upcoming'>('alpha');
 	let selectedAreas = $state<string[]>([]);
+	let jobsFilter = $state<'all' | 'has' | 'no'>('all');
+	let unresolvedInvoiceOnly = $state(false);
+	let activeLetter = $state<string | null>(null);
 
-	let enhancedClients = $state<any[]>([]);
+	type EnhancedClient = Client & {
+		lastJobDate: Date | null;
+		totalJobs: number;
+		nextJobDate: Date | null;
+		hasUnresolvedInvoice: boolean;
+	};
+
+	const ALPHABET_LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+
+	let enhancedClients = $state<EnhancedClient[]>([]);
+
+	function getNameBucket(name: string | undefined): string {
+		const first = (name || '').trim().charAt(0).toUpperCase();
+		if (!first) return '#';
+		if (first >= 'A' && first <= 'Z') return first;
+		return '#';
+	}
+
+	function findInvoiceForJob(job: Job, invoiceByJobId: Map<string, Invoice>): Invoice | undefined {
+		if (job.id) {
+			const byId = invoiceByJobId.get(job.id);
+			if (byId) return byId;
+		}
+		if (job.pbId) {
+			const byPb = invoiceByJobId.get(job.pbId);
+			if (byPb) return byPb;
+		}
+		return undefined;
+	}
+
+	function isUnresolvedInvoice(invoice: Invoice): boolean {
+		if (invoice.status === 'paid') return false;
+		return true;
+	}
 
 	// Dynamic areas from options store (already reactive)
 	const areaOptions = $derived.by(() => {
@@ -57,6 +94,16 @@
 			result = result.filter((c) => selectedAreas.includes(c.areaOfTown));
 		}
 
+		if (jobsFilter === 'has') {
+			result = result.filter((c) => (c.totalJobs ?? 0) > 0);
+		} else if (jobsFilter === 'no') {
+			result = result.filter((c) => (c.totalJobs ?? 0) === 0);
+		}
+
+		if (unresolvedInvoiceOnly) {
+			result = result.filter((c) => c.hasUnresolvedInvoice);
+		}
+
 		if (sortMode === 'recent') {
 			result.sort(
 				(a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -76,6 +123,64 @@
 
 		return result;
 	});
+
+	const showAlphabetRail = $derived(sortMode === 'alpha' && displayedClients.length > 0);
+
+	const alphabetRail = $derived.by(() => {
+		const present = new Set<string>();
+		for (const client of displayedClients) {
+			present.add(getNameBucket(client.name));
+		}
+		return ALPHABET_LETTERS.map((letter) => ({
+			letter,
+			hasClients: present.has(letter)
+		}));
+	});
+
+	$effect(() => {
+		if (!showAlphabetRail) {
+			activeLetter = null;
+			return;
+		}
+
+		void displayedClients.map((c) => c.id).join(',');
+
+		let observer: IntersectionObserver | null = null;
+		const timer = window.setTimeout(() => {
+			const headers = document.querySelectorAll('[data-client-letter-anchor]');
+			if (!headers.length) return;
+
+			observer = new IntersectionObserver(
+				(entries) => {
+					const visible = entries
+						.filter((e) => e.isIntersecting)
+						.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+					const letter = (visible[0]?.target as HTMLElement | undefined)?.dataset.letter;
+					if (letter) activeLetter = letter;
+				},
+				{ root: null, rootMargin: '-8% 0px -75% 0px', threshold: 0 }
+			);
+
+			headers.forEach((header) => observer!.observe(header));
+		}, 0);
+
+		return () => {
+			window.clearTimeout(timer);
+			observer?.disconnect();
+		};
+	});
+
+	function jumpToLetter(letter: string) {
+		const entry = alphabetRail.find((item) => item.letter === letter);
+		if (!entry?.hasClients) return;
+
+		const client = displayedClients.find((c) => getNameBucket(c.name) === letter);
+		if (!client?.id) return;
+
+		const header = document.getElementById(`client-header-${client.id}`);
+		header?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		activeLetter = letter;
+	}
 
 	// )=- Replaced onMount with Svelte 5 $effect + flag (per agents.md rules)
 	// )=- Added defensive auth/role check for consistency across all protected pages.
@@ -107,8 +212,16 @@
 	}
 
 	async function loadClientsWithLastJob() {
-		const allClients = await db.clients.orderBy('name').toArray();
-		const allJobs = await db.jobs.orderBy('start').reverse().toArray();
+		const [allClients, allJobs, allInvoices] = await Promise.all([
+			db.clients.orderBy('name').toArray(),
+			db.jobs.orderBy('start').reverse().toArray(),
+			db.invoices.toArray()
+		]);
+
+		const invoiceByJobId = new Map<string, Invoice>();
+		for (const invoice of allInvoices) {
+			if (invoice.jobId) invoiceByJobId.set(invoice.jobId, invoice);
+		}
 
 		enhancedClients = allClients.map((client) => {
 			// )=- Match jobs by local id OR pbId (handles post-sync state correctly)
@@ -126,11 +239,17 @@
 				.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 			const nextJob = futureJobs[0] || null;
 
+			const hasUnresolvedInvoice = clientJobs.some((job) => {
+				const invoice = findInvoiceForJob(job, invoiceByJobId);
+				return invoice ? isUnresolvedInvoice(invoice) : false;
+			});
+
 			return {
 				...client,
 				lastJobDate: lastJob ? new Date(lastJob.start) : null,
 				totalJobs: clientJobs.length,
-				nextJobDate: nextJob ? new Date(nextJob.start) : null
+				nextJobDate: nextJob ? new Date(nextJob.start) : null,
+				hasUnresolvedInvoice
 			};
 		});
 	}
@@ -328,11 +447,78 @@
 		</div>
 	</div>
 
-	<ul class="clients-page__list">
+	<div class="clients-page__facets">
+		<div class="clients-page__facet-group" role="group" aria-label="Filter by jobs">
+			<span class="clients-page__facet-label">Jobs</span>
+			<button
+				type="button"
+				class="clients-page__facet-btn"
+				class:clients-page__facet-btn--active={jobsFilter === 'all'}
+				onclick={() => (jobsFilter = 'all')}
+			>
+				All
+			</button>
+			<button
+				type="button"
+				class="clients-page__facet-btn"
+				class:clients-page__facet-btn--active={jobsFilter === 'has'}
+				onclick={() => (jobsFilter = 'has')}
+			>
+				Has jobs
+			</button>
+			<button
+				type="button"
+				class="clients-page__facet-btn"
+				class:clients-page__facet-btn--active={jobsFilter === 'no'}
+				onclick={() => (jobsFilter = 'no')}
+			>
+				No jobs
+			</button>
+		</div>
+
+		<div class="clients-page__facet-group" role="group" aria-label="Filter by invoice status">
+			<button
+				type="button"
+				class="clients-page__facet-btn clients-page__facet-btn--alert"
+				class:clients-page__facet-btn--active={unresolvedInvoiceOnly}
+				onclick={() => (unresolvedInvoiceOnly = !unresolvedInvoiceOnly)}
+			>
+				Unresolved invoices
+			</button>
+		</div>
+	</div>
+
+	<div class="clients-page__browse">
+		{#if showAlphabetRail}
+			<nav class="clients-page__alphabet" aria-label="Jump to clients by letter">
+				{#each alphabetRail as item (item.letter)}
+					<button
+						type="button"
+						class="clients-page__alphabet-letter"
+						class:clients-page__alphabet-letter--active={activeLetter === item.letter}
+						class:clients-page__alphabet-letter--empty={!item.hasClients}
+						disabled={!item.hasClients}
+						aria-label={item.hasClients
+							? `Jump to clients starting with ${item.letter}`
+							: `No clients starting with ${item.letter}`}
+						onclick={() => jumpToLetter(item.letter)}
+					>
+						{item.letter}
+					</button>
+				{/each}
+			</nav>
+		{/if}
+
+		<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
 			<li class="client-card card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
 				<div class="client-card__main">
-					<div class="client-card__header">
+					<div
+						class="client-card__header"
+						id="client-header-{client.id}"
+						data-client-letter-anchor
+						data-letter={getNameBucket(client.name)}
+					>
 						<h3 class="client-card__name">{client.name}</h3>
 						<span
 							class="area-badge"
@@ -481,7 +667,8 @@
 		{#if displayedClients.length === 0}
 			<li class="clients-page__empty">No clients match your filters.</li>
 		{/if}
-	</ul>
+		</ul>
+	</div>
 </div>
 
 {#if showForm}
@@ -573,10 +760,111 @@
 		box-shadow: 0 0 0 3px currentColor;
 	}
 
+	.clients-page__facets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+		margin-bottom: var(--space-5);
+		align-items: center;
+	}
+
+	.clients-page__facet-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
+	.clients-page__facet-label {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		margin-right: var(--space-1);
+	}
+
+	.clients-page__facet-btn {
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition:
+			background var(--transition-fast),
+			color var(--transition-fast),
+			border-color var(--transition-fast);
+	}
+
+	.clients-page__facet-btn--active {
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+		border-color: var(--color-primary);
+		font-weight: var(--font-weight-semibold);
+	}
+
+	.clients-page__facet-btn--alert.clients-page__facet-btn--active {
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border-color: var(--color-danger);
+	}
+
+	.clients-page__browse {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+		position: relative;
+	}
+
+	.clients-page__alphabet {
+		position: sticky;
+		top: 50%;
+		transform: translateY(-50%);
+		flex-shrink: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1px;
+		padding: var(--space-1) 0;
+		z-index: 5;
+		user-select: none;
+		touch-action: manipulation;
+	}
+
+	.clients-page__alphabet-letter {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.35rem;
+		height: 1.1rem;
+		padding: 0;
+		border: none;
+		background: transparent;
+		font-size: 0.62rem;
+		font-weight: var(--font-weight-semibold);
+		line-height: 1;
+		color: var(--color-primary-emphasis);
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+	}
+
+	.clients-page__alphabet-letter--active {
+		color: white;
+		background: var(--color-primary);
+	}
+
+	.clients-page__alphabet-letter--empty {
+		color: var(--color-text-subtle);
+		opacity: 0.45;
+		cursor: default;
+	}
+
 	.clients-page__list {
 		list-style: none;
 		padding: 0;
 		margin: 0;
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-5);
@@ -602,6 +890,7 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		margin-bottom: 0.75rem;
+		scroll-margin-top: var(--space-4);
 	}
 	.client-card__name {
 		margin: 0;
@@ -804,6 +1093,43 @@
 		border: none;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
+	}
+
+	@media (max-width: 768px) {
+		.clients-page__browse {
+			display: flex;
+			gap: var(--space-1);
+		}
+
+		.clients-page__alphabet {
+			position: fixed;
+			left: max(2px, env(safe-area-inset-left, 0px));
+			top: 50%;
+			transform: translateY(-50%);
+			padding: var(--space-1) 0;
+			background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+			border-radius: var(--radius-md);
+			backdrop-filter: blur(4px);
+		}
+
+		.clients-page__alphabet-letter {
+			width: 1.75rem;
+			height: 1.35rem;
+			font-size: 0.68rem;
+		}
+
+		.clients-page__list {
+			padding-left: 1.85rem;
+		}
+
+		.clients-page__facets {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.clients-page__facet-group {
+			width: 100%;
+		}
 	}
 
 	/* Mobile fixes for horizontal scroll: reduce min-widths, allow header wrap, contain grids. */
