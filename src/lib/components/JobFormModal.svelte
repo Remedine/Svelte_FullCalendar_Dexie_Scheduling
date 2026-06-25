@@ -92,6 +92,7 @@
 						...job,
 						start: startDate,
 						end: endDate,
+						areaOfTown: job.areaOfTown ?? '',
 						assignedCrew: job.assignedCrew || [],
 						billableItems: job.billableItems?.length
 							? job.billableItems.map((b: any) => {
@@ -159,23 +160,9 @@
 		});
 	});
 
-	// )=- Auto-sync job's areaOfTown to the selected client's areaOfTown.
-	// In almost all cases, the client and the job are the same area of town.
-	// This $effect reacts whenever currentJob.clientId changes (from the ClientPicker bind:value
-	// or when loading an existing job for edit). We fetch from Dexie (clients are preloaded by the picker)
-	// and set the area. Manual override in the area dropdown is still possible afterward for exceptions.
-	// )=- Also wired the onSelect callback in the ClientPicker to do immediate sync on selection/create.
-	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	$effect(() => {
-		const clientId = currentJob.clientId;
-		if (clientId) {
-			db.clients.get(clientId).then((client: Client | undefined) => {
-				if (client?.areaOfTown) {
-					currentJob.areaOfTown = client.areaOfTown;
-				}
-			});
-		}
-	});
+	// Area sync from client → job happens only in ClientPicker onSelect (user picks a client).
+	// Do NOT auto-sync on clientId bind when opening edit — that overwrote the job's saved area
+	// with the client's area (e.g. always showing Valley).
 
 	// Scroll modal content to top when it opens
 	$effect(() => {
