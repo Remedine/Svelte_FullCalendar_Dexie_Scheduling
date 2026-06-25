@@ -29,15 +29,22 @@
 	let searchTerm = $state('');
 	let sortMode = $state<'alpha' | 'recent' | 'upcoming'>('alpha');
 	let selectedAreas = $state<string[]>([]);
-	let jobsFilter = $state<'all' | 'has' | 'no'>('all');
+	let jobsFilter = $state<'all' | 'upcoming'>('all');
 	let unresolvedInvoiceOnly = $state(false);
 	let activeLetter = $state<string | null>(null);
+
+	type ClientInvoiceBadge = {
+		label: string;
+		status: Invoice['status'] | 'overdue';
+		isOverdue: boolean;
+	};
 
 	type EnhancedClient = Client & {
 		lastJobDate: Date | null;
 		totalJobs: number;
 		nextJobDate: Date | null;
 		hasUnresolvedInvoice: boolean;
+		invoiceBadge: ClientInvoiceBadge | null;
 	};
 
 	const ALPHABET_LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
@@ -68,6 +75,43 @@
 		return true;
 	}
 
+	const INVOICE_STATUS_PRIORITY: Record<Invoice['status'], number> = {
+		draft: 1,
+		generated: 2,
+		sent: 3,
+		paid: 0
+	};
+
+	function getClientInvoiceBadge(
+		clientJobs: Job[],
+		invoiceByJobId: Map<string, Invoice>
+	): ClientInvoiceBadge | null {
+		let hasOverdue = false;
+		let worstStatus: Invoice['status'] | null = null;
+
+		for (const job of clientJobs) {
+			const invoice = findInvoiceForJob(job, invoiceByJobId);
+			if (!invoice || invoice.status === 'paid') continue;
+			if (isInvoiceOverdue(invoice)) hasOverdue = true;
+			if (
+				!worstStatus ||
+				INVOICE_STATUS_PRIORITY[invoice.status] > INVOICE_STATUS_PRIORITY[worstStatus]
+			) {
+				worstStatus = invoice.status;
+			}
+		}
+
+		if (!worstStatus && !hasOverdue) return null;
+		if (hasOverdue) {
+			return { label: 'Overdue', status: 'overdue', isOverdue: true };
+		}
+		return {
+			label: worstStatus!,
+			status: worstStatus!,
+			isOverdue: false
+		};
+	}
+
 	// Dynamic areas from options store (already reactive)
 	const areaOptions = $derived.by(() => {
 		return optionsStore.data?.areasOfTown ?? [];
@@ -94,10 +138,8 @@
 			result = result.filter((c) => selectedAreas.includes(c.areaOfTown));
 		}
 
-		if (jobsFilter === 'has') {
-			result = result.filter((c) => (c.totalJobs ?? 0) > 0);
-		} else if (jobsFilter === 'no') {
-			result = result.filter((c) => (c.totalJobs ?? 0) === 0);
+		if (jobsFilter === 'upcoming') {
+			result = result.filter((c) => c.nextJobDate != null);
 		}
 
 		if (unresolvedInvoiceOnly) {
@@ -243,13 +285,15 @@
 				const invoice = findInvoiceForJob(job, invoiceByJobId);
 				return invoice ? isUnresolvedInvoice(invoice) : false;
 			});
+			const invoiceBadge = getClientInvoiceBadge(clientJobs, invoiceByJobId);
 
 			return {
 				...client,
 				lastJobDate: lastJob ? new Date(lastJob.start) : null,
 				totalJobs: clientJobs.length,
 				nextJobDate: nextJob ? new Date(nextJob.start) : null,
-				hasUnresolvedInvoice
+				hasUnresolvedInvoice,
+				invoiceBadge
 			};
 		});
 	}
@@ -461,18 +505,10 @@
 			<button
 				type="button"
 				class="clients-page__facet-btn"
-				class:clients-page__facet-btn--active={jobsFilter === 'has'}
-				onclick={() => (jobsFilter = 'has')}
+				class:clients-page__facet-btn--active={jobsFilter === 'upcoming'}
+				onclick={() => (jobsFilter = 'upcoming')}
 			>
-				Has jobs
-			</button>
-			<button
-				type="button"
-				class="clients-page__facet-btn"
-				class:clients-page__facet-btn--active={jobsFilter === 'no'}
-				onclick={() => (jobsFilter = 'no')}
-			>
-				No jobs
+				Has upcoming jobs
 			</button>
 		</div>
 
@@ -520,14 +556,28 @@
 						data-letter={getNameBucket(client.name)}
 					>
 						<h3 class="client-card__name">{client.name}</h3>
-						<span
-							class="area-badge"
-							style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(
-								client.areaOfTown
-							)};"
-						>
-							{getAreaLabel(client.areaOfTown)}
-						</span>
+						<div class="client-card__badges">
+							{#if client.invoiceBadge}
+								<span
+									class="client-card__invoice-badge"
+									class:client-card__invoice-badge--overdue={client.invoiceBadge.isOverdue}
+									class:client-card__invoice-badge--sent={client.invoiceBadge.status === 'sent'}
+									class:client-card__invoice-badge--generated={client.invoiceBadge.status ===
+										'generated'}
+									class:client-card__invoice-badge--draft={client.invoiceBadge.status === 'draft'}
+								>
+									📄 {client.invoiceBadge.label}
+								</span>
+							{/if}
+							<span
+								class="area-badge"
+								style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(
+									client.areaOfTown
+								)};"
+							>
+								{getAreaLabel(client.areaOfTown)}
+							</span>
+						</div>
 					</div>
 
 					<div class="client-card__contact">
@@ -818,14 +868,16 @@
 
 	.clients-page__alphabet {
 		position: sticky;
-		top: 50%;
-		transform: translateY(-50%);
+		top: var(--space-4);
+		align-self: flex-start;
 		flex-shrink: 0;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 1px;
 		padding: var(--space-1) 0;
+		max-height: calc(100vh - var(--space-8));
+		overflow: hidden;
 		z-index: 5;
 		user-select: none;
 		touch-action: manipulation;
@@ -889,6 +941,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
+		gap: var(--space-2);
 		margin-bottom: 0.75rem;
 		scroll-margin-top: var(--space-4);
 	}
@@ -897,6 +950,36 @@
 		font-size: var(--font-size-lg);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
+	}
+	.client-card__badges {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-1);
+		justify-content: flex-end;
+		flex-shrink: 0;
+	}
+	.client-card__invoice-badge {
+		font-size: var(--font-size-xs);
+		padding: 0.15rem 0.45rem;
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-semibold);
+		text-transform: capitalize;
+		white-space: nowrap;
+		background: var(--color-warning-soft);
+		color: var(--color-warning);
+	}
+	.client-card__invoice-badge--draft,
+	.client-card__invoice-badge--generated {
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
+	}
+	.client-card__invoice-badge--sent {
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+	}
+	.client-card__invoice-badge--overdue {
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
 	}
 
 	.client-card__contact {
