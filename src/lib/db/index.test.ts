@@ -1495,4 +1495,26 @@ describe('dedupJobs prefers newer updatedAt', () => {
 		expect(result).toHaveLength(1);
 		expect(result[0].title).toBe('new');
 	});
+
+	it('prefers a newer local-uuid row over a stale canonical pbId row (calendar drag-and-drop)', () => {
+		const staleCanonical = {
+			id: 'pb-job-1',
+			pbId: 'pb-job-1',
+			updatedAt: new Date('2020-01-01'),
+			start: new Date('2026-06-01T09:00:00'),
+			title: 'stale canonical'
+		} as Job;
+		const freshLocal = {
+			id: 'local-uuid-1',
+			pbId: 'pb-job-1',
+			updatedAt: new Date('2026-06-25T12:00:00'),
+			start: new Date('2026-06-25T14:00:00'),
+			title: 'moved locally'
+		} as Job;
+
+		const result = dedupJobs([staleCanonical, freshLocal]);
+		expect(result).toHaveLength(1);
+		expect(result[0].id).toBe('local-uuid-1');
+		expect(result[0].start).toEqual(freshLocal.start);
+	});
 });

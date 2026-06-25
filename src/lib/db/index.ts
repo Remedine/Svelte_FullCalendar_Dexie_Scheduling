@@ -695,12 +695,13 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 		throw new Error('updateJobDates: newStart is null');
 	}
 
-	const job = await db.jobs.get(jobId);
-	if (!job) {
+	const job =
+		(await db.jobs.get(jobId)) ||
+		(await db.jobs.where('pbId').equals(jobId).first());
+	if (!job?.id) {
 		throw new Error(`updateJobDates: job not found ${jobId}`);
 	}
 
-	const realId = job.pbId || job.id || jobId;
 	const resolvedClientId = job.clientId ? await resolveClientPbId(job.clientId) : undefined;
 	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000);
 
@@ -711,12 +712,20 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 		updatedAt: new Date()
 	});
 
-	await db.jobs.update(jobId, updates);
+	// Write the same dates to every Dexie row for this logical job so reload/dedup never surfaces a stale sibling.
+	const siblingIds = new Set<string>([job.id]);
+	if (job.pbId) {
+		const siblings = await db.jobs.where('pbId').equals(job.pbId).toArray();
+		for (const sibling of siblings) {
+			if (sibling.id) siblingIds.add(sibling.id);
+		}
+	}
+	await Promise.all([...siblingIds].map((id) => db.jobs.update(id, updates)));
 
 	await addToSyncQueue({
 		type: 'update',
 		collection: 'jobs',
-		recordId: realId,
+		recordId: job.id,
 		data: updates
 	});
 
@@ -763,17 +772,22 @@ export function dedupJobs(list: Job[]): Job[] {
 		const existing = byKey.get(key);
 		if (!existing) {
 			byKey.set(key, j);
+			continue;
+		}
+
+		const existingUpdated = new Date(existing.updatedAt || 0).getTime();
+		const candidateUpdated = new Date(j.updatedAt || 0).getTime();
+
+		// Prefer the most recently edited row. Canonical id === pbId is only a tiebreaker so
+		// drag-and-drop updates on a local-uuid row are not discarded when a stale canonical row exists.
+		if (candidateUpdated > existingUpdated) {
+			byKey.set(key, j);
+		} else if (candidateUpdated < existingUpdated) {
+			// keep existing
 		} else {
 			const existingIsCanonical = existing.id === existing.pbId;
 			const candidateIsCanonical = j.id === j.pbId;
-			const existingUpdated = new Date(existing.updatedAt || 0).getTime();
-			const candidateUpdated = new Date(j.updatedAt || 0).getTime();
-
 			if (candidateIsCanonical && !existingIsCanonical) {
-				byKey.set(key, j);
-			} else if (!candidateIsCanonical && existingIsCanonical) {
-				// keep existing canonical row
-			} else if (candidateUpdated > existingUpdated) {
 				byKey.set(key, j);
 			}
 		}
