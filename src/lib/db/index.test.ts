@@ -786,6 +786,48 @@ describe('CRUD helpers - optimistic + queue (onLine=false)', () => {
 		expect(queue.length).toBe(1);
 	});
 
+	it('updateJob persists billableItems and assignedCrew arrays (Svelte proxy-safe)', async () => {
+		const jobId = 'job-array-update';
+		await db.jobs.add({
+			id: jobId,
+			clientId: 'c1',
+			title: 'Array Job',
+			start: new Date(),
+			end: new Date(),
+			assignedCrew: ['Alice'],
+			status: 'scheduled',
+			billableItems: [{ title: 'Old', price: 10, quantity: 1, total: 10, unit: 'qty' }],
+			subtotal: 10,
+			taxRate: 0,
+			taxAmount: 0,
+			totalAmount: 10,
+			areaOfTown: '',
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		// Simulate Svelte $state proxy arrays passed from JobFormModal.
+		const proxyLikeCrew = new Proxy(['Alice', 'Bob'], {});
+		const proxyLikeItems = new Proxy(
+			[{ title: 'New line', price: 200, quantity: 2, total: 400, unit: 'qty' }],
+			{}
+		);
+
+		await expect(
+			updateJob(jobId, {
+				assignedCrew: proxyLikeCrew as unknown as string[],
+				billableItems: proxyLikeItems as unknown as Job['billableItems'],
+				subtotal: 400,
+				totalAmount: 400
+			})
+		).resolves.not.toThrow();
+
+		const job = await db.jobs.get(jobId);
+		expect(job!.assignedCrew).toEqual(['Alice', 'Bob']);
+		expect(job!.billableItems[0].title).toBe('New line');
+		expect(job!.billableItems[0].total).toBe(400);
+	});
+
 	it('cancelJob sets cancelled status, records who/why, queues update', async () => {
 		// Simulate current user in auth (the cancelJob reads it)
 		// We set a minimal one since auth is lazily loaded in db module.

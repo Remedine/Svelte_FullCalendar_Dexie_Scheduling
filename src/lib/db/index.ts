@@ -113,6 +113,15 @@ function dexieJobPatch(patch: Partial<Job>): Partial<Job> {
 	return out;
 }
 
+/**
+ * Strip Svelte $state proxies and produce a structured-clone-safe job record for Dexie.
+ * Job form arrays (billableItems, assignedCrew) must pass through safeClone before put/add/update
+ * or IndexedDB throws DataCloneError: "[object Array] could not be cloned".
+ */
+function prepareJobForDexie<T extends Partial<Job>>(record: T): T {
+	return dexieJobPatch(safeClone(record) as Partial<Job>) as T;
+}
+
 /** Rewrite any legacy ISO-string date fields back to Date objects in Dexie (one row at a time). */
 export async function repairJobDateFields(): Promise<number> {
 	const all = await db.jobs.toArray();
@@ -123,7 +132,7 @@ export async function repairJobDateFields(): Promise<number> {
 			return val != null && !(val instanceof Date);
 		});
 		if (!needsFix) continue;
-		await db.jobs.put(normalizeJobDates(job));
+		await db.jobs.put(prepareJobForDexie(normalizeJobDates(job)) as Job);
 		fixed++;
 	}
 	return fixed;
@@ -570,7 +579,7 @@ export async function createJob(jobData: any): Promise<string> {
 	const optionsRecord = await db.options.get('1');
 	const taxRate = normalizeTaxRateToPercent(optionsRecord?.taxRate);
 
-	const newJob: Job = {
+	const newJob = prepareJobForDexie({
 		id: newId,
 		clientId: realClientId,
 		title: String(jobData.title),
@@ -589,7 +598,7 @@ export async function createJob(jobData: any): Promise<string> {
 		taxRate,
 		taxAmount: jobData.taxAmount || 0,
 		totalAmount: jobData.totalAmount || 0
-	};
+	}) as Job;
 
 	const id = await db.jobs.add(newJob);
 	console.log(`✅ Job created locally (optimistic): ${id}`);
@@ -624,7 +633,7 @@ export async function updateJob(
 		resolvedUpdates.clientId = await resolveClientPbId(resolvedUpdates.clientId);
 	}
 
-	const dexieUpdates = dexieJobPatch({ ...resolvedUpdates, updatedAt: new Date() });
+	const dexieUpdates = prepareJobForDexie({ ...resolvedUpdates, updatedAt: new Date() });
 	await db.jobs.update(jobId, dexieUpdates);
 
 	const updatedJob = await db.jobs.get(jobId);
@@ -659,7 +668,7 @@ export async function cancelJob(jobId: string, cancelReason: string, notes?: str
 	}
 
 	// )=- Batch B: cancelNotes is separate from job notes (was incorrectly overwriting notes).
-	const updates = dexieJobPatch({
+	const updates = prepareJobForDexie({
 		status: 'cancelled' as const,
 		cancelReason,
 		cancelledAt: new Date(),
@@ -696,16 +705,12 @@ export async function rescheduleCancelledJob(jobId: string, jobData: Partial<Job
 		resolved.clientId = await resolveClientPbId(resolved.clientId);
 	}
 
-	const billableItems = (resolved.billableItems ?? existing.billableItems ?? []).map((item: any) =>
-		safeClone({ ...item })
-	);
-
 	const nextJob = normalizeJobDates(
-		dexieJobPatch({
+		prepareJobForDexie({
 			...existing,
 			...resolved,
 			assignedCrew: [...(resolved.assignedCrew ?? existing.assignedCrew ?? [])],
-			billableItems,
+			billableItems: resolved.billableItems ?? existing.billableItems ?? [],
 			start: new Date(resolved.start ?? existing.start),
 			end: new Date(resolved.end ?? existing.end),
 			status: 'scheduled' as const,
@@ -760,7 +765,7 @@ export async function updateJobDates(jobId: string, newStart: Date | null, newEn
 	const resolvedClientId = job.clientId ? await resolveClientPbId(job.clientId) : undefined;
 	const finalEnd = newEnd || new Date(newStart.getTime() + 4 * 60 * 60 * 1000);
 
-	const dexieUpdates = dexieJobPatch({
+	const dexieUpdates = prepareJobForDexie({
 		start: newStart,
 		end: finalEnd,
 		...(resolvedClientId && { clientId: resolvedClientId }),
