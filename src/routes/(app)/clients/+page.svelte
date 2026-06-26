@@ -309,6 +309,11 @@
 		return parts.join(', ');
 	}
 
+	function openInMaps(client: Client) {
+		const address = encodeURIComponent(getFullAddress(client));
+		window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
+	}
+
 	function openNewClient() {
 		editingClient = null;
 		editingClientJobCount = 0;
@@ -598,7 +603,16 @@
 					</div>
 
 					{#if getFullAddress(client)}
-						<div class="client-card__address">📍 {getFullAddress(client)}</div>
+						<button
+							type="button"
+							class="client-card__address"
+							onclick={(e) => {
+								e.stopPropagation();
+								openInMaps(client);
+							}}
+						>
+							📍 {getFullAddress(client)}
+						</button>
 					{/if}
 
 					<div class="client-card__meta">
@@ -981,8 +995,23 @@
 	}
 
 	.client-card__address {
-		color: var(--color-text-muted);
-		margin-bottom: var(--space-3);
+		display: inline-block;
+		width: fit-content;
+		max-width: 100%;
+		margin: 0 0 var(--space-3);
+		padding: 0;
+		border: none;
+		background: none;
+		font: inherit;
+		text-align: left;
+		color: var(--color-primary);
+		cursor: pointer;
+		text-decoration: underline dotted;
+	}
+
+	.client-card__address:hover {
+		color: var(--color-primary-emphasis);
+		text-decoration: underline;
 	}
 
 	.client-card__meta {
