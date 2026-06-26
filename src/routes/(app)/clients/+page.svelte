@@ -32,6 +32,7 @@
 	let selectedAreas = $state<string[]>([]);
 	let jobsFilter = $state<'all' | 'upcoming'>('all');
 	let unresolvedInvoiceOnly = $state(false);
+	let filtersOpen = $state(false);
 	let activeLetter = $state<string | null>(null);
 
 	type ClientInvoiceBadge = {
@@ -471,59 +472,81 @@
 			class="clients-page__search"
 		/>
 
-		<select bind:value={sortMode} class="clients-page__select">
-			<option value="alpha">Alphabetical</option>
-			<option value="recent">Most Recent Added</option>
-			<option value="upcoming">Upcoming Jobs</option>
-		</select>
-	</div>
+		<div class="clients-page__toolbar">
+			<label class="clients-page__sort">
+				<span class="clients-page__sort-label">Sort</span>
+				<select bind:value={sortMode} class="clients-page__select">
+					<option value="alpha">Alphabetical</option>
+					<option value="recent">Most Recent Added</option>
+					<option value="upcoming">Upcoming Jobs</option>
+				</select>
+			</label>
 
-	<div class="area-filter">
-		<div class="area-filter__chips">
-			{#each areaOptions as area (area.id)}
-				<button
-					class="area-chip"
-					class:active={selectedAreas.includes(area.id)}
-					onclick={() => toggleArea(area.id)}
-					style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
-				>
-					{area.label}
-				</button>
-			{/each}
-		</div>
-	</div>
-
-	<div class="clients-page__facets">
-		<div class="clients-page__facet-group" role="group" aria-label="Filter by jobs">
-			<span class="clients-page__facet-label">Jobs</span>
 			<button
 				type="button"
-				class="clients-page__facet-btn"
-				class:clients-page__facet-btn--active={jobsFilter === 'all'}
-				onclick={() => (jobsFilter = 'all')}
+				class="clients-page__filters-trigger"
+				class:clients-page__filters-trigger--open={filtersOpen}
+				onclick={() => (filtersOpen = !filtersOpen)}
+				aria-expanded={filtersOpen}
 			>
-				All
-			</button>
-			<button
-				type="button"
-				class="clients-page__facet-btn"
-				class:clients-page__facet-btn--active={jobsFilter === 'upcoming'}
-				onclick={() => (jobsFilter = 'upcoming')}
-			>
-				Has upcoming jobs
+				Filters
+				<span class="clients-page__filters-arrow" aria-hidden="true">{filtersOpen ? '▾' : '▸'}</span>
 			</button>
 		</div>
 
-		<div class="clients-page__facet-group" role="group" aria-label="Filter by invoice status">
-			<button
-				type="button"
-				class="clients-page__facet-btn clients-page__facet-btn--alert"
-				class:clients-page__facet-btn--active={unresolvedInvoiceOnly}
-				onclick={() => (unresolvedInvoiceOnly = !unresolvedInvoiceOnly)}
-			>
-				Unresolved invoices
-			</button>
-		</div>
+		{#if filtersOpen}
+			<div class="clients-page__filters-panel">
+				<div class="clients-page__filter-group clients-page__filter-group--inline">
+					<span class="clients-page__filter-group-label">Areas</span>
+					<div class="clients-page__area-chips">
+						{#each areaOptions as area (area.id)}
+							<button
+								type="button"
+								class="area-chip"
+								class:active={selectedAreas.includes(area.id)}
+								onclick={() => toggleArea(area.id)}
+								style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
+							>
+								{area.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<div class="clients-page__facets">
+					<div class="clients-page__facet-group" role="group" aria-label="Filter by jobs">
+						<span class="clients-page__facet-label">Jobs</span>
+						<button
+							type="button"
+							class="clients-page__facet-btn"
+							class:clients-page__facet-btn--active={jobsFilter === 'all'}
+							onclick={() => (jobsFilter = 'all')}
+						>
+							All
+						</button>
+						<button
+							type="button"
+							class="clients-page__facet-btn"
+							class:clients-page__facet-btn--active={jobsFilter === 'upcoming'}
+							onclick={() => (jobsFilter = 'upcoming')}
+						>
+							Has upcoming jobs
+						</button>
+					</div>
+
+					<div class="clients-page__facet-group" role="group" aria-label="Filter by invoice status">
+						<button
+							type="button"
+							class="clients-page__facet-btn clients-page__facet-btn--alert"
+							class:clients-page__facet-btn--active={unresolvedInvoiceOnly}
+							onclick={() => (unresolvedInvoiceOnly = !unresolvedInvoiceOnly)}
+						>
+							Unresolved invoices
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<div class="clients-page__browse">
@@ -765,35 +788,103 @@
 
 	.clients-page__filters {
 		display: flex;
-		gap: var(--space-4);
-		margin-bottom: var(--space-6);
-		flex-wrap: wrap;
+		flex-direction: column;
+		gap: var(--space-3);
+		margin-bottom: var(--space-5);
 	}
 
 	.clients-page__search {
-		flex: 1;
-		min-width: 160px;
+		width: 100%;
 		padding: var(--space-3) var(--space-4);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
 		background: var(--color-surface);
 		color: var(--color-text);
+		font-size: var(--font-size-base);
+	}
+
+	.clients-page__toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.clients-page__sort {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.clients-page__sort-label {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		white-space: nowrap;
 	}
 
 	.clients-page__select {
-		padding: var(--space-3) var(--space-4);
+		padding: var(--space-2) var(--space-3);
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
-		min-width: 100px;
+		width: auto;
+		min-width: 0;
 		background: var(--color-surface);
 		color: var(--color-text);
+		font-size: var(--font-size-sm);
 	}
 
-	.area-filter__chips {
+	.clients-page__filters-trigger {
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		background: none;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-md);
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		min-height: 36px;
+	}
+
+	.clients-page__filters-trigger--open {
+		color: var(--color-primary-emphasis);
+		border-color: var(--color-primary);
+	}
+
+	.clients-page__filters-arrow {
+		font-size: var(--font-size-xs);
+		line-height: 1;
+	}
+
+	.clients-page__filters-panel {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		padding-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
+	}
+
+	.clients-page__filter-group--inline {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	.clients-page__filter-group-label {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		white-space: nowrap;
+	}
+
+	.clients-page__area-chips {
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--space-2);
-		margin-bottom: var(--space-6);
 	}
 
 	.area-chip {
@@ -814,7 +905,6 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--space-3);
-		margin-bottom: var(--space-5);
 		align-items: center;
 	}
 
@@ -1226,15 +1316,7 @@
 			padding: var(--space-4) var(--space-3);
 		}
 
-		.clients-page__search {
-			min-width: 120px;
-		}
-
-		.clients-page__select {
-			min-width: 80px;
-		}
-
-		.clients-page__filters {
+		.clients-page__toolbar {
 			gap: var(--space-2);
 		}
 
