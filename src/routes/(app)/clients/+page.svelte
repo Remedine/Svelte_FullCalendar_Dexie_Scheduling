@@ -15,7 +15,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import ClientForm from '$lib/components/ClientForm.svelte';
-	import { deleteClient as deleteClientFromDb } from '$lib/db';
+
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
 	import {
 		pullJobsFromServer,
@@ -25,6 +25,7 @@
 
 	let showForm = $state(false);
 	let editingClient = $state<Client | null>(null);
+	let editingClientJobCount = $state(0);
 
 	let searchTerm = $state('');
 	let sortMode = $state<'alpha' | 'recent' | 'upcoming'>('alpha');
@@ -308,41 +309,37 @@
 		return parts.join(', ');
 	}
 
-	function openInMaps(client: Client) {
-		const address = encodeURIComponent(getFullAddress(client));
-		window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
-	}
-
 	function openNewClient() {
 		editingClient = null;
+		editingClientJobCount = 0;
 		showForm = true;
 	}
 
-	function editClient(client: Client) {
+	function editClient(client: EnhancedClient) {
 		editingClient = { ...client };
+		editingClientJobCount = client.totalJobs ?? 0;
 		showForm = true;
+	}
+
+	function handleCardBodyClick(client: EnhancedClient) {
+		editClient(client);
+	}
+
+	function stopCardClick(e: MouseEvent) {
+		e.stopPropagation();
 	}
 
 	async function handleClientSaved() {
 		showForm = false;
 		editingClient = null;
+		editingClientJobCount = 0;
 		await loadClientsWithLastJob();
 	}
 
-	async function deleteClient(id: string) {
-		// )=- Prevent deletion if client has any jobs (protects data integrity)
-		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		const clientWithJobs = enhancedClients.find((c) => c.id === id);
-		if (clientWithJobs && (clientWithJobs.totalJobs ?? 0) > 0) {
-			alert(
-				'Cannot delete this client because they have existing job records.\n\nPlease cancel or delete the associated jobs first.'
-			);
-			return;
-		}
-
-		if (!confirm('Delete this client? This action cannot be undone.')) return;
-
-		await deleteClientFromDb(id);
+	async function handleClientDeleted() {
+		showForm = false;
+		editingClient = null;
+		editingClientJobCount = 0;
 		await loadClientsWithLastJob();
 	}
 
@@ -548,7 +545,18 @@
 		<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
 			<li class="client-card card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
-				<div class="client-card__main">
+				<div
+					class="client-card__main"
+					role="button"
+					tabindex="0"
+					onclick={() => handleCardBodyClick(client)}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							handleCardBodyClick(client);
+						}
+					}}
+				>
 					<div
 						class="client-card__header"
 						id="client-header-{client.id}"
@@ -580,7 +588,7 @@
 						</div>
 					</div>
 
-					<div class="client-card__contact">
+					<div class="client-card__contact" onclick={stopCardClick} role="presentation">
 						{#if client.phone}
 							<a href="tel:{client.phone}" class="contact-link">📞 {client.phone}</a>
 						{/if}
@@ -590,20 +598,7 @@
 					</div>
 
 					{#if getFullAddress(client)}
-						<div
-							class="client-card__address"
-							role="button"
-							tabindex="0"
-							onclick={() => openInMaps(client)}
-							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									openInMaps(client);
-								}
-							}}
-						>
-							📍 {getFullAddress(client)}
-						</div>
+						<div class="client-card__address">📍 {getFullAddress(client)}</div>
 					{/if}
 
 					<div class="client-card__meta">
@@ -637,7 +632,7 @@
 					     Uses getPaginatedJobsForClient + opens the shared JobDetailsModal with client context.
 					     Per spec: "The job list can be expandable on click inside the client card. Then the modal shared with the jobs page... Paginated jobs for now."
 					     Reference: JOBS_AND_INVOICES_SPEC.md -->
-					<div class="client-card__related">
+					<div class="client-card__related" onclick={stopCardClick} role="presentation">
 						<button class="client-card__related-toggle" onclick={() => toggleRelatedJobs(client)}>
 							{expandedClients[client.id!] ? '▼' : '▶'} Related Jobs ({client.totalJobs || 0})
 						</button>
@@ -691,26 +686,6 @@
 						{/if}
 					</div>
 				</div>
-
-				<div class="client-card__actions">
-					<button
-						onclick={() => editClient(client)}
-						class="client-card__btn client-card__btn--edit"
-					>
-						Edit
-					</button>
-					<button
-						onclick={() => deleteClient(client.id!)}
-						class="client-card__btn client-card__btn--delete"
-						class:client-card__btn--disabled={(client.totalJobs ?? 0) > 0}
-						disabled={(client.totalJobs ?? 0) > 0}
-						title={(client.totalJobs ?? 0) > 0
-							? 'Cannot delete: client has existing jobs'
-							: 'Delete client'}
-					>
-						Delete
-					</button>
-				</div>
 			</li>
 		{/each}
 
@@ -722,7 +697,13 @@
 </div>
 
 {#if showForm}
-	<ClientForm bind:show={showForm} bind:client={editingClient} onSaved={handleClientSaved} />
+	<ClientForm
+		bind:show={showForm}
+		bind:client={editingClient}
+		canDelete={editingClientJobCount === 0}
+		onSaved={handleClientSaved}
+		onDeleted={handleClientDeleted}
+	/>
 {/if}
 
 <!-- Note: JobDetailsModal is globally mounted in (app)/+layout.svelte -->
@@ -924,18 +905,23 @@
 
 	.client-card {
 		/* base from global .card; list-specific */
-		display: flex;
-		justify-content: space-between;
 		padding: var(--space-5);
-		transition: transform 0.2s;
-	}
-
-	.client-card:hover {
-		transform: translateX(4px);
 	}
 
 	.client-card__main {
 		flex: 1;
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+		transition: background var(--transition-fast);
+	}
+
+	.client-card__main:hover {
+		background: var(--color-surface-alt);
+	}
+
+	.client-card__main:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
 	}
 	.client-card__header {
 		display: flex;
@@ -995,14 +981,8 @@
 	}
 
 	.client-card__address {
-		color: var(--color-primary);
-		cursor: pointer;
+		color: var(--color-text-muted);
 		margin-bottom: var(--space-3);
-		text-decoration: underline dotted;
-	}
-	.client-card__address:hover {
-		color: var(--color-primary-emphasis);
-		text-decoration: underline;
 	}
 
 	.client-card__meta {
@@ -1012,38 +992,6 @@
 
 	.no-jobs {
 		color: var(--color-warning);
-	}
-
-	.client-card__actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		margin-left: var(--space-4);
-	}
-
-	.client-card__btn {
-		padding: var(--space-2) var(--space-4);
-		border-radius: var(--radius-sm);
-		border: none;
-		cursor: pointer;
-		font-size: var(--font-size-sm);
-		white-space: nowrap;
-	}
-
-	.client-card__btn--edit {
-		background: var(--color-primary-soft);
-		color: var(--color-primary);
-	}
-	.client-card__btn--delete {
-		background: var(--color-danger-soft);
-		color: var(--color-danger);
-	}
-
-	.client-card__btn--disabled {
-		background: var(--color-surface-alt) !important;
-		color: var(--color-text-subtle) !important;
-		cursor: not-allowed;
-		opacity: 0.6;
 	}
 
 	.clients-page__empty {

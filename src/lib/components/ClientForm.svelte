@@ -1,6 +1,6 @@
 <!-- src/lib/components/ClientForm.svelte -->
 <script lang="ts">
-	import { db, type Client, createClient, updateClient } from '$lib/db';
+	import { type Client, createClient, updateClient, deleteClient } from '$lib/db';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { z } from 'zod';
@@ -30,7 +30,9 @@
 	let {
 		show = $bindable(false),
 		client = $bindable<Client | null>(null),
-		onSaved = () => {}
+		canDelete = false,
+		onSaved = () => {},
+		onDeleted = () => {}
 	} = $props();
 
 	const isEditing = $derived(!!client?.id);
@@ -179,6 +181,20 @@
 
 	function closeForm() {
 		show = false;
+	}
+
+	async function handleDelete() {
+		if (!isEditing || !client?.id || !canDelete) return;
+		if (!confirm('Delete this client? This action cannot be undone.')) return;
+
+		try {
+			await deleteClient(client.id);
+			onDeleted();
+			show = false;
+		} catch (err) {
+			console.error(err);
+			alert('❌ Error deleting client');
+		}
 	}
 </script>
 
@@ -358,20 +374,33 @@
 			     Matches JobFormModal__footer exactly for visual + behavior consistency.
 			     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 			<div class="client-form-modal__footer sticky-footer">
-				<button
-					type="button"
-					class="client-form-modal__btn client-form-modal__btn--cancel button button--ghost"
-					onclick={closeForm}
-				>
-					Cancel
-				</button>
-				<button
-					type="submit"
-					form="client-form"
-					class="client-form-modal__btn client-form-modal__btn--primary button button--primary"
-				>
-					{isEditing ? 'Save Changes' : 'Create Client'}
-				</button>
+				<div class="client-form-modal__footer-primary">
+					<button
+						type="button"
+						class="client-form-modal__btn client-form-modal__btn--cancel button button--ghost"
+						onclick={closeForm}
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						form="client-form"
+						class="client-form-modal__btn client-form-modal__btn--primary button button--primary"
+					>
+						{isEditing ? 'Save Changes' : 'Create Client'}
+					</button>
+				</div>
+				{#if isEditing && canDelete}
+					<div class="client-form-modal__footer-secondary">
+						<button
+							type="button"
+							class="client-form-modal__text-action client-form-modal__text-action--danger"
+							onclick={handleDelete}
+						>
+							Delete Client
+						</button>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -467,13 +496,45 @@
 	.client-form-modal__footer {
 		/* base from .sticky-footer global */
 		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-2);
+	}
+
+	.client-form-modal__footer-primary {
+		display: flex;
 		gap: var(--space-3);
 		justify-content: flex-end;
 		align-items: center;
+		width: 100%;
 	}
 
-	.client-form-modal__footer .client-form-modal__btn {
+	.client-form-modal__footer-primary .client-form-modal__btn {
 		flex: 1;
+	}
+
+	.client-form-modal__footer-secondary {
+		display: flex;
+		justify-content: flex-end;
+		width: 100%;
+	}
+
+	.client-form-modal__text-action {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		text-decoration: underline;
+		opacity: 0.9;
+	}
+
+	.client-form-modal__text-action--danger {
+		color: var(--color-danger);
+	}
+
+	.client-form-modal__text-action:hover {
+		opacity: 1;
 	}
 
 	.client-form-modal__btn {
