@@ -549,19 +549,20 @@
 
 		<ul class="clients-page__list">
 		{#each displayedClients as client (client.id)}
-			<li class="client-card card" style="border-left: 6px solid {getAreaColor(client.areaOfTown)};">
-				<div
-					class="client-card__main"
-					role="button"
-					tabindex="0"
-					onclick={() => handleCardBodyClick(client)}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') {
-							e.preventDefault();
-							handleCardBodyClick(client);
-						}
-					}}
-				>
+			<li
+				class="client-card card"
+				style="border-left: 6px solid {getAreaColor(client.areaOfTown)};"
+				role="button"
+				tabindex="0"
+				onclick={() => handleCardBodyClick(client)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						handleCardBodyClick(client);
+					}
+				}}
+			>
+				<div class="client-card__main">
 					<div
 						class="client-card__header"
 						id="client-header-{client.id}"
@@ -920,22 +921,26 @@
 	.client-card {
 		/* base from global .card; list-specific */
 		padding: var(--space-5);
+		cursor: pointer;
+		transition:
+			background var(--transition-fast),
+			box-shadow var(--transition-fast),
+			transform var(--transition-fast);
+	}
+
+	.client-card:hover {
+		background: var(--color-surface-alt);
+		box-shadow: var(--shadow-md);
+		transform: translateY(-1px);
+	}
+
+	.client-card:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
 	}
 
 	.client-card__main {
 		flex: 1;
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		transition: background var(--transition-fast);
-	}
-
-	.client-card__main:hover {
-		background: var(--color-surface-alt);
-	}
-
-	.client-card__main:focus-visible {
-		outline: 2px solid var(--color-primary);
-		outline-offset: 2px;
 	}
 	.client-card__header {
 		display: flex;
