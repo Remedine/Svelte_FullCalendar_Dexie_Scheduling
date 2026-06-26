@@ -570,6 +570,19 @@
 						data-letter={getNameBucket(client.name)}
 					>
 						<h3 class="client-card__name">{client.name}</h3>
+						{#if client.phone || client.email}
+							<div class="client-card__contact" onclick={stopCardClick} role="presentation">
+								{#if client.phone}
+									<a href="tel:{client.phone}" class="contact-link">📞 {client.phone}</a>
+								{/if}
+								{#if client.phone && client.email}
+									<span class="client-card__contact-sep" aria-hidden="true">·</span>
+								{/if}
+								{#if client.email}
+									<a href="mailto:{client.email}" class="contact-link">✉️ {client.email}</a>
+								{/if}
+							</div>
+						{/if}
 						<div class="client-card__badges">
 							<span
 								class="area-badge"
@@ -592,15 +605,6 @@
 								</span>
 							{/if}
 						</div>
-					</div>
-
-					<div class="client-card__contact" onclick={stopCardClick} role="presentation">
-						{#if client.phone}
-							<a href="tel:{client.phone}" class="contact-link">📞 {client.phone}</a>
-						{/if}
-						{#if client.email}
-							<a href="mailto:{client.email}" class="contact-link">✉️ {client.email}</a>
-						{/if}
 					</div>
 
 					{#if getFullAddress(client)}
@@ -943,20 +947,43 @@
 		flex: 1;
 	}
 	.client-card__header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: var(--space-2);
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas:
+			'name badges'
+			'contact badges';
+		gap: var(--space-1) var(--space-3);
+		align-items: start;
 		margin-bottom: 0.75rem;
 		scroll-margin-top: var(--space-4);
 	}
+
 	.client-card__name {
+		grid-area: name;
 		margin: 0;
+		min-width: 0;
 		font-size: var(--font-size-lg);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
 	}
+
+	.client-card__contact {
+		grid-area: contact;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-1) var(--space-2);
+		min-width: 0;
+		line-height: var(--line-height-normal);
+	}
+
+	.client-card__contact-sep {
+		color: var(--color-text-subtle);
+		user-select: none;
+	}
+
 	.client-card__badges {
+		grid-area: badges;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
@@ -987,10 +1014,6 @@
 		color: var(--color-danger-emphasis);
 	}
 
-	.client-card__contact {
-		margin-bottom: var(--space-2);
-		line-height: var(--line-height-normal);
-	}
 	.contact-link {
 		color: var(--color-primary);
 		text-decoration: none;
