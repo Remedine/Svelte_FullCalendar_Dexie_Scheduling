@@ -571,6 +571,14 @@
 					>
 						<h3 class="client-card__name">{client.name}</h3>
 						<div class="client-card__badges">
+							<span
+								class="area-badge"
+								style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(
+									client.areaOfTown
+								)};"
+							>
+								{getAreaLabel(client.areaOfTown)}
+							</span>
 							{#if client.invoiceBadge}
 								<span
 									class="client-card__invoice-badge"
@@ -583,14 +591,6 @@
 									📄 {client.invoiceBadge.label}
 								</span>
 							{/if}
-							<span
-								class="area-badge"
-								style="background-color: {getAreaColor(client.areaOfTown)}20; color: {getAreaColor(
-									client.areaOfTown
-								)};"
-							>
-								{getAreaLabel(client.areaOfTown)}
-							</span>
 						</div>
 					</div>
 
@@ -958,9 +958,9 @@
 	}
 	.client-card__badges {
 		display: flex;
-		flex-wrap: wrap;
+		flex-direction: column;
+		align-items: flex-end;
 		gap: var(--space-1);
-		justify-content: flex-end;
 		flex-shrink: 0;
 	}
 	.client-card__invoice-badge {
