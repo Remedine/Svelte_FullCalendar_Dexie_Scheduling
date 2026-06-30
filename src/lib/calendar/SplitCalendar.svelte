@@ -63,15 +63,36 @@
 		return { x: 0, y: 0 };
 	}
 
-	// Mobile: drag only from + handle; resize uses FullCalendar native gesture on edge pills.
-	function selectMobileCalendarEvent(calendar: Calendar, instanceId: string) {
-		const cal = calendar as Calendar & {
-			dispatch?: (action: { type: string; eventInstanceId: string }) => void;
-			currentDataManager?: { actionRunner?: { drain: () => void } };
-		};
-		cal.dispatch?.({ type: 'SELECT_EVENT', eventInstanceId: instanceId });
-		// Flush so FC sees the selection before its resizer pointerdown runs (same touch).
-		cal.currentDataManager?.actionRunner?.drain();
+	// Mobile touch zones: drag only from + handle, resize only from edge pills (custom gesture).
+	// FullCalendar touch resize requires pre-selecting by internal instanceId and fights scroll.
+	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 56;
+	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 300;
+
+	let mobileEdgeScrollPointerY: number | null = null;
+	let mobileEdgeScrollRaf: number | null = null;
+	let mobileEdgeScrollLastTs: number | null = null;
+
+	let activeMobileResize: {
+		eventId: string;
+		eventEl: HTMLElement;
+		harnessEl: HTMLElement;
+		resizeStartEdge: boolean;
+		pointerStartY: number;
+		initialScrollTop: number;
+		initialHarnessTop: number;
+		initialHarnessHeight: number;
+		originalStart: Date;
+		originalEnd: Date;
+		previewStart: Date;
+		previewEnd: Date;
+	} | null = null;
+
+	function getMobileScrollEl(): HTMLElement | null {
+		const fcScroller = dayEl?.querySelector('.fc-scroller') as HTMLElement | null;
+		if (fcScroller && fcScroller.scrollHeight > fcScroller.clientHeight) {
+			return fcScroller;
+		}
+		return document.querySelector('.split-calendar__day-wrapper');
 	}
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
@@ -86,6 +107,218 @@
 		const harness = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
 		harness?.style.removeProperty('height');
 		harness?.style.removeProperty('top');
+		harness?.style.removeProperty('bottom');
+	}
+
+	function getMobileSlotMetrics(harnessEl?: HTMLElement | null): { slotHeight: number; slotMs: number } {
+		const col = harnessEl?.closest('.fc-timegrid-col');
+		const slotEl =
+			col?.querySelector('.fc-timegrid-slot-lane') ||
+			col?.querySelector('.fc-timegrid-slot') ||
+			document.querySelector('.fc-timegrid-slot-lane') ||
+			document.querySelector('.fc-timegrid-slot');
+		const slotHeight = slotEl?.getBoundingClientRect().height || 42;
+		const duration = dayApi?.getOption('slotDuration') as
+			| { milliseconds?: number }
+			| string
+			| null
+			| undefined;
+		let slotMs = 30 * 60 * 1000;
+		if (duration && typeof duration === 'object' && typeof duration.milliseconds === 'number') {
+			slotMs = duration.milliseconds;
+		}
+		return { slotHeight, slotMs };
+	}
+
+	function snapMobileResizePreview(
+		originalStart: Date,
+		originalEnd: Date,
+		resizeStartEdge: boolean,
+		slotDelta: number,
+		slotMs: number
+	): { start: Date; end: Date } {
+		if (resizeStartEdge) {
+			const nextStart = new Date(originalStart.getTime() + slotDelta * slotMs);
+			if (nextStart.getTime() >= originalEnd.getTime() - slotMs) {
+				return {
+					start: new Date(originalEnd.getTime() - slotMs),
+					end: originalEnd
+				};
+			}
+			return { start: nextStart, end: originalEnd };
+		}
+
+		const nextEnd = new Date(originalEnd.getTime() + slotDelta * slotMs);
+		if (nextEnd.getTime() <= originalStart.getTime() + slotMs) {
+			return {
+				start: originalStart,
+				end: new Date(originalStart.getTime() + slotMs)
+			};
+		}
+		return { start: originalStart, end: nextEnd };
+	}
+
+	function applyMobileResizePreview(
+		gesture: NonNullable<typeof activeMobileResize>,
+		start: Date,
+		end: Date,
+		slotMs: number
+	) {
+		const { slotHeight } = getMobileSlotMetrics(gesture.harnessEl);
+		const startSlotDelta = Math.round((start.getTime() - gesture.originalStart.getTime()) / slotMs);
+		const endSlotDelta = Math.round((end.getTime() - gesture.originalEnd.getTime()) / slotMs);
+
+		// FC positions harness with top+bottom; switch to top+height for preview and clear bottom.
+		gesture.harnessEl.style.removeProperty('bottom');
+
+		if (gesture.resizeStartEdge) {
+			const newTop = gesture.initialHarnessTop + startSlotDelta * slotHeight;
+			const newHeight = Math.max(
+				slotHeight,
+				gesture.initialHarnessHeight - startSlotDelta * slotHeight
+			);
+			gesture.harnessEl.style.top = `${newTop}px`;
+			gesture.harnessEl.style.height = `${newHeight}px`;
+			return;
+		}
+
+		gesture.harnessEl.style.top = `${gesture.initialHarnessTop}px`;
+		gesture.harnessEl.style.height = `${Math.max(
+			slotHeight,
+			gesture.initialHarnessHeight + endSlotDelta * slotHeight
+		)}px`;
+	}
+
+	function getMobileScrollCompensation(gesture: NonNullable<typeof activeMobileResize>): number {
+		const scrollEl = getMobileScrollEl();
+		if (!scrollEl) return 0;
+		return scrollEl.scrollTop - gesture.initialScrollTop;
+	}
+
+	function updateMobileResizeFromClientY(clientY: number) {
+		if (!activeMobileResize) return;
+
+		const { slotHeight, slotMs } = getMobileSlotMetrics(activeMobileResize.harnessEl);
+		const scrollCompensation = getMobileScrollCompensation(activeMobileResize);
+		const slotDelta = Math.round(
+			(clientY - activeMobileResize.pointerStartY + scrollCompensation) / slotHeight
+		);
+		const snapped = snapMobileResizePreview(
+			activeMobileResize.originalStart,
+			activeMobileResize.originalEnd,
+			activeMobileResize.resizeStartEdge,
+			slotDelta,
+			slotMs
+		);
+		activeMobileResize.previewStart = snapped.start;
+		activeMobileResize.previewEnd = snapped.end;
+		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end, slotMs);
+	}
+
+	function stopMobileEdgeAutoScroll() {
+		if (mobileEdgeScrollRaf != null) {
+			cancelAnimationFrame(mobileEdgeScrollRaf);
+			mobileEdgeScrollRaf = null;
+		}
+		mobileEdgeScrollPointerY = null;
+		mobileEdgeScrollLastTs = null;
+	}
+
+	function runMobileEdgeAutoScrollFrame(ts: number) {
+		if (!activeMobileResize) {
+			stopMobileEdgeAutoScroll();
+			return;
+		}
+
+		const scrollEl = getMobileScrollEl();
+		const pointerY = mobileEdgeScrollPointerY;
+
+		if (scrollEl && pointerY != null) {
+			const rect = scrollEl.getBoundingClientRect();
+			let velocity = 0;
+			const fromTop = pointerY - rect.top;
+			const fromBottom = rect.bottom - pointerY;
+
+			if (fromTop >= 0 && fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+				const proximity =
+					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromTop) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
+				velocity = -(proximity * proximity) * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			} else if (fromBottom >= 0 && fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+				const proximity =
+					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromBottom) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
+				velocity = proximity * proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			}
+
+			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
+				const dt = Math.min(0.05, (ts - mobileEdgeScrollLastTs) / 1000);
+				const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+				scrollEl.scrollTop = Math.min(
+					maxScroll,
+					Math.max(0, scrollEl.scrollTop + velocity * dt)
+				);
+			}
+
+			updateMobileResizeFromClientY(pointerY);
+		}
+
+		mobileEdgeScrollLastTs = ts;
+		mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
+	}
+
+	function ensureMobileEdgeAutoScrollRunning(clientY: number) {
+		mobileEdgeScrollPointerY = clientY;
+		if (mobileEdgeScrollRaf == null) {
+			mobileEdgeScrollLastTs = performance.now();
+			mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
+		}
+	}
+
+	function clearMobileResizeListeners() {
+		document.removeEventListener('touchmove', handleMobileResizeMove);
+		document.removeEventListener('touchend', handleMobileResizeEnd);
+		document.removeEventListener('touchcancel', handleMobileResizeEnd);
+		stopMobileEdgeAutoScroll();
+	}
+
+	function handleMobileResizeMove(e: TouchEvent) {
+		if (!activeMobileResize) return;
+		const touch = e.touches[0];
+		if (!touch) return;
+
+		updateMobileResizeFromClientY(touch.clientY);
+		ensureMobileEdgeAutoScrollRunning(touch.clientY);
+		e.preventDefault();
+	}
+
+	async function handleMobileResizeEnd() {
+		const gesture = activeMobileResize;
+		activeMobileResize = null;
+		clearMobileResizeListeners();
+		endCalendarInteraction();
+
+		if (!gesture) return;
+
+		const changed =
+			gesture.previewStart.getTime() !== gesture.originalStart.getTime() ||
+			gesture.previewEnd.getTime() !== gesture.originalEnd.getTime();
+
+		gesture.eventEl.classList.remove('fc-event-resizing');
+		const harness = gesture.harnessEl;
+		if (!changed) {
+			clearStaleEventHarnessStyles(gesture.eventEl);
+			dayApi?.refetchEvents();
+			return;
+		}
+
+		try {
+			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			clearStaleEventHarnessStyles(gesture.eventEl);
+		} catch {
+			clearStaleEventHarnessStyles(gesture.eventEl);
+			dayApi?.refetchEvents();
+			toast.error('Could not resize appointment');
+		}
 	}
 
 	function bindMobileDragHandle(eventEl: HTMLElement) {
@@ -96,8 +329,12 @@
 
 	function setupMobileEventTouchZones(info: {
 		el: HTMLElement;
-		event: { id: string };
-		view: { calendar: Calendar };
+		event: {
+			id: string;
+			start: Date | null;
+			end: Date | null;
+			extendedProps?: { status?: string };
+		};
 	}) {
 		const eventEl = info.el;
 		if (eventEl.dataset.mobileTouchZones === '1') {
@@ -109,24 +346,62 @@
 		clearStaleEventHarnessStyles(eventEl);
 		bindMobileDragHandle(eventEl);
 
-		const instanceId = info.event.id;
-		const calendar = info.view.calendar;
+		const eventId = info.event.id;
+		if (!info.event.start) return;
+		const originalStart = new Date(info.event.start);
+		const originalEnd = info.event.end
+			? new Date(info.event.end)
+			: new Date(originalStart.getTime() + getMobileSlotMetrics().slotMs);
 
-		// FC touch/pointer resize requires a selected event before the resizer drag starts.
-		const primeResizeSelection = (target: EventTarget | null) => {
-			if (target instanceof Element && target.closest('.fc-event-resizer')) {
-				selectMobileCalendarEvent(calendar, instanceId);
-			}
-		};
+		eventEl.addEventListener(
+			'touchstart',
+			(e) => {
+				const target = e.target;
+				if (!(target instanceof Element)) return;
+				const resizer = target.closest('.fc-event-resizer');
+				if (!resizer) return;
 
-		eventEl.addEventListener('touchstart', (e) => primeResizeSelection(e.target), {
-			capture: true,
-			passive: true
-		});
-		eventEl.addEventListener('pointerdown', (e) => primeResizeSelection(e.target), {
-			capture: true,
-			passive: true
-		});
+				const status = info.event.extendedProps?.status;
+				if (status === 'completed' || status === 'cancelled') {
+					toast.error('Cannot resize cancelled or completed jobs');
+					return;
+				}
+
+				const touch = e.changedTouches[0] || e.touches[0];
+				if (!touch) return;
+
+				const harnessEl = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+				if (!harnessEl) return;
+
+				e.stopPropagation();
+
+				const scrollEl = getMobileScrollEl();
+
+				beginCalendarInteraction();
+				activeMobileResize = {
+					eventId,
+					eventEl,
+					harnessEl,
+					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
+					pointerStartY: touch.clientY,
+					initialScrollTop: scrollEl?.scrollTop ?? 0,
+					initialHarnessTop: harnessEl.offsetTop,
+					initialHarnessHeight: harnessEl.offsetHeight,
+					originalStart,
+					originalEnd,
+					previewStart: originalStart,
+					previewEnd: originalEnd
+				};
+
+				eventEl.classList.add('fc-event-resizing');
+				updateMobileResizeFromClientY(touch.clientY);
+				ensureMobileEdgeAutoScrollRunning(touch.clientY);
+				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
+				document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
+				document.addEventListener('touchcancel', handleMobileResizeEnd, { passive: true });
+			},
+			{ capture: true, passive: true }
+		);
 	}
 
 	let dayEl = $state<HTMLDivElement | null>(null);
@@ -893,8 +1168,6 @@
 
 				eventResizeStart: (info) => {
 					beginCalendarInteraction();
-					// Clear leftover pixel harness styles from older custom resize previews.
-					clearStaleEventHarnessStyles(info.el);
 				},
 
 				eventResizeStop: (info) => {
@@ -1690,17 +1963,12 @@
 			padding-top: 28px;
 		}
 
-		/* Keep event content clipped to the harness so a bad mid-gesture layout recalc cannot leave floating avatars/title. */
-		:global(.fc-timegrid-event-harness .fc-timegrid-event) {
-			height: 100%;
-			overflow: hidden;
-		}
-
 		:global(.fc-event-resizer) {
 			height: 44px;
 			z-index: 22;
 			background-color: rgba(255, 255, 255, 0.2);
 			border-radius: 4px;
+			touch-action: none;
 		}
 
 		:global(.fc-event-resizer-end) {
