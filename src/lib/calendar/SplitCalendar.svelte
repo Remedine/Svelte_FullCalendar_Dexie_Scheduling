@@ -32,7 +32,8 @@
 	let appointmentDragActive = $state(false);
 
 	// Phase 1: edge-dwell on month picker while dragging an appointment to another day/month.
-	const MONTH_PICKER_EDGE_FRACTION = 0.15;
+	// Month change only when hovering the ←/→ nav buttons — not the day grid (Sun/Sat columns).
+	const MONTH_PICKER_NAV_HIT_PAD_PX = 8;
 	const MONTH_PICKER_EDGE_DWELL_MS = 1000;
 	const MONTH_PICKER_EDGE_REPEAT_MS = 800;
 
@@ -60,6 +61,22 @@
 		}, MONTH_PICKER_EDGE_REPEAT_MS);
 	}
 
+	function isPointerInElement(
+		clientX: number,
+		clientY: number,
+		el: Element | null,
+		pad = 0
+	): boolean {
+		if (!el) return false;
+		const r = el.getBoundingClientRect();
+		return (
+			clientX >= r.left - pad &&
+			clientX <= r.right + pad &&
+			clientY >= r.top - pad &&
+			clientY <= r.bottom + pad
+		);
+	}
+
 	function handleAppointmentDragPointerMove(clientX: number, clientY: number) {
 		const picker = document.querySelector('.month-picker');
 		if (!picker) {
@@ -79,10 +96,30 @@
 			return;
 		}
 
-		const relX = (clientX - rect.left) / rect.width;
+		const grid = picker.querySelector('.month-picker__grid');
+		if (grid) {
+			const gridRect = grid.getBoundingClientRect();
+			const overDayGrid =
+				clientX >= gridRect.left &&
+				clientX <= gridRect.right &&
+				clientY >= gridRect.top &&
+				clientY <= gridRect.bottom;
+			if (overDayGrid) {
+				clearMonthPickerEdgeDwell();
+				return;
+			}
+		}
+
+		const navButtons = picker.querySelectorAll<HTMLElement>('.month-picker__nav');
+		const leftNav = navButtons[0] ?? null;
+		const rightNav = navButtons.length > 1 ? navButtons[navButtons.length - 1] : null;
+
 		let side: 'left' | 'right' | null = null;
-		if (relX <= MONTH_PICKER_EDGE_FRACTION) side = 'left';
-		else if (relX >= 1 - MONTH_PICKER_EDGE_FRACTION) side = 'right';
+		if (isPointerInElement(clientX, clientY, leftNav, MONTH_PICKER_NAV_HIT_PAD_PX)) {
+			side = 'left';
+		} else if (isPointerInElement(clientX, clientY, rightNav, MONTH_PICKER_NAV_HIT_PAD_PX)) {
+			side = 'right';
+		}
 
 		if (side === monthEdgeActiveSide) return;
 
