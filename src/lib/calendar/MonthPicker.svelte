@@ -83,6 +83,13 @@
 			nextMonthDay++;
 		}
 
+		// Always render 6 rows so the nav footer does not jump between 5- and 6-week months.
+		const MONTH_GRID_CELLS = 42;
+		while (days.length < MONTH_GRID_CELLS) {
+			days.push({ date: new Date(year, month + 1, nextMonthDay), isCurrent: false });
+			nextMonthDay++;
+		}
+
 		return days;
 	}
 
@@ -374,6 +381,10 @@
 		display: grid;
 		grid-template-columns: repeat(7, 1fr);
 		gap: 2px;
+	}
+
+	.month-picker__grid {
+		grid-template-rows: repeat(6, 1fr);
 	}
 
 	.month-picker__weekday {
