@@ -17,6 +17,9 @@ import {
 	declineQuickUnlockSetup,
 	clearQuickUnlockDecline,
 	shouldOfferQuickUnlockSetup,
+	canOfferQuickUnlockToastAfterLogin,
+	userNeedsWelcomeOnboarding,
+	userNeedsPhotoOnboarding,
 	getPinAttemptsRemaining,
 	recordFailedPinAttempt,
 	clearPinAttempts,
@@ -72,6 +75,50 @@ describe('deviceUnlock', () => {
 
 		clearQuickUnlockDecline();
 		await expect(shouldOfferQuickUnlockSetup('user-1')).resolves.toBe(true);
+	});
+
+	it('canOfferQuickUnlockToastAfterLogin waits for welcome and photo onboarding', () => {
+		expect(
+			canOfferQuickUnlockToastAfterLogin({
+				verified: false,
+				forcePhotoUpdate: false
+			})
+		).toBe(false);
+		expect(
+			canOfferQuickUnlockToastAfterLogin({
+				verified: true,
+				forcePhotoUpdate: true,
+				photo: ''
+			})
+		).toBe(false);
+		expect(
+			canOfferQuickUnlockToastAfterLogin({
+				verified: true,
+				forcePhotoUpdate: true,
+				photo: 'data:image/png;base64,abc'
+			})
+		).toBe(true);
+		expect(
+			canOfferQuickUnlockToastAfterLogin({
+				verified: true,
+				forcePhotoUpdate: false
+			})
+		).toBe(true);
+	});
+
+	it('userNeedsWelcomeOnboarding and userNeedsPhotoOnboarding', () => {
+		expect(userNeedsWelcomeOnboarding({ verified: false })).toBe(true);
+		expect(userNeedsWelcomeOnboarding({ verified: true })).toBe(false);
+		expect(
+			userNeedsPhotoOnboarding({ verified: true, forcePhotoUpdate: true, photo: '  ' })
+		).toBe(true);
+		expect(
+			userNeedsPhotoOnboarding({
+				verified: true,
+				forcePhotoUpdate: true,
+				photo: 'data:image/png;base64,x'
+			})
+		).toBe(false);
 	});
 
 	it('shouldOfferQuickUnlockSetup is false when already enabled', async () => {

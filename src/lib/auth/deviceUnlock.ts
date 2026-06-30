@@ -166,6 +166,31 @@ export async function shouldOfferQuickUnlockSetup(userId: string): Promise<boole
 	return true;
 }
 
+export type LoginOnboardingUser = {
+	verified?: boolean | null;
+	forcePhotoUpdate?: boolean;
+	photo?: string | null;
+};
+
+/** First-login password reset (WelcomeModal) still pending. */
+export function userNeedsWelcomeOnboarding(user: LoginOnboardingUser): boolean {
+	return user.verified === false;
+}
+
+/** Admin-mandated photo still pending (ForcePhotoUpdate). */
+export function userNeedsPhotoOnboarding(user: LoginOnboardingUser): boolean {
+	if (!user.forcePhotoUpdate) return false;
+	const photo = user.photo?.trim();
+	return !photo;
+}
+
+/** Quick-unlock toast only after mandatory login onboarding modals are done. */
+export function canOfferQuickUnlockToastAfterLogin(user: LoginOnboardingUser): boolean {
+	if (userNeedsWelcomeOnboarding(user)) return false;
+	if (userNeedsPhotoOnboarding(user)) return false;
+	return true;
+}
+
 /** Clear quick unlock when a different user signs in on this device. */
 export async function ensureDeviceAuthMatchesUser(userId: string): Promise<void> {
 	try {

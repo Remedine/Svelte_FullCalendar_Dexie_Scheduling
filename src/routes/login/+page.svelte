@@ -7,7 +7,12 @@
 	import WelcomeModal from '$lib/components/WelcomeModal.svelte';
 	import ForcePhotoUpdate from '$lib/components/ForcePhotoUpdate.svelte';
 	import { canUsePasskeys } from '$lib/auth/passkeys';
-	import { shouldOfferQuickUnlockSetup } from '$lib/auth/deviceUnlock';
+	import {
+		canOfferQuickUnlockToastAfterLogin,
+		shouldOfferQuickUnlockSetup,
+		userNeedsPhotoOnboarding,
+		userNeedsWelcomeOnboarding
+	} from '$lib/auth/deviceUnlock';
 	import { toast } from '$lib/stores/toast.svelte';
 
 	let email = $state('');
@@ -28,11 +33,41 @@
 	let forcePhotoUser = $state<User | null>(null);
 	const passkeysAvailable = $derived(canUsePasskeys());
 
-	function userNeedsPhoto(user: User): boolean {
-		if (!user.forcePhotoUpdate) return false;
-		const photo = user.photo?.trim();
-		return !photo;
+	async function lookupFreshUser(fallback?: User | null): Promise<User | null> {
+		const currentEmail = (email || '').trim().toLowerCase();
+		if (!currentEmail) return fallback ?? null;
+
+		try {
+			let fresh = await db.users.where('email').equalsIgnoreCase(currentEmail).first();
+
+			if (!fresh) {
+				const guess = currentEmail.split('@')[0];
+				fresh =
+					(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
+					(await db.users.where('name').equalsIgnoreCase(guess).first());
+			}
+
+			return fresh ?? fallback ?? null;
+		} catch {
+			return fallback ?? null;
+		}
 	}
+
+	async function finishLoginToApp(user: User | null, offerQuickUnlockToast: boolean) {
+		goto('/calendar', { replaceState: true });
+		if (!user || !offerQuickUnlockToast || !canOfferQuickUnlockToastAfterLogin(user)) return;
+		const showQuickUnlockHint = await shouldOfferQuickUnlockSetup(String(user.id));
+		if (showQuickUnlockHint) {
+			toast.showWithAction('Click here to set a quick login PIN', () => {
+				goto('/profile?quickUnlock=setup');
+			});
+		}
+	}
+
+	type ContinueAfterAuthOptions = {
+		/** User chose "Later" on ForcePhotoUpdate — enter app without re-showing photo modal or toast. */
+		deferPhoto?: boolean;
+	};
 
 	function openForgotPassword() {
 		forgotEmail = (email || '').trim().toLowerCase();
@@ -63,24 +98,20 @@
 		}
 	}
 
-	async function continueAfterAuth(localUser: User) {
-		if (localUser.verified === false) {
+	async function continueAfterAuth(localUser: User, options: ContinueAfterAuthOptions = {}) {
+		if (userNeedsWelcomeOnboarding(localUser)) {
 			welcomeUser = localUser;
 			showWelcome = true;
 			return;
 		}
-		if (userNeedsPhoto(localUser)) {
+		if (!options.deferPhoto && userNeedsPhotoOnboarding(localUser)) {
 			forcePhotoUser = localUser;
 			showForcePhoto = true;
 			return;
 		}
-		const showQuickUnlockHint = await shouldOfferQuickUnlockSetup(String(localUser.id));
-		goto('/calendar', { replaceState: true });
-		if (showQuickUnlockHint) {
-			toast.showWithAction('Click here to set a quick login PIN', () => {
-				goto('/profile?quickUnlock=setup');
-			});
-		}
+		const offerToast =
+			!options.deferPhoto && canOfferQuickUnlockToastAfterLogin(localUser);
+		await finishLoginToApp(localUser, offerToast);
 	}
 
 	async function handlePasskeyLogin() {
@@ -150,30 +181,27 @@
 
 	// Re-check Dexie after WelcomeModal completes, then run the same post-auth gates.
 	async function checkPhotoRequirementAndContinue() {
-		const currentEmail = (email || '').trim().toLowerCase();
-		if (!currentEmail) {
-			goto('/calendar', { replaceState: true });
+		const fresh = await lookupFreshUser();
+		if (fresh) {
+			await continueAfterAuth(fresh);
+		} else {
+			await finishLoginToApp(null, false);
+		}
+	}
+
+	async function handleForcePhotoClose() {
+		const fallback = forcePhotoUser;
+		showForcePhoto = false;
+		forcePhotoUser = null;
+
+		const fresh = await lookupFreshUser(fallback);
+		if (!fresh) {
+			await finishLoginToApp(null, false);
 			return;
 		}
 
-		try {
-			let fresh = await db.users.where('email').equalsIgnoreCase(currentEmail).first();
-
-			if (!fresh) {
-				const guess = currentEmail.split('@')[0];
-				fresh =
-					(await db.users.where('firstName').equalsIgnoreCase(guess).first()) ||
-					(await db.users.where('name').equalsIgnoreCase(guess).first());
-			}
-
-			if (fresh) {
-				await continueAfterAuth(fresh);
-			} else {
-				goto('/calendar', { replaceState: true });
-			}
-		} catch {
-			goto('/calendar', { replaceState: true });
-		}
+		const deferPhoto = userNeedsPhotoOnboarding(fresh);
+		await continueAfterAuth(fresh, { deferPhoto });
 	}
 </script>
 
@@ -324,19 +352,7 @@
 	{/if}
 
 	{#if showForcePhoto && forcePhotoUser}
-		<ForcePhotoUpdate
-			user={forcePhotoUser}
-			onClose={async () => {
-				const user = forcePhotoUser;
-				showForcePhoto = false;
-				forcePhotoUser = null;
-				if (user) {
-					await continueAfterAuth(user);
-				} else {
-					goto('/calendar', { replaceState: true });
-				}
-			}}
-		/>
+		<ForcePhotoUpdate user={forcePhotoUser} onClose={handleForcePhotoClose} />
 	{/if}
 
 </div>
