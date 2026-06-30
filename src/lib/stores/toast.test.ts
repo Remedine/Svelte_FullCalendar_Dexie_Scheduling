@@ -59,4 +59,12 @@ describe('toast store (runes $state)', () => {
 		toast.clearAll();
 		expect(toast.toasts.length).toBe(0);
 	});
+
+	it('showWithAction adds actionable toast with 5s default', () => {
+		const onAction = vi.fn();
+		toast.showWithAction('Click here', onAction, 0);
+		expect(toast.toasts.length).toBe(1);
+		expect(toast.toasts[0].actionLabel).toBe('Click here');
+		expect(toast.toasts[0].onAction).toBe(onAction);
+	});
 });

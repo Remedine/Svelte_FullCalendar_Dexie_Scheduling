@@ -1,12 +1,25 @@
 <!-- src/lib/components/Toast.svelte -->
 <script>
 	import { toast } from '$lib/stores/toast.svelte.ts';
+
+	function handleAction(t) {
+		t.onAction?.();
+		toast.dismiss(t.id);
+	}
 </script>
 
 <div class="toast-container">
 	{#each toast.toasts as t (t.id)}
 		<div class="toast toast--{t.type}">
-			<span class="toast__message">{t.message}</span>
+			<div class="toast__message">
+				{#if t.actionLabel}
+					<button type="button" class="toast__action" onclick={() => handleAction(t)}>
+						{t.actionLabel}
+					</button>
+				{:else}
+					{t.message}
+				{/if}
+			</div>
 			<button
 				class="toast__close"
 				onclick={() => toast.dismiss(t.id)}
@@ -62,6 +75,23 @@
 	.toast__message {
 		flex: 1;
 		margin-right: var(--space-4);
+	}
+
+	.toast__action {
+		background: none;
+		border: none;
+		color: inherit;
+		font: inherit;
+		font-weight: var(--font-weight-semibold);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		cursor: pointer;
+		padding: 0;
+		text-align: left;
+	}
+
+	.toast__action:hover {
+		opacity: 0.92;
 	}
 
 	.toast__close {

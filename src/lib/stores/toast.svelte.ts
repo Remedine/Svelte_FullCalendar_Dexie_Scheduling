@@ -5,12 +5,19 @@ export interface ToastItem {
 	id: number;
 	message: string;
 	type: 'success' | 'error' | 'info';
+	actionLabel?: string;
+	onAction?: () => void;
 }
 
 export const toast = $state({
 	toasts: [] as ToastItem[],
 
-	show(message: string, type: 'success' | 'error' | 'info' = 'success', duration = 4500) {
+	show(
+		message: string,
+		type: 'success' | 'error' | 'info' = 'success',
+		duration = 4500,
+		opts?: { actionLabel?: string; onAction?: () => void }
+	) {
 		if (!browser) return;
 
 		const id = Date.now() + Math.random();
@@ -20,7 +27,9 @@ export const toast = $state({
 			{
 				id,
 				message,
-				type
+				type,
+				actionLabel: opts?.actionLabel,
+				onAction: opts?.onAction
 			}
 		];
 
@@ -31,6 +40,16 @@ export const toast = $state({
 		}
 
 		return id;
+	},
+
+	/** Actionable toast (e.g. post-login quick PIN prompt). Default 5s auto-dismiss. */
+	showWithAction(
+		actionLabel: string,
+		onAction: () => void,
+		duration = 5000,
+		type: 'success' | 'error' | 'info' = 'info'
+	) {
+		return this.show('', type, duration, { actionLabel, onAction });
 	},
 
 	success(message: string, duration = 4000) {

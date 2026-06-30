@@ -6,9 +6,9 @@
 	import type { User } from '$lib/db';
 	import WelcomeModal from '$lib/components/WelcomeModal.svelte';
 	import ForcePhotoUpdate from '$lib/components/ForcePhotoUpdate.svelte';
-	import QuickUnlockSetup from '$lib/components/QuickUnlockSetup.svelte';
 	import { canUsePasskeys } from '$lib/auth/passkeys';
 	import { shouldOfferQuickUnlockSetup } from '$lib/auth/deviceUnlock';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -26,8 +26,6 @@
 	// or directly on login for verified users where an admin set forcePhotoUpdate).
 	let showForcePhoto = $state(false);
 	let forcePhotoUser = $state<User | null>(null);
-	let showQuickUnlockSetup = $state(false);
-	let quickUnlockUser = $state<User | null>(null);
 	const passkeysAvailable = $derived(canUsePasskeys());
 
 	function userNeedsPhoto(user: User): boolean {
@@ -65,7 +63,7 @@
 		}
 	}
 
-	async function continueAfterAuth(localUser: User, opts?: { skipQuickUnlockOffer?: boolean }) {
+	async function continueAfterAuth(localUser: User) {
 		if (localUser.verified === false) {
 			welcomeUser = localUser;
 			showWelcome = true;
@@ -76,15 +74,13 @@
 			showForcePhoto = true;
 			return;
 		}
-		if (
-			!opts?.skipQuickUnlockOffer &&
-			(await shouldOfferQuickUnlockSetup(String(localUser.id)))
-		) {
-			quickUnlockUser = localUser;
-			showQuickUnlockSetup = true;
-			return;
-		}
+		const showQuickUnlockHint = await shouldOfferQuickUnlockSetup(String(localUser.id));
 		goto('/calendar', { replaceState: true });
+		if (showQuickUnlockHint) {
+			toast.showWithAction('Click here to set a quick login PIN', () => {
+				goto('/profile?quickUnlock=setup');
+			});
+		}
 	}
 
 	async function handlePasskeyLogin() {
@@ -110,7 +106,7 @@
 			clearTimeout(loginUiTimeout);
 			email = normalizedEmail;
 			isLoading = false;
-			await continueAfterAuth(localUser, { skipQuickUnlockOffer: true });
+			await continueAfterAuth(localUser);
 		} catch (err: any) {
 			clearTimeout(loginUiTimeout);
 			error = err?.message || 'Passkey sign-in failed';
@@ -182,7 +178,7 @@
 </script>
 
 <div class="login-page">
-	{#if !showWelcome && !showForcePhoto && !showQuickUnlockSetup}
+	{#if !showWelcome && !showForcePhoto}
 		<div class="login-card">
 			<h1 class="login-card__title">CapitalCity Windows</h1>
 			<p class="login-card__subtitle">
@@ -309,8 +305,7 @@
 			<p class="login-card__help">
 				Sign in with email and password.
 				{#if passkeysAvailable}
-					Passkeys are for signing in — device unlock (PIN / fingerprint) is optional and set up after
-					login or in Profile.
+					Passkeys are for signing in — optional device PIN / fingerprint unlock can be set in Profile.
 				{/if}
 			</p>
 			{/if}
@@ -344,23 +339,6 @@
 		/>
 	{/if}
 
-	{#if showQuickUnlockSetup && quickUnlockUser}
-		<QuickUnlockSetup
-			userId={String(quickUnlockUser.id)}
-			email={(quickUnlockUser.email || email).trim().toLowerCase()}
-			displayName={quickUnlockUser.name || quickUnlockUser.email || 'Crew'}
-			onComplete={() => {
-				showQuickUnlockSetup = false;
-				quickUnlockUser = null;
-				goto('/calendar', { replaceState: true });
-			}}
-			onSkip={() => {
-				showQuickUnlockSetup = false;
-				quickUnlockUser = null;
-				goto('/calendar', { replaceState: true });
-			}}
-		/>
-	{/if}
 </div>
 
 <style>

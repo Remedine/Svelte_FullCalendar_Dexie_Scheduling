@@ -10,6 +10,8 @@
 	// - Email editing fully supported.
 	// )=- PIN/forcePin completely removed from UI, state, and save paths. Only email/password auth now.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db, updateUser, getUserPhotoSrc } from '$lib/db';
 	import { pb } from '$lib/db/pb';
@@ -125,6 +127,14 @@
 
 	$effect(() => {
 		if (auth.currentUser) void refreshDeviceAuthUi();
+	});
+
+	// Open quick-unlock setup when arriving from the post-login toast link.
+	$effect(() => {
+		if (page.url.searchParams.get('quickUnlock') !== 'setup' || !auth.currentUser) return;
+		if (editing === 'quickUnlock') return;
+		startEditing('quickUnlock');
+		goto('/profile', { replaceState: true });
 	});
 
 	function onProfilePinFirstComplete(code: string) {
