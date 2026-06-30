@@ -268,7 +268,7 @@
 	.month-picker {
 		container-type: inline-size;
 		/* Fixed grid slot: 6-row months shrink cells instead of shifting the footer. */
-		--month-picker-grid-height: 252px;
+		--month-picker-grid-height: 302px;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
@@ -461,9 +461,9 @@
 	@media (max-width: 768px) {
 		.month-picker {
 			/* Midpoint between the prior compact (~1/3) and original (~2/3) mobile picker. */
-			--month-picker-grid-height: 112px;
-			--month-picker-nav-height: 39px;
-			padding: 3px 5px;
+			--month-picker-grid-height: 134px;
+			--month-picker-nav-height: 47px;
+			padding: 4px 6px;
 		}
 
 		.month-picker__header {
