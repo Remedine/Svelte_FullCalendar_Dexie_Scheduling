@@ -98,6 +98,7 @@
 				calendarDayStartHour: 6,
 				calendarDayEndHour: 22,
 				quickUnlockIdleMinutes: 120,
+				desktopSecurityIdleMinutes: 30,
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -148,6 +149,12 @@
 			return;
 		}
 
+		const desktopIdleMinutes = Number(editingOptions.desktopSecurityIdleMinutes ?? 30);
+		if (Number.isNaN(desktopIdleMinutes) || desktopIdleMinutes < 1 || desktopIdleMinutes > 24 * 60) {
+			toast.error('Desktop security idle time must be between 1 and 1440 minutes.');
+			return;
+		}
+
 		isSaving = true;
 
 		try {
@@ -156,6 +163,7 @@
 				calendarDayStartHour: calStart,
 				calendarDayEndHour: calEnd,
 				quickUnlockIdleMinutes: idleMinutes,
+				desktopSecurityIdleMinutes: desktopIdleMinutes,
 				crewAssignmentHour: hour,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'
@@ -492,11 +500,10 @@
 			<h2>App Security</h2>
 
 			<div class="form-section">
-				<h3>Quick unlock idle time</h3>
+				<h3>Mobile quick unlock</h3>
 				<p class="options-page__help">
-					After a crew member unlocks the app, how long the app can stay in the background before
-					asking for their PIN or biometric again. Does not affect sign-in — only the device unlock
-					layer.
+					On phones and small screens only: after a crew member unlocks the app, how long it can stay
+					in the background before asking for their PIN or biometric again. Does not affect sign-in.
 				</p>
 				<div class="form-grid">
 					<label for="opt-idle-minutes" class="label">Re-lock after (minutes)</label>
@@ -511,6 +518,28 @@
 				</div>
 				<p class="options-page__help">
 					Default is 120 minutes (2 hours). Common values: 15, 30, 60, 120.
+				</p>
+			</div>
+
+			<div class="form-section">
+				<h3>Desktop session timeout</h3>
+				<p class="options-page__help">
+					On desktop browsers: how long a signed-in user can be inactive before they must sign in
+					again with email and password. PIN quick unlock does not apply on desktop.
+				</p>
+				<div class="form-grid">
+					<label for="opt-desktop-idle-minutes" class="label">Sign out after (minutes)</label>
+					<input
+						id="opt-desktop-idle-minutes"
+						type="number"
+						min="1"
+						max="1440"
+						class="input"
+						bind:value={editingOptions.desktopSecurityIdleMinutes}
+					/>
+				</div>
+				<p class="options-page__help">
+					Default is 30 minutes. Common values: 15, 30, 60, 120.
 				</p>
 			</div>
 		{:else if activeTab === 'invoice'}

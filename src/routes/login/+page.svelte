@@ -14,6 +14,7 @@
 		userNeedsWelcomeOnboarding
 	} from '$lib/auth/deviceUnlock';
 	import { toast } from '$lib/stores/toast.svelte';
+	import { page } from '$app/state';
 
 	let email = $state('');
 	let password = $state('');
@@ -32,6 +33,11 @@
 	let showForcePhoto = $state(false);
 	let forcePhotoUser = $state<User | null>(null);
 	const passkeysAvailable = $derived(canUsePasskeys());
+	const sessionExpiredNotice = $derived(
+		page.url.searchParams.get('session') === 'expired'
+			? 'Your desktop session timed out due to inactivity. Please sign in again.'
+			: ''
+	);
 
 	async function lookupFreshUser(fallback?: User | null): Promise<User | null> {
 		const currentEmail = (email || '').trim().toLowerCase();
@@ -212,6 +218,10 @@
 			<p class="login-card__subtitle">
 				{showForgotPassword ? 'Reset Password' : 'Crew Login'}
 			</p>
+
+			{#if sessionExpiredNotice && !showForgotPassword}
+				<p class="login-form__notice">{sessionExpiredNotice}</p>
+			{/if}
 
 			{#if showForgotPassword}
 				<form
@@ -535,6 +545,17 @@
 		font-size: var(--font-size-sm);
 		margin: var(--space-3) 0;
 		text-align: center;
+	}
+
+	.login-form__notice {
+		margin: calc(-1 * var(--space-4)) 0 var(--space-5);
+		padding: var(--space-3);
+		border-radius: var(--radius-md);
+		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		line-height: 1.45;
+		text-align: left;
 	}
 
 	.login-card__help {

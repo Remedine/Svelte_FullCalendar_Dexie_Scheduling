@@ -10,6 +10,7 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import QuickUnlock from '$lib/components/QuickUnlock.svelte';
 	import { theme } from '$lib/stores/theme.svelte.ts';
+	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
 
 	// Import global design tokens + base styles (tokens power the entire overhaul)
 	import '$lib/styles/globals.css';
@@ -19,6 +20,17 @@
 	const currentPath = $derived(page.url.pathname);
 
 	let showAvatarMenu = $state(false);
+	let isMobile = $state(false);
+
+	$effect(() => {
+		isMobile = isMobileViewport();
+		const mql = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`);
+		const onChange = (e: MediaQueryListEvent) => {
+			isMobile = e.matches;
+		};
+		mql.addEventListener('change', onChange);
+		return () => mql.removeEventListener('change', onChange);
+	});
 
 	// )=- Logout handler for the avatar dropdown menu.
 	async function handleLogout() {
@@ -322,7 +334,7 @@
 	     JobFormModal: edit/create job from details modal, calendar, etc. -->
 	<JobDetailsModal />
 	<JobFormModal />
-	{#if auth.locked && auth.isAuthenticated}
+	{#if isMobile && auth.locked && auth.isAuthenticated}
 		<QuickUnlock />
 	{/if}
 </div>

@@ -31,6 +31,7 @@
 		registerPasskey,
 		removePasskey
 	} from '$lib/auth/passkeys';
+	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
 
 	let loading = $state(false);
 	let error = $state('');
@@ -70,6 +71,7 @@
 	let setupUseBiometric = $state(true);
 	let biometricAvailable = $state(false);
 	const passkeysSupported = $derived(canUsePasskeys());
+	let isMobile = $state(false);
 
 	function startEditing(section: 'password' | 'name' | 'email' | 'quickUnlock') {
 		editing = section;
@@ -129,9 +131,19 @@
 		if (auth.currentUser) void refreshDeviceAuthUi();
 	});
 
-	// Open quick-unlock setup when arriving from the post-login toast link.
 	$effect(() => {
-		if (page.url.searchParams.get('quickUnlock') !== 'setup' || !auth.currentUser) return;
+		isMobile = isMobileViewport();
+		const mql = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`);
+		const onChange = (e: MediaQueryListEvent) => {
+			isMobile = e.matches;
+		};
+		mql.addEventListener('change', onChange);
+		return () => mql.removeEventListener('change', onChange);
+	});
+
+	// Open quick-unlock setup when arriving from the post-login toast link (mobile only).
+	$effect(() => {
+		if (page.url.searchParams.get('quickUnlock') !== 'setup' || !auth.currentUser || !isMobile) return;
 		if (editing === 'quickUnlock') return;
 		startEditing('quickUnlock');
 		goto('/profile', { replaceState: true });
@@ -818,6 +830,7 @@
          Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
 		<div class="profile__security">
+			{#if isMobile}
 			<div class="profile__security-item">
 				<div class="profile__security-item-main">
 					<span class="profile__security-label">Quick unlock (this device)</span>
@@ -843,8 +856,14 @@
 					>
 				</button>
 			</div>
+			{:else}
+				<p class="profile__security-hint">
+					Quick unlock (PIN / fingerprint) is available on mobile only. Desktop sessions use the
+					admin-configured inactivity timeout and require full sign-in again.
+				</p>
+			{/if}
 
-			{#if editing === 'quickUnlock'}
+			{#if isMobile && editing === 'quickUnlock'}
 				<div class="profile__inline-form profile__inline-form--quick-unlock">
 					<p class="profile__security-hint">
 						Optional layer for this device — PIN or fingerprint when you return to the app. Does not

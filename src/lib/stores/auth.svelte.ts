@@ -1,6 +1,8 @@
 // src/lib/stores/auth.svelte.ts
 import { browser } from '$app/environment';
 
+let desktopSessionExpiryInProgress = false;
+
 export const auth = $state({
 	currentUser: null as any,
 	isAuthenticated: false,
@@ -96,6 +98,12 @@ export async function restoreSession(): Promise<void> {
 
 			void refreshPbAuthIfNeeded();
 			await applyQuickUnlockIfNeeded(user.id);
+			const { isQuickUnlockDevice } = await import('$lib/utils/device');
+			if (!isQuickUnlockDevice()) {
+				const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
+				markSessionActivity();
+				if (await enforceDesktopSessionIfExpired()) return;
+			}
 		} else {
 			auth.currentUser = null;
 			auth.isAuthenticated = false;
@@ -125,6 +133,31 @@ export async function restoreSession(): Promise<void> {
 export function unlockApp(): void {
 	auth.locked = false;
 	void import('$lib/auth/deviceUnlock').then(({ clearAppHidden }) => clearAppHidden());
+	void import('$lib/auth/sessionSecurity').then(({ markSessionActivity }) => markSessionActivity());
+}
+
+export async function enforceDesktopSessionIfExpired(): Promise<boolean> {
+	if (desktopSessionExpiryInProgress) return false;
+	const { isQuickUnlockDevice } = await import('$lib/utils/device');
+	if (isQuickUnlockDevice()) return false;
+	if (!auth.isAuthenticated || !auth.currentUser) return false;
+
+	const {
+		getDesktopSessionIdleMs,
+		isDesktopSessionExpired
+	} = await import('$lib/auth/sessionSecurity');
+	const idleMs = await getDesktopSessionIdleMs();
+	if (!isDesktopSessionExpired(idleMs)) return false;
+
+	desktopSessionExpiryInProgress = true;
+	try {
+		await logout();
+		const { goto } = await import('$app/navigation');
+		goto('/login?session=expired', { replaceState: true });
+		return true;
+	} finally {
+		desktopSessionExpiryInProgress = false;
+	}
 }
 
 export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
@@ -139,6 +172,7 @@ export async function logout() {
 	auth.isAuthenticated = false;
 	auth.locked = false;
 	localStorage.removeItem('currentUserId');
+	void import('$lib/auth/sessionSecurity').then(({ clearSessionActivity }) => clearSessionActivity());
 
 	try {
 		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
@@ -183,6 +217,7 @@ export function setCurrentUser(user: any | null) {
 			markFreshLogin();
 			ensureDeviceAuthMatchesUser(String(user.id));
 		});
+		void import('$lib/auth/sessionSecurity').then(({ markSessionActivity }) => markSessionActivity());
 		const id = user.id.toString();
 		localStorage.setItem('currentUserId', id);
 		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(id));
@@ -192,24 +227,39 @@ export function setCurrentUser(user: any | null) {
 	}
 }
 
+async function handleAppVisible(): Promise<void> {
+	const { isQuickUnlockDevice } = await import('$lib/utils/device');
+	if (isQuickUnlockDevice()) {
+		const { shouldLockAfterReturn, clearAppHidden, getIdleLockMs } = await import(
+			'$lib/auth/deviceUnlock'
+		);
+		const idleMs = await getIdleLockMs();
+		if (shouldLockAfterReturn(idleMs)) {
+			await lockAppIfQuickUnlockEnabled();
+		}
+		clearAppHidden();
+		return;
+	}
+
+	if (await enforceDesktopSessionIfExpired()) return;
+	const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
+	markSessionActivity();
+}
+
 if (browser) {
 	void restoreSession();
 
-	// Re-lock after extended background idle (not every tab switch).
+	// Mobile: quick-unlock after background idle. Desktop: inactivity session timeout.
 	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState === 'hidden') {
 			void import('$lib/auth/deviceUnlock').then(({ markAppHidden }) => markAppHidden());
 		} else if (document.visibilityState === 'visible') {
-			void import('$lib/auth/deviceUnlock').then(
-				async ({ shouldLockAfterReturn, clearAppHidden, getIdleLockMs }) => {
-					const idleMs = await getIdleLockMs();
-					if (shouldLockAfterReturn(idleMs)) {
-						await lockAppIfQuickUnlockEnabled();
-					}
-					clearAppHidden();
-				}
-			);
+			void handleAppVisible();
 		}
+	});
+
+	void import('$lib/auth/sessionSecurity').then(({ initDesktopSessionWatchers }) => {
+		initDesktopSessionWatchers(() => enforceDesktopSessionIfExpired());
 	});
 } else {
 	auth.loading = false;

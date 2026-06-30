@@ -161,6 +161,8 @@ export function clearQuickUnlockDecline(): void {
 
 export async function shouldOfferQuickUnlockSetup(userId: string): Promise<boolean> {
 	if (!userId) return false;
+	const { isQuickUnlockDevice } = await import('$lib/utils/device');
+	if (!isQuickUnlockDevice()) return false;
 	if (await isQuickUnlockEnabled()) return false;
 	if (browser && localStorage.getItem(QUICK_UNLOCK_DECLINED_KEY) === userId) return false;
 	return true;
@@ -223,6 +225,9 @@ export function hasUsableUnlockMethod(settings: DeviceAuthSettings | null | unde
 }
 
 export async function shouldRequireUnlock(userId?: string | null): Promise<boolean> {
+	const { isQuickUnlockDevice } = await import('$lib/utils/device');
+	if (!isQuickUnlockDevice()) return false;
+
 	const settings = await readSettings();
 	if (!settings?.enabled) return false;
 	if (userId && settings.userId && settings.userId !== userId) return false;

@@ -5,6 +5,12 @@ vi.mock('$app/environment', () => ({
 	dev: true
 }));
 
+vi.mock('$lib/utils/device', () => ({
+	isQuickUnlockDevice: vi.fn(() => true),
+	isMobileViewport: vi.fn(() => true),
+	MOBILE_MAX_WIDTH_PX: 768
+}));
+
 import {
 	DEFAULT_IDLE_LOCK_MS,
 	IDLE_LOCK_MS,
@@ -192,6 +198,24 @@ describe('deviceUnlock', () => {
 		expect(isWithinFreshLoginGrace()).toBe(true);
 		sessionStorage.setItem('ccw_fresh_login_until', String(Date.now() - 1));
 		expect(isWithinFreshLoginGrace()).toBe(false);
+	});
+
+	it('shouldRequireUnlock is false on desktop even when quick unlock is enabled', async () => {
+		const { isQuickUnlockDevice } = await import('$lib/utils/device');
+		vi.mocked(isQuickUnlockDevice).mockReturnValue(false);
+
+		const db = (await import('$lib/db')).db;
+		await db.deviceAuth.put({
+			id: 'current',
+			enabled: true,
+			pinEnabled: true,
+			biometricEnabled: false,
+			pinHash: '$2a$10$hash',
+			userId: 'user-1'
+		});
+
+		await expect(shouldRequireUnlock('user-1')).resolves.toBe(false);
+		vi.mocked(isQuickUnlockDevice).mockReturnValue(true);
 	});
 
 	it('shouldRequireUnlock clears corrupt deviceAuth instead of locking', async () => {
