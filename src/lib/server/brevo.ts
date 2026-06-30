@@ -265,6 +265,84 @@ export async function sendInvoiceToClientEmail(
 
 // === INVOICE SENT (after client approval) ===
 
+// === BACKUP ALERTS ===
+
+export async function sendBackupSuccessEmail(
+	to: string[],
+	data: {
+		filename: string;
+		sizeBytes: number;
+		manual: boolean;
+		zipBase64: string | null;
+		hasSyncQueue?: boolean;
+		tooLargeForEmail?: boolean;
+	}
+) {
+	const sizeMb = (data.sizeBytes / (1024 * 1024)).toFixed(2);
+	const trigger = data.manual ? 'Manual backup' : 'Scheduled backup';
+	let attachmentNote = '';
+	let attachment: BrevoEmailPayload['attachment'];
+
+	if (data.tooLargeForEmail) {
+		attachmentNote =
+			'<p><strong>Note:</strong> The backup file is too large to attach. Download it from <strong>Options → Backups</strong> in the admin app.</p>';
+	} else if (data.zipBase64) {
+		attachment = [{ content: data.zipBase64, name: data.filename }];
+		attachmentNote = '<p>The full PocketBase backup is attached.</p>';
+	}
+
+	const syncNote = data.hasSyncQueue
+		? '<p>A <code>sync_queue.json</code> snapshot from the admin device is stored on the server (download from Options → Backups).</p>'
+		: '';
+
+	const html = `
+		<div style="font-family: sans-serif; max-width: 600px; line-height: 1.5;">
+			${LOGO_HTML}
+			<h2>Backup completed</h2>
+			<p>${trigger} finished successfully.</p>
+			<ul>
+				<li><strong>File:</strong> ${data.filename}</li>
+				<li><strong>Size:</strong> ${sizeMb} MB</li>
+			</ul>
+			${attachmentNote}
+			${syncNote}
+			${CREDIT_HTML}
+		</div>
+	`;
+
+	await sendBrevoEmail({
+		sender: SENDER,
+		to: to.map((email) => ({ email })),
+		subject: `Backup completed — ${data.filename}`,
+		htmlContent: html,
+		attachment
+	});
+}
+
+export async function sendBackupFailureAlert(
+	to: string[],
+	data: { error: string; manual: boolean }
+) {
+	const trigger = data.manual ? 'Manual backup' : 'Scheduled backup';
+	const html = `
+		<div style="font-family: sans-serif; max-width: 600px; line-height: 1.5;">
+			${LOGO_HTML}
+			<h2>Backup failed</h2>
+			<p>${trigger} did not complete.</p>
+			<pre style="background:#f4f4f5;padding:12px;border-radius:6px;white-space:pre-wrap;font-size:13px;">${data.error}</pre>
+			<p>Check Railway logs and try <strong>Backup now</strong> from Options → Backups.</p>
+			${CREDIT_HTML}
+		</div>
+	`;
+
+	await sendBrevoEmail({
+		sender: SENDER,
+		to: to.map((email) => ({ email })),
+		subject: 'Backup failed — Capital City Windows',
+		htmlContent: html
+	});
+}
+
 export async function sendInvoiceSentEmail(to: string, invoiceId: string, clientName: string) {
 	const html = `
 		<div style="font-family: sans-serif; max-width: 600px; line-height: 1.5;">

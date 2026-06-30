@@ -53,6 +53,14 @@
 		};
 	});
 
+	// Upload Dexie sync queue snapshot for backup bundling (admin only, throttled).
+	$effect(() => {
+		if (auth.loading || auth.currentUser?.role !== 'admin') return;
+		import('$lib/backups/syncQueueUpload').then(({ uploadSyncQueueSnapshotIfDue }) => {
+			void uploadSyncQueueSnapshotIfDue();
+		});
+	});
+
 	// Process scheduled crew assignment notifications while the app is open.
 	$effect(() => {
 		if (auth.loading || !auth.currentUser) return;

@@ -12,6 +12,8 @@
 		hour24To12,
 		type Hour12Period
 	} from '$lib/utils/dates';
+	import { pb } from '$lib/db/pb';
+	import { uploadSyncQueueSnapshotIfDue } from '$lib/backups/syncQueueUpload';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
 	// This avoids duplicate redirects and race conditions on navigation.
@@ -34,7 +36,7 @@
 	});
 
 	let isSaving = $state(false);
-	let activeTab = $state<'scheduling' | 'security' | 'invoice'>('scheduling');
+	let activeTab = $state<'scheduling' | 'security' | 'invoice' | 'backups'>('scheduling');
 
 	// )=- One-time flag to ensure options load/pull happens only once, preventing repeated pull attempts and error spam if pull fails.
 	let optionsInitialized = $state(false);
@@ -48,8 +50,17 @@
 	const tabs = [
 		{ id: 'scheduling', label: 'Scheduling Options' },
 		{ id: 'invoice', label: 'Invoice Options' },
-		{ id: 'security', label: 'App Security' }
+		{ id: 'security', label: 'App Security' },
+		{ id: 'backups', label: 'Backups' }
 	] as const;
+
+	type BackupRow = { name: string; size: number; created: string };
+	let backupItems = $state<BackupRow[]>([]);
+	let backupRetention = $state<{ total: number; wouldKeep: number; wouldPrune: number } | null>(
+		null
+	);
+	let backupLoading = $state(false);
+	let backupRunning = $state(false);
 
 	let editingOptions = $state<any>({});
 	let crewAssignmentHour12 = $state(7);
@@ -99,6 +110,9 @@
 				calendarDayEndHour: 22,
 				quickUnlockIdleMinutes: 120,
 				desktopSecurityIdleMinutes: 30,
+				backupScheduledEnabled: false,
+				backupDestEmail: false,
+				backupAlertEmails: '',
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -270,6 +284,97 @@
 	function isDefaultCancelReason(index: number): boolean {
 		return index === 0;
 	}
+
+	function formatBytes(bytes: number): string {
+		if (!bytes || bytes < 1) return '—';
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+	}
+
+	function formatBackupDate(iso: string | undefined): string {
+		if (!iso) return '—';
+		try {
+			return new Date(iso).toLocaleString('en-US', { timeZone: 'America/Anchorage' });
+		} catch {
+			return iso;
+		}
+	}
+
+	async function loadBackupList() {
+		if (!pb?.authStore?.token) return;
+		backupLoading = true;
+		try {
+			const res = await fetch('/api/admin/backups', {
+				headers: { Authorization: pb.authStore.token }
+			});
+			if (!res.ok) throw new Error('Failed to load backups');
+			const data = await res.json();
+			backupItems = data.items ?? [];
+			backupRetention = data.retention ?? null;
+		} catch (err) {
+			console.error(err);
+			toast.error('Could not load backup list');
+		} finally {
+			backupLoading = false;
+		}
+	}
+
+	async function runBackupNow() {
+		if (!pb?.authStore?.token) return;
+		backupRunning = true;
+		try {
+			await uploadSyncQueueSnapshotIfDue(true);
+			const res = await fetch('/api/admin/backups', {
+				method: 'POST',
+				headers: {
+					Authorization: pb.authStore.token,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(data.error || 'Backup failed');
+			}
+			toast.success(`Backup created: ${data.filename || 'success'}`);
+			editingOptions.lastBackupAt = new Date().toISOString();
+			editingOptions.lastBackupStatus = 'success';
+			editingOptions.lastBackupFilename = data.filename;
+			editingOptions.lastBackupSizeBytes = data.size;
+			editingOptions.lastBackupError = '';
+			await loadBackupList();
+			await optionsStore.pullFromPB();
+		} catch (err: any) {
+			toast.error(err?.message || 'Backup failed');
+		} finally {
+			backupRunning = false;
+		}
+	}
+
+	function downloadBackup(name: string) {
+		if (!pb?.authStore?.token) return;
+		const url = `/api/admin/backups/download?name=${encodeURIComponent(name)}`;
+		fetch(url, { headers: { Authorization: pb.authStore.token } })
+			.then((res) => {
+				if (!res.ok) throw new Error('Download failed');
+				return res.blob();
+			})
+			.then((blob) => {
+				const a = document.createElement('a');
+				a.href = URL.createObjectURL(blob);
+				a.download = name;
+				a.click();
+				URL.revokeObjectURL(a.href);
+			})
+			.catch(() => toast.error('Could not download backup'));
+	}
+
+	$effect(() => {
+		if (activeTab === 'backups' && auth.currentUser?.role === 'admin') {
+			loadBackupList();
+		}
+	});
 
 	// )=- Removed legacy onMount (duplicate of the $effect below, and onMount not imported — would throw ReferenceError on page load, potentially causing navigation/auth guard side-effects like redirect to login).
 	// The $effect above (lines ~17-30) handles loading when admin role is confirmed and not loading.
@@ -744,6 +849,109 @@
 					+ Add New Billable Item
 				</button>
 			</div>
+		{:else if activeTab === 'backups'}
+			<h2>Data Backups</h2>
+			<p class="options-page__help">
+				Full PocketBase backups (database + uploaded files). Alaska time is used for filenames and
+				retention. Save settings below, then use <strong>Backup now</strong> or enable the daily
+				cron.
+			</p>
+
+			<div class="form-section">
+				<h3>Schedule &amp; delivery</h3>
+				<div class="backup-settings">
+					<label class="backup-settings__check">
+						<input type="checkbox" bind:checked={editingOptions.backupScheduledEnabled} />
+						Enable daily scheduled backup (Railway cron → <code>/api/cron/run-backup</code>)
+					</label>
+					<label class="backup-settings__check">
+						<input type="checkbox" bind:checked={editingOptions.backupDestEmail} />
+						Email backup zip when under 18 MB (larger backups: download from this page)
+					</label>
+					<label for="opt-backup-alerts" class="label">Alert / delivery emails</label>
+					<textarea
+						id="opt-backup-alerts"
+						class="input backup-settings__textarea"
+						rows="3"
+						placeholder="admin@example.com, ops@example.com"
+						bind:value={editingOptions.backupAlertEmails}
+					></textarea>
+					<p class="options-page__help">
+						Comma-separated. Used for successful delivery (if enabled) and failure alerts. Email
+						copies are never auto-deleted.
+					</p>
+				</div>
+			</div>
+
+			<div class="form-section">
+				<h3>Manual backup</h3>
+				<p class="options-page__help">
+					Includes the latest sync queue snapshot from this device when you tap Backup now.
+				</p>
+				<button
+					type="button"
+					class="options-page__btn options-page__btn--save backup-now-btn"
+					onclick={runBackupNow}
+					disabled={backupRunning}
+				>
+					{backupRunning ? 'Creating backup…' : 'Backup now'}
+				</button>
+			</div>
+
+			<div class="form-section">
+				<h3>Last backup</h3>
+				<ul class="backup-status-list">
+					<li><strong>Status:</strong> {editingOptions.lastBackupStatus || '—'}</li>
+					<li><strong>When:</strong> {formatBackupDate(editingOptions.lastBackupAt)}</li>
+					<li><strong>File:</strong> {editingOptions.lastBackupFilename || '—'}</li>
+					<li><strong>Size:</strong> {formatBytes(Number(editingOptions.lastBackupSizeBytes ?? 0))}</li>
+					{#if editingOptions.syncQueueSnapshotAt}
+						<li>
+							<strong>Sync queue snapshot:</strong>
+							{formatBackupDate(editingOptions.syncQueueSnapshotAt)} (server)
+						</li>
+					{/if}
+				</ul>
+				{#if editingOptions.lastBackupStatus === 'failed' && editingOptions.lastBackupError}
+					<pre class="backup-error">{editingOptions.lastBackupError}</pre>
+				{/if}
+			</div>
+
+			<div class="form-section">
+				<h3>Server backups</h3>
+				{#if backupRetention}
+					<p class="options-page__help">
+						Retention preview: would keep <strong>{backupRetention.wouldKeep}</strong> of
+						<strong>{backupRetention.total}</strong> dated backups; prune
+						<strong>{backupRetention.wouldPrune}</strong> on server (email copies unaffected).
+					</p>
+				{/if}
+				{#if backupLoading}
+					<p>Loading…</p>
+				{:else if backupItems.length === 0}
+					<p class="options-page__help">No backups on server yet.</p>
+				{:else}
+					<div class="backup-list">
+						{#each backupItems as item (item.name)}
+							<div class="backup-list__row">
+								<div class="backup-list__meta">
+									<span class="backup-list__name">{item.name}</span>
+									<span class="backup-list__detail">
+										{formatBytes(item.size)} · {formatBackupDate(item.created)}
+									</span>
+								</div>
+								<button
+									type="button"
+									class="options-page__btn options-page__btn--add backup-list__dl"
+									onclick={() => downloadBackup(item.name)}
+								>
+									Download
+								</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		{/if}
 	</div>
 
@@ -1131,6 +1339,74 @@
 		border: none;
 		padding: var(--space-3) var(--space-6);
 		font-weight: var(--font-weight-medium);
+	}
+
+	.backup-settings {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		max-width: 520px;
+	}
+	.backup-settings__check {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		line-height: 1.4;
+	}
+	.backup-settings__textarea {
+		min-height: 4.5rem;
+		resize: vertical;
+	}
+	.backup-now-btn {
+		width: fit-content;
+	}
+	.backup-status-list {
+		margin: 0;
+		padding-left: var(--space-5);
+		line-height: 1.6;
+	}
+	.backup-error {
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		padding: var(--space-3);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		overflow-x: auto;
+	}
+	.backup-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		max-height: 280px;
+		overflow-y: auto;
+	}
+	.backup-list__row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-3);
+		padding: var(--space-3);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-md);
+	}
+	.backup-list__meta {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+	.backup-list__name {
+		font-weight: var(--font-weight-medium);
+		word-break: break-all;
+	}
+	.backup-list__detail {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+	.backup-list__dl {
+		flex-shrink: 0;
+		padding: var(--space-2) var(--space-4);
 	}
 
 	/* )=- Sticky bottom action bar modeled directly on the job/client modal footers.
