@@ -534,11 +534,11 @@
 			     Primary actions always visible at bottom of modal view. -->
 			<div class="new-job-modal__footer sticky-footer">
 				<div class="new-job-modal__footer-bar">
-					<button class="new-job-modal__btn button button--ghost" onclick={closeModal}>
-						{isEditing ? 'Close' : 'Cancel'}
-					</button>
+					<div class="new-job-modal__footer-main">
+						<button class="new-job-modal__btn new-job-modal__btn--close button" onclick={closeModal}>
+							{isEditing ? 'Close' : 'Cancel'}
+						</button>
 
-					<div class="new-job-modal__footer-end">
 						<button
 							class="new-job-modal__btn button button--primary"
 							class:new-job-modal__btn--reschedule-highlight={showRescheduleHighlight}
@@ -550,32 +550,34 @@
 									? 'Save Changes'
 									: 'Create Job'}
 						</button>
+					</div>
 
-						{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
+					{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
+						<div class="new-job-modal__footer-sub">
 							<button class="cancel-job-text" onclick={() => (showCancelConfirm = true)}>
 								Cancel Job
 							</button>
-						{/if}
+						</div>
+					{/if}
 
-						{#if isEditing && currentJob.status === 'cancelled'}
-							<div class="new-job-modal__cancelled-actions">
-								<button
-									type="button"
-									class="new-job-modal__secondary-action"
-									onclick={openUpdateCancelReason}
-								>
-									Update cancel reason
-								</button>
-								<button
-									type="button"
-									class="new-job-modal__secondary-action new-job-modal__secondary-action--reschedule"
-									onclick={startReschedule}
-								>
-									Reschedule
-								</button>
-							</div>
-						{/if}
-					</div>
+					{#if isEditing && currentJob.status === 'cancelled'}
+						<div class="new-job-modal__footer-sub new-job-modal__cancelled-actions">
+							<button
+								type="button"
+								class="new-job-modal__secondary-action"
+								onclick={openUpdateCancelReason}
+							>
+								Update cancel reason
+							</button>
+							<button
+								type="button"
+								class="new-job-modal__secondary-action new-job-modal__secondary-action--reschedule"
+								onclick={startReschedule}
+							>
+								Reschedule
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -807,23 +809,39 @@
 
 	.new-job-modal__footer-bar {
 		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: var(--space-3);
+		flex-direction: column;
+		gap: var(--space-1);
 		width: 100%;
 	}
 
-	.new-job-modal__footer-end {
+	.new-job-modal__footer-main {
 		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: var(--space-1);
-		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+		width: 100%;
+	}
+
+	.new-job-modal__footer-sub {
+		display: flex;
+		justify-content: flex-end;
+		width: 100%;
 	}
 
 	.new-job-modal__btn {
 		/* base .button provides core button styles; these add modal-specific sizing */
 		padding: var(--space-3) var(--space-6);
+	}
+
+	.new-job-modal__btn--close {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-strong);
+		color: var(--color-text);
+	}
+
+	.new-job-modal__btn--close:hover:not(:disabled) {
+		background: var(--color-surface-alt);
+		border-color: var(--color-border-strong);
 	}
 
 	.new-job-modal__btn-add {
@@ -965,7 +983,6 @@
 	}
 
 	.new-job-modal__cancelled-actions {
-		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
 		gap: var(--space-1);
@@ -1065,18 +1082,10 @@
 			gap: 0;
 		}
 
-		.new-job-modal__footer-bar {
-			align-items: center;
-			gap: var(--space-2);
-		}
-
-		.new-job-modal__footer .new-job-modal__btn {
+		.new-job-modal__footer-main .new-job-modal__btn {
 			padding: var(--space-2) var(--space-3);
 			min-height: 38px;
 			font-size: var(--font-size-sm);
-		}
-
-		.new-job-modal__footer-end .new-job-modal__btn {
 			white-space: nowrap;
 		}
 
