@@ -19,8 +19,8 @@
 	import { createJob, updateJob, cancelJob, rescheduleCancelledJob, updateClient } from '$lib/db';
 	import ClientPicker from './ClientPicker.svelte';
 	import BillableItemRow from './BillableItemRow.svelte';
+	import AreaSelect from './AreaSelect.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 	import { db, type Client, cleanupDuplicateUsers, getUserPhotoSrc } from '$lib/db';
 
@@ -410,26 +410,12 @@
              without forcing the user to set it twice. -->
 				<div class="new-job-modal__field">
 					<span id="job-area-label" class="new-job-modal__label label">Area of Town</span>
-					<div
-						class="new-job-modal__area-chips"
-						role="radiogroup"
-						aria-labelledby="job-area-label"
-					>
-						{#each areaOptions as option (option.value)}
-							{@const areaColor = getDisplayAreaColor(option.color)}
-							<button
-								type="button"
-								class="new-job-modal__area-chip"
-								class:new-job-modal__area-chip--active={currentJob.areaOfTown === option.value}
-								role="radio"
-								aria-checked={currentJob.areaOfTown === option.value}
-								onclick={() => (currentJob.areaOfTown = option.value)}
-								style="--area-chip-color: {areaColor}; background-color: {areaColor}20; color: {areaColor}; border-color: {areaColor};"
-							>
-								{option.label}
-							</button>
-						{/each}
-					</div>
+					<AreaSelect
+						id="job-area"
+						labelId="job-area-label"
+						bind:value={currentJob.areaOfTown}
+						options={areaOptions}
+					/>
 				</div>
 
 				<!-- Dates -->
@@ -845,39 +831,6 @@
 		margin-top: var(--space-3);
 		background: var(--color-primary-soft);
 		color: var(--color-primary);
-	}
-
-	.new-job-modal__area-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-	}
-
-	.new-job-modal__area-chip {
-		padding: var(--space-2) var(--space-4);
-		border-radius: var(--radius-full);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		cursor: pointer;
-		border: 1px solid;
-		transition:
-			box-shadow var(--transition-fast),
-			filter var(--transition-fast),
-			font-weight var(--transition-fast);
-	}
-
-	.new-job-modal__area-chip:hover {
-		filter: brightness(1.08);
-	}
-
-	.new-job-modal__area-chip:focus-visible {
-		outline: none;
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--area-chip-color) 45%, transparent);
-	}
-
-	.new-job-modal__area-chip--active {
-		font-weight: var(--font-weight-semibold);
-		box-shadow: 0 0 0 3px var(--area-chip-color);
 	}
 
 	/* Cancel confirmation — stacked above the job form modal (global shell + BEM extensions). */
