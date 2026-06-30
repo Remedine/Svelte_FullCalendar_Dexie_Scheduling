@@ -34,32 +34,6 @@
 	let visiblePickerYear = $state(new Date().getFullYear());
 	let visiblePickerMonth = $state(new Date().getMonth());
 
-	const CALENDAR_MONTH_NAMES = [
-		'January',
-		'February',
-		'March',
-		'April',
-		'May',
-		'June',
-		'July',
-		'August',
-		'September',
-		'October',
-		'November',
-		'December'
-	];
-
-	const visibleMonthLabel = $derived(
-		`${CALENDAR_MONTH_NAMES[visiblePickerMonth]} ${visiblePickerYear}`
-	);
-
-	const dragHoverDayLabel = $derived.by(() => {
-		if (!dragHoverDateStr) return null;
-		const d = parseLocalDate(dragHoverDateStr);
-		if (isNaN(d.getTime())) return null;
-		return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-	});
-
 	// Phase 1: edge-dwell on month picker while dragging an appointment to another day/month.
 	// Month change only when hovering the ←/→ nav buttons — not the day grid (Sun/Sat columns).
 	const MONTH_PICKER_NAV_HIT_PAD_PX = 8;
@@ -1484,10 +1458,6 @@
 		stepMonthPicker = fn;
 	}
 
-	function handleDragDayHover(dateStr: string | null) {
-		dragHoverDateStr = dateStr;
-	}
-
 	function handleVisibleMonthChange(year: number, month: number) {
 		visiblePickerYear = year;
 		visiblePickerMonth = month;
@@ -1537,19 +1507,6 @@
 	}
 </script>
 
-{#if isMobile && appointmentDragActive}
-	<div class="split-calendar__drag-banner" aria-live="polite">
-		<div class="split-calendar__drag-banner-month">{visibleMonthLabel}</div>
-		<div class="split-calendar__drag-banner-hint">
-			{#if dragHoverDayLabel}
-				Drop on {dragHoverDayLabel}
-			{:else}
-				Drop on a day · ← → change month
-			{/if}
-		</div>
-	</div>
-{/if}
-
 <div class="split-calendar-container">
 	<div class="split-calendar">
 		<!-- Sidebar -->
@@ -1559,7 +1516,7 @@
 				bind:selectedDate
 				onDateSelect={handleDateSelect}
 				onVisibleMonthChange={handleVisibleMonthChange}
-				onDragDayHover={handleDragDayHover}
+				dragHoverDateStr={dragHoverDateStr}
 				appointmentDragActive={appointmentDragActive}
 				onRegisterNavigator={registerMonthNavigator}
 			/>
@@ -1669,47 +1626,6 @@
 </div>
 
 <style>
-	.split-calendar__drag-banner {
-		display: none;
-	}
-
-	@media (max-width: 768px) {
-		.split-calendar__drag-banner {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			gap: 2px;
-			position: fixed;
-			top: max(6px, env(safe-area-inset-top, 0px));
-			left: 50%;
-			transform: translateX(-50%);
-			z-index: 1100;
-			pointer-events: none;
-			max-width: calc(100vw - var(--space-4));
-			padding: 6px 14px;
-			border-radius: 999px;
-			background: color-mix(in srgb, var(--color-primary) 92%, black);
-			color: white;
-			box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
-			text-align: center;
-		}
-
-		.split-calendar__drag-banner-month {
-			font-size: var(--font-size-sm);
-			font-weight: var(--font-weight-bold);
-			line-height: 1.2;
-			white-space: nowrap;
-		}
-
-		.split-calendar__drag-banner-hint {
-			font-size: 10px;
-			font-weight: var(--font-weight-medium);
-			line-height: 1.2;
-			opacity: 0.92;
-			white-space: nowrap;
-		}
-	}
-
 	.split-calendar-container {
 		container-type: inline-size;
 		container-name: split-calendar;

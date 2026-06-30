@@ -12,7 +12,7 @@
 		onDateSelect,
 		onRegisterNavigator,
 		onVisibleMonthChange,
-		onDragDayHover,
+		dragHoverDateStr = null,
 		appointmentDragActive = false
 	}: {
 		jobs?: any[];
@@ -20,7 +20,7 @@
 		onDateSelect?: (dateStr: string) => void;
 		onRegisterNavigator?: (stepMonth: (delta: number) => void) => void;
 		onVisibleMonthChange?: (year: number, month: number) => void;
-		onDragDayHover?: (dateStr: string | null) => void;
+		dragHoverDateStr?: string | null;
 		appointmentDragActive?: boolean;
 	} = $props();
 
@@ -156,10 +156,19 @@
 	});
 
 	$effect(() => {
-		if (!appointmentDragActive) {
-			dragOverDay = null;
-			onDragDayHover?.(null);
-		}
+		if (!appointmentDragActive) dragOverDay = null;
+	});
+
+	function formatShortDragDate(date: Date): string {
+		return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+	}
+
+	const dragContextDateLabel = $derived.by(() => {
+		if (dragOverDay?.date) return formatShortDragDate(dragOverDay.date);
+		if (!dragHoverDateStr) return null;
+		const d = new Date(dragHoverDateStr + 'T12:00:00');
+		if (isNaN(d.getTime())) return null;
+		return formatShortDragDate(d);
 	});
 
 	// Keep the visible month in sync when the parent sets selectedDate (e.g. jump from job details).
@@ -205,11 +214,9 @@
 				ondragover={(e) => {
 					e.preventDefault();
 					dragOverDay = day;
-					onDragDayHover?.(toDateString(day.date));
 				}}
 				ondragleave={() => {
 					dragOverDay = null;
-					onDragDayHover?.(null);
 				}}
 			>
 				<span class="month-picker__number">{day.date.getDate()}</span>
@@ -231,7 +238,9 @@
 				{monthNames[currentMonth]}
 				{currentYear}
 			</span>
-			<span class="month-picker__drag-context-hint">Drop on a day · ← → change month</span>
+			{#if dragContextDateLabel}
+				<span class="month-picker__drag-context-date">{dragContextDateLabel}</span>
+			{/if}
 		</div>
 	{/if}
 
@@ -294,9 +303,10 @@
 		line-height: 1.2;
 	}
 
-	.month-picker__drag-context-hint {
-		font-size: 10px;
-		color: var(--color-text-muted);
+	.month-picker__drag-context-date {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text);
 		line-height: 1.2;
 	}
 
