@@ -168,7 +168,6 @@
 				dayApi.changeView('timeGridDay');
 			}
 			if (dayApi) {
-				dayApi.setOption('height', isMobile ? '100%' : 'auto');
 				dayApi.setOption('eventResizableFromStart', isMobile);
 			}
 		};
@@ -967,8 +966,7 @@
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
-				// Keep mobile at 100% so the time grid fills the viewport; desktop stays content-sized.
-				api?.setOption('height', isMobile ? '100%' : 'auto');
+				api?.setOption('height', 'auto'); // only once, during initial creation. Repeated calls from observers were a major source of idle "refreshing" and layout churn.
 				api?.gotoDate(parseLocalDate(selectedDate));
 			});
 		});
