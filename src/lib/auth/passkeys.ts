@@ -16,7 +16,12 @@ export async function registerPasskey(deviceName?: string): Promise<void> {
 	});
 	if (!optionsRes.ok) {
 		const data = await optionsRes.json().catch(() => ({}));
-		throw new Error(data.error || 'Could not start passkey setup');
+		const detail = data.error || `Server error (${optionsRes.status})`;
+		throw new Error(
+			detail.includes('passkeys') || detail.includes('PB internal')
+				? 'Passkey storage is not ready on the server. Try again in a minute after the backend finishes updating.'
+				: detail
+		);
 	}
 
 	const { options, challengeToken } = await optionsRes.json();

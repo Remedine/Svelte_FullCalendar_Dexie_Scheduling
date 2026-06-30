@@ -92,7 +92,8 @@ export default defineConfig({
 	// in PWA setups with route-based code splitting). The crossorigin plugin above handles credentials mismatches.
 	build: {
 		modulePreload: {
-			polyfill: false
+			polyfill: false,
+			resolveDependencies: () => []
 		}
 	},
 

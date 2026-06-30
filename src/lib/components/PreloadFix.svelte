@@ -6,7 +6,7 @@
 		if (!browser) return;
 
 		const fixPreloadLinks = () => {
-			document.querySelectorAll('link[rel="modulepreload"]').forEach((link) => {
+			document.querySelectorAll('link[rel="modulepreload"], link[rel="preload"][as="script"]').forEach((link) => {
 				// Same-origin module scripts load without crossorigin; preloads must match or the browser
 				// warns "request credentials mode does not match" and discards the preload.
 				if (link.hasAttribute('crossorigin')) {
