@@ -1584,78 +1584,98 @@
 
 			<!-- Filters -->
 			<div class="split-calendar__filters">
-				<details bind:open={filtersOpen}>
-					<summary class="split-calendar__filters-summary">
-						<span>Filters</span>
+				<details bind:open={filtersOpen} class="split-calendar__filters-details">
+					<summary class="split-calendar__filters-summary" aria-expanded={filtersOpen}>
+						<span class="split-calendar__filters-summary-label">Filters</span>
 						{#if activeFilterCount > 0}
 							<span class="split-calendar__filters-badge">{activeFilterCount}</span>
 						{/if}
+						<span class="split-calendar__filters-arrow" aria-hidden="true">{filtersOpen ? '▾' : '▸'}</span>
 					</summary>
 
-					<!-- Crew: avatar row, highlight border when selected -->
-					<div class="split-calendar__filter-group">
-						<div class="split-calendar__filter-group-label">Crew</div>
-						<div class="split-calendar__crew-avatars">
-							{#each crewOptions as crew (crew)}
-								<button
-									type="button"
-									class="split-calendar__crew-avatar"
-									class:split-calendar__crew-avatar--selected={filters.crew.includes(crew)}
-									onclick={() => toggleFilter('crew', crew)}
-									title={crew}
-									aria-label={crew}
-									aria-pressed={filters.crew.includes(crew)}
-								>
-									{#if crewPhotoMap[crew]}
-										<img src={crewPhotoMap[crew]} alt="" />
-									{:else}
-										<span class="split-calendar__crew-avatar-initial">
-											{(crew || '?').charAt(0).toUpperCase()}
-										</span>
-									{/if}
-								</button>
-							{/each}
-						</div>
-					</div>
+					<div class="split-calendar__filters-body">
+						<!-- Crew: avatar row, highlight border when selected -->
+						<details class="split-calendar__filter-section" open>
+							<summary class="split-calendar__filter-section-summary">
+								<span class="split-calendar__filter-group-label">Crew</span>
+								<span class="split-calendar__filter-section-arrow" aria-hidden="true"></span>
+							</summary>
+							<div class="split-calendar__filter-section-body">
+								<div class="split-calendar__crew-avatars">
+									{#each crewOptions as crew (crew)}
+										<button
+											type="button"
+											class="split-calendar__crew-avatar"
+											class:split-calendar__crew-avatar--selected={filters.crew.includes(crew)}
+											onclick={() => toggleFilter('crew', crew)}
+											title={crew}
+											aria-label={crew}
+											aria-pressed={filters.crew.includes(crew)}
+										>
+											{#if crewPhotoMap[crew]}
+												<img src={crewPhotoMap[crew]} alt="" />
+											{:else}
+												<span class="split-calendar__crew-avatar-initial">
+													{(crew || '?').charAt(0).toUpperCase()}
+												</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</div>
+						</details>
 
-					<!-- Area: colored tokens (matches clients/jobs pages) -->
-					<div class="split-calendar__filter-group split-calendar__filter-group--inline">
-						<div class="split-calendar__filter-group-label">Area</div>
-						<div class="split-calendar__area-chips">
-							{#each optionsStore.data?.areasOfTown || [] as area (area.id)}
-								<button
-									type="button"
-									class="area-chip"
-									class:active={filters.areas.includes(area.id)}
-									onclick={() => toggleFilter('areas', area.id)}
-									style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
-								>
-									{area.label}
-								</button>
-							{/each}
-						</div>
-					</div>
+						<!-- Area: colored tokens (matches clients/jobs pages) -->
+						<details class="split-calendar__filter-section" open>
+							<summary class="split-calendar__filter-section-summary">
+								<span class="split-calendar__filter-group-label">Area</span>
+								<span class="split-calendar__filter-section-arrow" aria-hidden="true"></span>
+							</summary>
+							<div class="split-calendar__filter-section-body">
+								<div class="split-calendar__area-chips">
+									{#each optionsStore.data?.areasOfTown || [] as area (area.id)}
+										<button
+											type="button"
+											class="area-chip"
+											class:active={filters.areas.includes(area.id)}
+											onclick={() => toggleFilter('areas', area.id)}
+											style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
+										>
+											{area.label}
+										</button>
+									{/each}
+								</div>
+							</div>
+						</details>
 
-					<!-- Status -->
-					<div class="split-calendar__filter-group">
-						<div class="split-calendar__filter-group-label">Status</div>
-						<div class="split-calendar__filter-options">
-							{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
-								<label class="split-calendar__filter-option">
-									<input
-										type="checkbox"
-										checked={filters.statuses.includes(status)}
-										onchange={() => toggleFilter('statuses', status)}
-									/>
-									<span class="split-calendar__status split-calendar__status--{status}">{status}</span>
-								</label>
-							{/each}
-						</div>
-					</div>
+						<!-- Status -->
+						<details class="split-calendar__filter-section" open>
+							<summary class="split-calendar__filter-section-summary">
+								<span class="split-calendar__filter-group-label">Status</span>
+								<span class="split-calendar__filter-section-arrow" aria-hidden="true"></span>
+							</summary>
+							<div class="split-calendar__filter-section-body">
+								<div class="split-calendar__filter-options">
+									{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
+										<label class="split-calendar__filter-option">
+											<input
+												type="checkbox"
+												checked={filters.statuses.includes(status)}
+												onchange={() => toggleFilter('statuses', status)}
+											/>
+											<span class="split-calendar__status split-calendar__status--{status}">{status}</span>
+										</label>
+									{/each}
+								</div>
+							</div>
+						</details>
 
-					{#if activeFilterCount > 0}
-						<button class="split-calendar__filters-clear-btn" onclick={clearFilters}> Clear all filters </button>
-					{/if}
+						{#if activeFilterCount > 0}
+							<button class="split-calendar__filters-clear-btn" onclick={clearFilters}>
+								Clear all filters
+							</button>
+						{/if}
+					</div>
 				</details>
 			</div>
 		</div>
@@ -1934,6 +1954,16 @@
 		font-size: var(--font-size-sm);
 	}
 
+	.split-calendar__filters-details > summary,
+	.split-calendar__filter-section > summary {
+		list-style: none;
+	}
+
+	.split-calendar__filters-details > summary::-webkit-details-marker,
+	.split-calendar__filter-section > summary::-webkit-details-marker {
+		display: none;
+	}
+
 	.split-calendar__filters-summary {
 		font-weight: var(--font-weight-semibold);
 		display: flex;
@@ -1941,6 +1971,61 @@
 		gap: var(--space-2);
 		cursor: pointer;
 		color: var(--color-text);
+	}
+
+	.split-calendar__filters-summary-label {
+		flex: 1;
+	}
+
+	.split-calendar__filters-arrow,
+	.split-calendar__filter-section-arrow {
+		font-size: var(--font-size-xs);
+		line-height: 1;
+		color: var(--color-text-muted);
+		flex-shrink: 0;
+	}
+
+	.split-calendar__filter-section-arrow::before {
+		content: '▸';
+	}
+
+	.split-calendar__filter-section[open] > summary .split-calendar__filter-section-arrow::before {
+		content: '▾';
+	}
+
+	.split-calendar__filters-body {
+		margin-top: var(--space-3);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.split-calendar__filter-section {
+		border-bottom: 1px solid var(--color-border);
+		padding-bottom: var(--space-2);
+	}
+
+	.split-calendar__filter-section:last-of-type {
+		border-bottom: none;
+		padding-bottom: 0;
+	}
+
+	.split-calendar__filter-section-summary {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		cursor: pointer;
+		padding: var(--space-1) 0;
+		user-select: none;
+	}
+
+	.split-calendar__filter-section-summary .split-calendar__filter-group-label {
+		flex: 1;
+		margin-bottom: 0;
+	}
+
+	.split-calendar__filter-section-body {
+		padding-top: var(--space-1);
 	}
 
 	.split-calendar__filters-badge {
@@ -1971,21 +2056,6 @@
 	.split-calendar__filters-clear-btn:hover {
 		background: var(--color-danger);
 		color: white;
-	}
-
-	.split-calendar__filter-group {
-		margin-bottom: var(--space-3);
-	}
-
-	.split-calendar__filter-group--inline {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-
-	.split-calendar__filter-group--inline .split-calendar__filter-group-label {
-		margin-bottom: 0;
 	}
 
 	.split-calendar__filter-group-label {
