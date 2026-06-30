@@ -2354,8 +2354,8 @@
 			z-index: 20;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 			background: var(--color-surface);
-			/* ~1/3 screen: grid/nav sizing lives in MonthPicker.svelte */
-			max-height: 34dvh;
+			/* ~half screen: grid/nav sizing lives in MonthPicker.svelte */
+			max-height: 48dvh;
 		}
 
 		:global(.month-picker__header) {

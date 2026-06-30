@@ -456,64 +456,67 @@
 
 	@media (max-width: 768px) {
 		.month-picker {
-			padding: 2px 4px;
+			/* Midpoint between the prior compact (~1/3) and original (~2/3) mobile picker. */
+			--month-picker-grid-height: 112px;
+			--month-picker-nav-height: 39px;
+			padding: 3px 5px;
 		}
 
 		.month-picker__header {
-			margin-bottom: 1px;
+			margin-bottom: 2px;
 		}
 
 		.month-picker__weekdays {
-			gap: 1px;
-			margin-bottom: 1px;
+			gap: 2px;
+			margin-bottom: 2px;
 		}
 
 		.month-picker__weekday {
-			font-size: 9px;
+			font-size: 10px;
 			padding: 0;
 			line-height: 1.1;
 		}
 
 		/* Fixed grid slot: 6-row months shrink cells instead of growing the picker. */
 		.month-picker__grid {
-			height: 84px;
-			gap: 1px;
+			height: var(--month-picker-grid-height);
+			gap: 2px;
 		}
 
 		.month-picker__day {
 			min-height: 0;
-			padding: 0;
-			font-size: 10px;
-			line-height: 1;
+			padding: 1px;
+			font-size: 11px;
+			line-height: 1.1;
 		}
 
 		.month-picker__number {
-			font-size: 10px;
+			font-size: 11px;
 		}
 
 		.month-picker__dots {
 			gap: 1px;
-			margin-top: 0;
+			margin-top: 1px;
 		}
 
 		.month-picker__dot {
-			width: 2.5px;
-			height: 2.5px;
+			width: 3px;
+			height: 3px;
 		}
 
 		.month-picker__footer {
-			margin-top: 2px;
-			gap: 3px;
+			margin-top: 3px;
+			gap: 4px;
 		}
 
 		.month-picker__nav {
-			min-height: 34px;
-			font-size: var(--font-size-base);
+			min-height: var(--month-picker-nav-height);
+			font-size: var(--font-size-lg);
 		}
 
 		.month-picker__today-btn {
-			padding: 1px 5px;
-			font-size: 9px;
+			padding: 2px 6px;
+			font-size: 10px;
 		}
 
 		.month-picker--drag-active .month-picker__header {
