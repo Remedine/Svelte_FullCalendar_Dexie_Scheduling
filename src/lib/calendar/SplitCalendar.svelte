@@ -2347,7 +2347,6 @@
 	   BEM rules + tokens. */
 	@media (max-width: 768px) {
 		:global(.month-picker) {
-			padding: 4px 6px;
 			border-radius: var(--radius-sm);
 			/* Anchor to top of the mobile viewport / scroll container */
 			position: sticky;
@@ -2355,58 +2354,16 @@
 			z-index: 20;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 			background: var(--color-surface);
+			/* ~1/3 screen: grid/nav sizing lives in MonthPicker.svelte */
+			max-height: 34dvh;
 		}
 
 		:global(.month-picker__header) {
-			margin-bottom: 2px;
 			padding: 0 2px;
 		}
 
 		:global(.month-picker__title) {
 			font-size: var(--font-size-xs);
-		}
-
-		:global(.month-picker__footer) {
-			margin-top: 4px;
-			gap: 4px;
-		}
-
-		:global(.month-picker__nav) {
-			min-height: 44px;
-			font-size: var(--font-size-lg);
-		}
-
-		:global(.month-picker__today-btn) {
-			padding: 1px 6px;
-			font-size: 10px;
-		}
-
-		:global(.month-picker__weekdays),
-		:global(.month-picker__weekday) {
-			font-size: 9px;
-			padding: 0;
-		}
-
-		:global(.month-picker__day) {
-			min-height: 18px; /* significantly tighter vertical space below the day number while keeping usable tap target */
-			padding: 0 1px;
-			font-size: 10px;
-			line-height: 1;
-		}
-
-		:global(.month-picker__number) {
-			font-size: 10px;
-			line-height: 1;
-		}
-
-		:global(.month-picker__dots) {
-			gap: 1px;
-			margin-top: 0;
-		}
-
-		:global(.month-picker__dot) {
-			width: 2.5px;
-			height: 2.5px;
 		}
 	}
 </style>
