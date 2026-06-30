@@ -110,6 +110,18 @@
 		harness?.style.removeProperty('bottom');
 	}
 
+	// Custom mobile resize mutates harness inline styles in the live DOM. Incremental refetch /
+	// setDates can leave the stale harness node collapsed. Remove + refetch forces a fresh mount.
+	function finalizeMobileResizeVisual(eventId: string, eventEl: HTMLElement) {
+		dayApi?.getEventById(eventId)?.remove();
+		dayApi?.refetchEvents();
+		requestAnimationFrame(() => {
+			clearStaleEventHarnessStyles(eventEl);
+			dayApi?.updateSize();
+			endCalendarInteraction();
+		});
+	}
+
 	function getMobileSlotMetrics(harnessEl?: HTMLElement | null): { slotHeight: number; slotMs: number } {
 		const col = harnessEl?.closest('.fc-timegrid-col');
 		const slotEl =
@@ -294,33 +306,40 @@
 		const gesture = activeMobileResize;
 		activeMobileResize = null;
 		clearMobileResizeListeners();
-		endCalendarInteraction();
 
-		if (!gesture) return;
+		if (!gesture) {
+			endCalendarInteraction();
+			return;
+		}
 
 		const changed =
 			gesture.previewStart.getTime() !== gesture.originalStart.getTime() ||
 			gesture.previewEnd.getTime() !== gesture.originalEnd.getTime();
 
 		gesture.eventEl.classList.remove('fc-event-resizing');
-		const harness = gesture.harnessEl;
+
 		if (!changed) {
 			clearStaleEventHarnessStyles(gesture.eventEl);
 			dayApi?.refetchEvents();
+			requestAnimationFrame(() => {
+				dayApi?.updateSize();
+				endCalendarInteraction();
+			});
 			return;
 		}
 
 		try {
 			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
-			clearStaleEventHarnessStyles(gesture.eventEl);
-			// Custom mobile resize bypasses FC's MERGE_EVENTS — refetch so harness top/bottom
-			// are recomputed from the new dates (otherwise the card collapses after release).
-			requestAnimationFrame(() => dayApi?.refetchEvents());
+			finalizeMobileResizeVisual(gesture.eventId, gesture.eventEl);
 		} catch {
 			clearStaleEventHarnessStyles(gesture.eventEl);
 			dayApi?.refetchEvents();
 			toast.error('Could not resize appointment');
+			requestAnimationFrame(() => {
+				dayApi?.updateSize();
+				endCalendarInteraction();
+			});
 		}
 	}
 
