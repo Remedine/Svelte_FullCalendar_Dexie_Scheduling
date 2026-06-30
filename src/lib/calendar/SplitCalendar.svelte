@@ -29,6 +29,99 @@
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	let isExternalDrop = false;
 	let originalEventRect: DOMRect | null = null;
+	let appointmentDragActive = $state(false);
+
+	// Phase 1: edge-dwell on month picker while dragging an appointment to another day/month.
+	const MONTH_PICKER_EDGE_FRACTION = 0.15;
+	const MONTH_PICKER_EDGE_DWELL_MS = 500;
+	const MONTH_PICKER_EDGE_REPEAT_MS = 400;
+
+	let stepMonthPicker: (delta: number) => void = () => {};
+	let monthEdgeDwellTimer: ReturnType<typeof setTimeout> | null = null;
+	let monthEdgeActiveSide: 'left' | 'right' | null = null;
+	let appointmentDragPointerListenerActive = false;
+
+	function clearMonthPickerEdgeDwell() {
+		if (monthEdgeDwellTimer) {
+			clearTimeout(monthEdgeDwellTimer);
+			monthEdgeDwellTimer = null;
+		}
+		monthEdgeActiveSide = null;
+		document
+			.querySelector('.month-picker')
+			?.classList.remove('month-picker--edge-left', 'month-picker--edge-right');
+	}
+
+	function scheduleMonthPickerEdgeStep(side: 'left' | 'right') {
+		monthEdgeDwellTimer = setTimeout(() => {
+			if (monthEdgeActiveSide !== side) return;
+			stepMonthPicker(side === 'left' ? -1 : 1);
+			scheduleMonthPickerEdgeStep(side);
+		}, MONTH_PICKER_EDGE_REPEAT_MS);
+	}
+
+	function handleAppointmentDragPointerMove(clientX: number, clientY: number) {
+		const picker = document.querySelector('.month-picker');
+		if (!picker) {
+			clearMonthPickerEdgeDwell();
+			return;
+		}
+
+		const rect = picker.getBoundingClientRect();
+		const inside =
+			clientX >= rect.left &&
+			clientX <= rect.right &&
+			clientY >= rect.top &&
+			clientY <= rect.bottom;
+
+		if (!inside) {
+			clearMonthPickerEdgeDwell();
+			return;
+		}
+
+		const relX = (clientX - rect.left) / rect.width;
+		let side: 'left' | 'right' | null = null;
+		if (relX <= MONTH_PICKER_EDGE_FRACTION) side = 'left';
+		else if (relX >= 1 - MONTH_PICKER_EDGE_FRACTION) side = 'right';
+
+		if (side === monthEdgeActiveSide) return;
+
+		clearMonthPickerEdgeDwell();
+		monthEdgeActiveSide = side;
+
+		if (!side) return;
+
+		picker.classList.add(side === 'left' ? 'month-picker--edge-left' : 'month-picker--edge-right');
+		monthEdgeDwellTimer = setTimeout(() => {
+			if (monthEdgeActiveSide !== side) return;
+			stepMonthPicker(side === 'left' ? -1 : 1);
+			scheduleMonthPickerEdgeStep(side);
+		}, MONTH_PICKER_EDGE_DWELL_MS);
+	}
+
+	function onAppointmentDragPointerMove(e: PointerEvent) {
+		handleAppointmentDragPointerMove(e.clientX, e.clientY);
+	}
+
+	function onAppointmentDragTouchMove(e: TouchEvent) {
+		const touch = e.touches[0];
+		if (touch) handleAppointmentDragPointerMove(touch.clientX, touch.clientY);
+	}
+
+	function startAppointmentDragToMonthTracking() {
+		if (appointmentDragPointerListenerActive) return;
+		appointmentDragPointerListenerActive = true;
+		document.addEventListener('pointermove', onAppointmentDragPointerMove, { passive: true });
+		document.addEventListener('touchmove', onAppointmentDragTouchMove, { passive: true });
+	}
+
+	function stopAppointmentDragToMonthTracking() {
+		if (!appointmentDragPointerListenerActive) return;
+		appointmentDragPointerListenerActive = false;
+		document.removeEventListener('pointermove', onAppointmentDragPointerMove);
+		document.removeEventListener('touchmove', onAppointmentDragTouchMove);
+		clearMonthPickerEdgeDwell();
+	}
 	// Suppress layout recalculation while FC is mid drag/resize — updateSize() during a gesture
 	// corrupts time-grid harness top/height and collapses the card to a thin line (content floats).
 	let calendarInteractionDepth = 0;
@@ -923,10 +1016,8 @@
 		try {
 			await updateJobDates(jobId, newDate, newEnd);
 			// Phase 1: optimistic patch for external drops (MonthPicker target).
-			// The drag gesture is already over (this is called from eventDragStop), so it's safe to refetch
-			// to remove the event from its old position in the main calendar and let the provider see the new date.
 			applyOptimisticDatePatch(jobId, newDate, newEnd);
-			dayApi?.refetchEvents();
+			handleDateSelect(dateStr);
 		} catch (e) {
 			toast.error('Failed to move job');
 		}
@@ -1124,9 +1215,13 @@
 					beginCalendarInteraction();
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
+					appointmentDragActive = true;
+					startAppointmentDragToMonthTracking();
 				},
 
 				eventDragStop: (info) => {
+					stopAppointmentDragToMonthTracking();
+					appointmentDragActive = false;
 					endCalendarInteraction();
 					originalEventRect = null;
 
@@ -1280,6 +1375,10 @@
 
 	// )=- Cleaned up stray duplicate calendar init (the second new Calendar + its raf/closings) that was left outside any $effect after a previous edit. The single version inside the $effect now has the destroy return (for isConnected fix), the full eventDidMount (drag handle + area color force + circular crew avatars using crewPhotoMap), modern title-only events mapper, and the explicit post-render refetch. This resolves the Rolldown "Unexpected token" that killed the Railway build.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+	function registerMonthNavigator(fn: (delta: number) => void) {
+		stepMonthPicker = fn;
+	}
+
 	function handleDateSelect(dateStr: string) {
 		clearJobHighlight();
 		clearJumpCancelledMode();
@@ -1316,7 +1415,13 @@
 	<div class="split-calendar">
 		<!-- Sidebar -->
 		<div class="split-calendar__sidebar">
-			<MonthPicker jobs={filteredJobs} bind:selectedDate onDateSelect={handleDateSelect} />
+			<MonthPicker
+				jobs={filteredJobs}
+				bind:selectedDate
+				onDateSelect={handleDateSelect}
+				appointmentDragActive={appointmentDragActive}
+				onRegisterNavigator={registerMonthNavigator}
+			/>
 
 			<!-- Filters -->
 			<div class="split-calendar__filters">
@@ -2053,6 +2158,19 @@
 		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 		outline: 1px dashed var(--color-border);
 		outline-offset: 1px;
+	}
+
+	:global(.month-picker--edge-left) {
+		box-shadow: inset 4px 0 0 var(--color-primary);
+	}
+
+	:global(.month-picker--edge-right) {
+		box-shadow: inset -4px 0 0 var(--color-primary);
+	}
+
+	:global(.month-picker--drag-active) {
+		outline: 1px dashed color-mix(in srgb, var(--color-primary) 50%, transparent);
+		outline-offset: 2px;
 	}
 
 	/* === Compact + anchored MonthPicker on mobile ===

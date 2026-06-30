@@ -9,11 +9,15 @@
 	let {
 		jobs = [],
 		selectedDate = $bindable(getLocalDateString()),
-		onDateSelect
+		onDateSelect,
+		onRegisterNavigator,
+		appointmentDragActive = false
 	}: {
 		jobs?: any[];
 		selectedDate?: string;
 		onDateSelect?: (dateStr: string) => void;
+		onRegisterNavigator?: (stepMonth: (delta: number) => void) => void;
+		appointmentDragActive?: boolean;
 	} = $props();
 
 	let currentMonth = $state(new Date().getMonth());
@@ -55,14 +59,26 @@
 	function getDaysInMonth(year: number, month: number) {
 		const firstDay = new Date(year, month, 1).getDay();
 		const daysInMonth = new Date(year, month + 1, 0).getDate();
-		const days = [];
+		const days: { date: Date; isCurrent: boolean }[] = [];
 
+		// Leading days from the previous month (grey)
+		const prevMonthLastDate = new Date(year, month, 0).getDate();
 		for (let i = 0; i < firstDay; i++) {
-			days.push({ date: new Date(year, month, -firstDay + i + 1), isCurrent: false });
+			const dayNum = prevMonthLastDate - firstDay + i + 1;
+			days.push({ date: new Date(year, month - 1, dayNum), isCurrent: false });
 		}
+
 		for (let d = 1; d <= daysInMonth; d++) {
 			days.push({ date: new Date(year, month, d), isCurrent: true });
 		}
+
+		// Trailing days from the next month — complete the final week (e.g. Jul 1–4 after June)
+		let nextMonthDay = 1;
+		while (days.length % 7 !== 0) {
+			days.push({ date: new Date(year, month + 1, nextMonthDay), isCurrent: false });
+			nextMonthDay++;
+		}
+
 		return days;
 	}
 
@@ -89,10 +105,11 @@
 		return jobsByDate.get(dateStr) || [];
 	}
 
-	function selectDay(day: any) {
-		if (!day.isCurrent) return;
+	function selectDay(day: { date: Date; isCurrent: boolean }) {
 		const dateStr = toDateString(day.date);
 		selectedDate = dateStr;
+		currentYear = day.date.getFullYear();
+		currentMonth = day.date.getMonth();
 		onDateSelect?.(dateStr);
 		dragOverDay = null;
 	}
@@ -125,6 +142,10 @@
 
 	const days = $derived(getDaysInMonth(currentYear, currentMonth));
 
+	$effect(() => {
+		onRegisterNavigator?.(changeMonth);
+	});
+
 	// Keep the visible month in sync when the parent sets selectedDate (e.g. jump from job details).
 	$effect(() => {
 		const dateStr = selectedDate;
@@ -136,7 +157,10 @@
 	});
 </script>
 
-<div class="month-picker">
+<div
+	class="month-picker"
+	class:month-picker--drag-active={appointmentDragActive}
+>
 	<div class="month-picker__header">
 		<button class="month-picker__nav" onclick={() => changeMonth(-1)} aria-label="Previous month">←</button>
 
@@ -289,6 +313,15 @@
 
 	.month-picker__day--other {
 		color: var(--color-text-subtle);
+	}
+
+	.month-picker__day--other:hover,
+	.month-picker__day--other.month-picker__day--drag-over {
+		background: var(--color-surface-alt);
+	}
+
+	.month-picker--drag-active .month-picker__day--other {
+		cursor: copy;
 	}
 
 	.month-picker__day--selected {
