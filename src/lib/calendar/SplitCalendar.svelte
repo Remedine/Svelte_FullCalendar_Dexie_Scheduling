@@ -314,6 +314,9 @@
 			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			clearStaleEventHarnessStyles(gesture.eventEl);
+			// Custom mobile resize bypasses FC's MERGE_EVENTS — refetch so harness top/bottom
+			// are recomputed from the new dates (otherwise the card collapses after release).
+			requestAnimationFrame(() => dayApi?.refetchEvents());
 		} catch {
 			clearStaleEventHarnessStyles(gesture.eventEl);
 			dayApi?.refetchEvents();
