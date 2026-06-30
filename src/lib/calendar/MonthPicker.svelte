@@ -267,6 +267,8 @@
 	/* MonthPicker — full tokens + BEM for cohesion with app look & feel (dark mode, spacing scale, etc.) */
 	.month-picker {
 		container-type: inline-size;
+		/* Fixed grid slot: 6-row months shrink cells instead of shifting the footer. */
+		--month-picker-grid-height: 252px;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
@@ -378,6 +380,7 @@
 	}
 
 	.month-picker__grid {
+		height: var(--month-picker-grid-height);
 		grid-template-rows: repeat(var(--month-grid-rows, 5), minmax(0, 1fr));
 	}
 
@@ -394,8 +397,9 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
+		justify-content: flex-start;
 		padding: var(--space-1);
-		min-height: 42px;
+		min-height: 0;
 		border: 1px solid transparent;
 		background: transparent;
 		border-radius: var(--radius-sm);
@@ -477,9 +481,7 @@
 			line-height: 1.1;
 		}
 
-		/* Fixed grid slot: 6-row months shrink cells instead of growing the picker. */
 		.month-picker__grid {
-			height: var(--month-picker-grid-height);
 			gap: 2px;
 		}
 
