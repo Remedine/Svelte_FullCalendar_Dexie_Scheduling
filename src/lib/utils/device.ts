@@ -9,7 +9,7 @@ export function isMobileViewport(): boolean {
 	return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`).matches;
 }
 
-/** Quick-unlock PIN / biometric re-lock is mobile-only. */
+/** Mobile idle timer (background re-lock); desktop uses desktopSecurityIdleMinutes instead. */
 export function isQuickUnlockDevice(): boolean {
 	return isMobileViewport();
 }

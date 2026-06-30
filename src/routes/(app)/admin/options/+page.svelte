@@ -502,8 +502,8 @@
 			<div class="form-section">
 				<h3>Mobile quick unlock</h3>
 				<p class="options-page__help">
-					On phones and small screens only: after a crew member unlocks the app, how long it can stay
-					in the background before asking for their PIN or biometric again. Does not affect sign-in.
+					On phones and small screens: how long the app can stay in the background before asking for
+					PIN or biometric again. Does not affect sign-in.
 				</p>
 				<div class="form-grid">
 					<label for="opt-idle-minutes" class="label">Re-lock after (minutes)</label>
@@ -522,13 +522,14 @@
 			</div>
 
 			<div class="form-section">
-				<h3>Desktop session timeout</h3>
+				<h3>Desktop quick unlock</h3>
 				<p class="options-page__help">
-					On desktop browsers: how long a signed-in user can be inactive before they must sign in
-					again with email and password. PIN quick unlock does not apply on desktop.
+					On desktop browsers: how long a signed-in user can be inactive before the quick-unlock
+					overlay appears (PIN or biometric, if configured in Profile). Separate from the mobile
+					timer above.
 				</p>
 				<div class="form-grid">
-					<label for="opt-desktop-idle-minutes" class="label">Sign out after (minutes)</label>
+					<label for="opt-desktop-idle-minutes" class="label">Re-lock after (minutes)</label>
 					<input
 						id="opt-desktop-idle-minutes"
 						type="number"

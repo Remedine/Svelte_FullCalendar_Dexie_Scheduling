@@ -334,7 +334,7 @@
 	     JobFormModal: edit/create job from details modal, calendar, etc. -->
 	<JobDetailsModal />
 	<JobFormModal />
-	{#if isMobile && auth.locked && auth.isAuthenticated}
+	{#if auth.locked && auth.isAuthenticated}
 		<QuickUnlock />
 	{/if}
 </div>

@@ -141,9 +141,9 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
-	// Open quick-unlock setup when arriving from the post-login toast link (mobile only).
+	// Open quick-unlock setup when arriving from the post-login toast link.
 	$effect(() => {
-		if (page.url.searchParams.get('quickUnlock') !== 'setup' || !auth.currentUser || !isMobile) return;
+		if (page.url.searchParams.get('quickUnlock') !== 'setup' || !auth.currentUser) return;
 		if (editing === 'quickUnlock') return;
 		startEditing('quickUnlock');
 		goto('/profile', { replaceState: true });
@@ -830,7 +830,6 @@
          Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
 		<div class="profile__security">
-			{#if isMobile}
 			<div class="profile__security-item">
 				<div class="profile__security-item-main">
 					<span class="profile__security-label">Quick unlock (this device)</span>
@@ -856,9 +855,8 @@
 					>
 				</button>
 			</div>
-			{/if}
 
-			{#if isMobile && editing === 'quickUnlock'}
+			{#if editing === 'quickUnlock'}
 				<div class="profile__inline-form profile__inline-form--quick-unlock">
 					<p class="profile__security-hint">
 						Optional layer for this device — PIN or fingerprint when you return to the app. Does not

@@ -180,7 +180,7 @@
 </div>
 
 <style>
-	/* Mobile-only overlay — compact layout that fits one screen above the PIN keyboard. */
+	/* Full-screen quick-unlock gate — compact on phones, centered card on wider screens. */
 	.quick-unlock {
 		position: fixed;
 		inset: 0;
@@ -275,5 +275,16 @@
 	.quick-unlock__fallback:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	@media (min-width: 769px) {
+		.quick-unlock {
+			align-items: center;
+			padding-top: max(var(--space-4), env(safe-area-inset-top, 0px));
+		}
+
+		.quick-unlock__card {
+			padding: var(--space-6) var(--space-5);
+		}
 	}
 </style>

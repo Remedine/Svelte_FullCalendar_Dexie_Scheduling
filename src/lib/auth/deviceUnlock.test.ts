@@ -200,10 +200,7 @@ describe('deviceUnlock', () => {
 		expect(isWithinFreshLoginGrace()).toBe(false);
 	});
 
-	it('shouldRequireUnlock is false on desktop even when quick unlock is enabled', async () => {
-		const { isQuickUnlockDevice } = await import('$lib/utils/device');
-		vi.mocked(isQuickUnlockDevice).mockReturnValue(false);
-
+	it('shouldRequireUnlock is true when quick unlock is configured for the user', async () => {
 		const db = (await import('$lib/db')).db;
 		await db.deviceAuth.put({
 			id: 'current',
@@ -214,8 +211,8 @@ describe('deviceUnlock', () => {
 			userId: 'user-1'
 		});
 
-		await expect(shouldRequireUnlock('user-1')).resolves.toBe(false);
-		vi.mocked(isQuickUnlockDevice).mockReturnValue(true);
+		await expect(shouldRequireUnlock('user-1')).resolves.toBe(true);
+		await expect(shouldRequireUnlock('user-2')).resolves.toBe(false);
 	});
 
 	it('shouldRequireUnlock clears corrupt deviceAuth instead of locking', async () => {

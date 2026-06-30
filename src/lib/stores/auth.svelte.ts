@@ -117,9 +117,9 @@ async function completeSessionRestore(user: any, appSessionEmail?: string): Prom
 
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');
 	if (!isQuickUnlockDevice()) {
+		await enforceDesktopLockIfInactive();
 		const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
-		markSessionActivity();
-		return !(await enforceDesktopSessionIfExpired());
+		if (!auth.locked) markSessionActivity();
 	}
 
 	return true;
@@ -219,11 +219,12 @@ export function unlockApp(): void {
 	void import('$lib/auth/sessionSecurity').then(({ markSessionActivity }) => markSessionActivity());
 }
 
-export async function enforceDesktopSessionIfExpired(): Promise<boolean> {
+/** Desktop inactivity: show quick-unlock overlay instead of signing out. */
+export async function enforceDesktopLockIfInactive(): Promise<boolean> {
 	if (desktopSessionExpiryInProgress) return false;
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');
 	if (isQuickUnlockDevice()) return false;
-	if (!auth.isAuthenticated || !auth.currentUser) return false;
+	if (!auth.isAuthenticated || !auth.currentUser || auth.locked) return false;
 
 	const {
 		getDesktopSessionIdleMs,
@@ -234,8 +235,8 @@ export async function enforceDesktopSessionIfExpired(): Promise<boolean> {
 
 	desktopSessionExpiryInProgress = true;
 	try {
-		await expireSessionToLogin('expired');
-		return true;
+		await lockAppIfQuickUnlockEnabled();
+		return auth.locked;
 	} finally {
 		desktopSessionExpiryInProgress = false;
 	}
@@ -361,7 +362,7 @@ async function handleAppVisible(): Promise<void> {
 		return;
 	}
 
-	if (await enforceDesktopSessionIfExpired()) return;
+	if (await enforceDesktopLockIfInactive()) return;
 	const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
 	markSessionActivity();
 }
@@ -369,7 +370,7 @@ async function handleAppVisible(): Promise<void> {
 if (browser) {
 	void restoreSession();
 
-	// Mobile: quick-unlock after background idle. Desktop: inactivity session timeout.
+	// Mobile: quick-unlock after background idle. Desktop: inactivity quick-unlock (separate timer).
 	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState === 'hidden') {
 			void import('$lib/auth/deviceUnlock').then(({ markAppHidden }) => markAppHidden());
@@ -385,7 +386,7 @@ if (browser) {
 	});
 
 	void import('$lib/auth/sessionSecurity').then(({ initDesktopSessionWatchers }) => {
-		initDesktopSessionWatchers(() => enforceDesktopSessionIfExpired());
+		initDesktopSessionWatchers(() => enforceDesktopLockIfInactive());
 	});
 } else {
 	auth.loading = false;

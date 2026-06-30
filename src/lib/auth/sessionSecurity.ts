@@ -2,7 +2,7 @@ import { browser } from '$app/environment';
 
 const LAST_ACTIVITY_KEY = 'ccw_last_activity_at';
 
-/** Default desktop inactivity sign-out: 30 minutes (overridable in Admin → Options). */
+/** Default desktop inactivity re-lock: 30 minutes (overridable in Admin → Options). */
 export const DEFAULT_DESKTOP_SESSION_IDLE_MINUTES = 30;
 
 export function markSessionActivity(): void {
@@ -40,10 +40,10 @@ export function isDesktopSessionExpired(idleMs: number): boolean {
 }
 
 /**
- * Track pointer/keyboard activity and poll for desktop session expiry.
+ * Track pointer/keyboard activity and poll for desktop inactivity re-lock.
  * Returns a teardown function (for tests).
  */
-export function initDesktopSessionWatchers(onExpired: () => void | Promise<void>): () => void {
+export function initDesktopSessionWatchers(onInactive: () => void | Promise<void>): () => void {
 	if (!browser) return () => {};
 
 	let throttleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,7 +66,7 @@ export function initDesktopSessionWatchers(onExpired: () => void | Promise<void>
 			if (isQuickUnlockDevice()) return;
 			const idleMs = await getDesktopSessionIdleMs();
 			if (isDesktopSessionExpired(idleMs)) {
-				await onExpired();
+				await onInactive();
 			}
 		})();
 	}, 30_000);
