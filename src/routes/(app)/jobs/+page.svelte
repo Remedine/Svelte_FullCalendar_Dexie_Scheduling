@@ -11,7 +11,8 @@
 	} from '$lib/db';
 	import { pullJobsFromServer, pullUsersFromServer, pullInvoicesFromServer, pb } from '$lib/db/pb';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
@@ -154,6 +155,40 @@
 	});
 	$effect(() => {
 		localStorage.setItem('jobsMoreFiltersOpen', String(moreFiltersOpen));
+	});
+
+	// Deep link: /jobs?jobId=…&tab=invoice (e.g. after "Click to complete" from job form)
+	let jobDeepLinkHandled = $state<string | null>(null);
+	$effect(() => {
+		if (loading) return;
+
+		const jobId = page.url.searchParams.get('jobId');
+		if (!jobId || jobDeepLinkHandled === jobId) return;
+
+		jobDeepLinkHandled = jobId;
+		const initialTab = page.url.searchParams.get('tab') === 'invoice' ? 'invoice' : 'job';
+
+		const openFromDeepLink = async () => {
+			let job =
+				jobs.find((j) => j.id === jobId || j.pbId === jobId) ||
+				(await db.jobs.get(jobId)) ||
+				(await db.jobs.where('pbId').equals(jobId).first());
+
+			if (job) {
+				openJobDetailsModal(job, { initialTab });
+			} else {
+				openJobDetailsModal(jobId, { initialTab });
+			}
+
+			await loadJobs();
+
+			const url = new URL(page.url);
+			url.searchParams.delete('jobId');
+			url.searchParams.delete('tab');
+			replaceState(url.pathname + url.search, {});
+		};
+
+		void openFromDeepLink();
 	});
 
 	// )=- Rich derived filtered + paginated list.

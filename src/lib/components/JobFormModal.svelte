@@ -16,13 +16,21 @@
 </script>
 
 <script lang="ts">
-	import { createJob, updateJob, cancelJob, rescheduleCancelledJob, updateClient } from '$lib/db';
+	import {
+		createJob,
+		updateJob,
+		cancelJob,
+		rescheduleCancelledJob,
+		updateClient,
+		ensureInvoiceForJob
+	} from '$lib/db';
 	import ClientPicker from './ClientPicker.svelte';
 	import BillableItemRow from './BillableItemRow.svelte';
 	import AreaSelect from './AreaSelect.svelte';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 	import { db, type Client, cleanupDuplicateUsers, getUserPhotoSrc } from '$lib/db';
+	import { goto } from '$app/navigation';
 
 	let show = $state(false);
 	let isEditing = $state(false);
@@ -30,6 +38,7 @@
 	let showCancelConfirm = $state(false);
 	let isUpdatingCancelReason = $state(false);
 	let showRescheduleHighlight = $state(false);
+	let completingJob = $state(false);
 	let selectedCancelReason = $state('');
 
 	let currentJob = $state<any>({
@@ -214,6 +223,16 @@
 		return isNaN(date.getTime()) ? null : date;
 	}
 
+	const jobEndDate = $derived(parseJobDate(currentJob.end));
+	const canCompleteJob = $derived(
+		isEditing &&
+			!!editingJobId &&
+			currentJob.status !== 'completed' &&
+			currentJob.status !== 'cancelled' &&
+			!!jobEndDate &&
+			new Date() >= jobEndDate
+	);
+
 	function startReschedule() {
 		showRescheduleHighlight = true;
 		requestAnimationFrame(() => {
@@ -343,6 +362,75 @@
 		showRescheduleHighlight = false;
 		closeCancelConfirm();
 	}
+
+	async function completeJobAndGoToInvoice() {
+		if (!editingJobId || !canCompleteJob || completingJob) return;
+
+		if (!currentJob.clientId) {
+			alert('Please select a client before completing the job.');
+			return;
+		}
+
+		const startDate = parseJobDate(currentJob.start);
+		const endDate = parseJobDate(currentJob.end);
+		if (!startDate || !endDate) {
+			alert('Please enter valid start and end times.');
+			return;
+		}
+
+		completingJob = true;
+		try {
+			if (currentJob.clientId && currentJob.areaOfTown) {
+				const client = await db.clients.get(currentJob.clientId);
+				if (client && !client.areaOfTown) {
+					await updateClient(currentJob.clientId, {
+						...client,
+						areaOfTown: currentJob.areaOfTown,
+						updatedAt: new Date()
+					});
+				}
+			}
+
+			const cleanPayload = {
+				title: currentJob.title || 'Untitled Job',
+				start: startDate,
+				end: endDate,
+				clientId: currentJob.clientId,
+				assignedCrew: currentJob.assignedCrew || [],
+				areaOfTown: currentJob.areaOfTown,
+				notes: currentJob.notes || undefined,
+				billableItems: currentJob.billableItems.map((item: any) => ({ ...item })),
+				subtotal,
+				taxRate: taxRatePercent,
+				taxAmount,
+				totalAmount,
+				status: 'completed' as const
+			};
+
+			await updateJob(editingJobId, cleanPayload);
+
+			const freshJob = await db.jobs.get(editingJobId);
+			if (freshJob) {
+				await ensureInvoiceForJob(freshJob, 'generated');
+			}
+
+			const jobId = editingJobId;
+			show = false;
+			showRescheduleHighlight = false;
+			closeCancelConfirm();
+
+			if (afterSaveCallback) {
+				afterSaveCallback();
+			}
+
+			await goto(`/jobs?jobId=${encodeURIComponent(jobId)}&tab=invoice`);
+		} catch (err) {
+			console.error('Failed to complete job', err);
+			alert('Error completing job — check console');
+		} finally {
+			completingJob = false;
+		}
+	}
 </script>
 
 <!-- Main Modal -->
@@ -374,6 +462,19 @@
 					</div>
 				{/if}
 			</div>
+
+			{#if canCompleteJob}
+				<div class="new-job-modal__complete-banner">
+					<button
+						type="button"
+						class="new-job-modal__complete-btn button"
+						onclick={completeJobAndGoToInvoice}
+						disabled={completingJob}
+					>
+						{completingJob ? 'Completing…' : 'Click to complete'}
+					</button>
+				</div>
+			{/if}
 
 			<div class="new-job-modal__form">
 				<!-- Job Title -->
@@ -695,6 +796,28 @@
 	.new-job-modal__cancel-detail {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
+	}
+
+	.new-job-modal__complete-banner {
+		padding: 0 var(--space-4) var(--space-2);
+	}
+
+	.new-job-modal__complete-btn {
+		width: 100%;
+		background: var(--color-success);
+		border-color: var(--color-success);
+		color: white;
+		font-weight: var(--font-weight-semibold);
+	}
+
+	.new-job-modal__complete-btn:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--color-success) 88%, black);
+		border-color: color-mix(in srgb, var(--color-success) 88%, black);
+	}
+
+	.new-job-modal__complete-btn:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
 	}
 
 	.new-job-modal__form {
@@ -1051,6 +1174,16 @@
 
 		.new-job-modal__title {
 			font-size: var(--font-size-lg);
+		}
+
+		.new-job-modal__complete-banner {
+			padding: 0 var(--space-2) var(--space-2);
+		}
+
+		.new-job-modal__complete-btn {
+			min-height: 38px;
+			padding: var(--space-2) var(--space-3);
+			font-size: var(--font-size-sm);
 		}
 
 		.new-job-modal__form {
