@@ -88,6 +88,8 @@
 	}
 
 	function handleAppointmentDragPointerMove(clientX: number, clientY: number) {
+		ensureMobileEdgeAutoScrollRunning(clientY);
+
 		const picker = document.querySelector('.month-picker');
 		if (!picker) {
 			clearMonthPickerEdgeDwell();
@@ -172,6 +174,7 @@
 		document.removeEventListener('touchmove', onAppointmentDragTouchMove);
 		clearMonthPickerEdgeDwell();
 		dragHoverDateStr = null;
+		stopMobileEdgeAutoScroll();
 	}
 	// Suppress layout recalculation while FC is mid drag/resize — updateSize() during a gesture
 	// corrupts time-grid harness top/height and collapses the card to a thin line (content floats).
@@ -209,8 +212,8 @@
 
 	// Mobile touch zones: drag only from + handle, resize only from edge pills (custom gesture).
 	// FullCalendar touch resize requires pre-selecting by internal instanceId and fights scroll.
-	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 56;
-	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 300;
+	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 72;
+	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 390;
 
 	let mobileEdgeScrollPointerY: number | null = null;
 	let mobileEdgeScrollRaf: number | null = null;
@@ -239,10 +242,55 @@
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
 		if (!(target instanceof Element)) return false;
-		return !!(
-			target.closest('.fc-event-resizer') ||
-			target.closest('.fc-event__drag-handle')
-		);
+		return !!target.closest('.fc-event-resizer');
+	}
+
+	let selectedMobileEventId = $state<string | null>(null);
+	let suppressNextDateClick = false;
+	let mobileBackgroundDeselectListenerActive = false;
+
+	function clearMobileEventSelection() {
+		if (!selectedMobileEventId) return;
+		document.querySelectorAll('.fc-event--mobile-selected').forEach((el) => {
+			el.classList.remove('fc-event--mobile-selected');
+		});
+		selectedMobileEventId = null;
+	}
+
+	function selectMobileEvent(eventId: string, eventEl: HTMLElement) {
+		clearMobileEventSelection();
+		selectedMobileEventId = eventId;
+		eventEl.classList.add('fc-event--mobile-selected');
+	}
+
+	function handleMobileCalendarBackgroundPointerDown(e: PointerEvent) {
+		if (!isMobile || appointmentDragActive || activeMobileResize) return;
+		const target = e.target;
+		if (!(target instanceof Element)) return;
+		if (target.closest('.fc-event-resizer')) return;
+
+		const eventRoot = target.closest('.fc-event') as HTMLElement | null;
+		if (!eventRoot) {
+			if (selectedMobileEventId) suppressNextDateClick = true;
+			clearMobileEventSelection();
+			return;
+		}
+
+		const id = eventRoot.dataset.mobileEventId;
+		if (id && id !== selectedMobileEventId) {
+			clearMobileEventSelection();
+		}
+	}
+
+	function ensureMobileBackgroundDeselectListener() {
+		if (mobileBackgroundDeselectListenerActive || !isMobile) return;
+		const wrapper = document.querySelector('.split-calendar__day-wrapper');
+		if (!wrapper) return;
+		mobileBackgroundDeselectListenerActive = true;
+		wrapper.addEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
+			capture: true,
+			passive: true
+		});
 	}
 
 	function getEventHarnessEl(el: HTMLElement): HTMLElement | null {
@@ -383,7 +431,7 @@
 	}
 
 	function runMobileEdgeAutoScrollFrame(ts: number) {
-		if (!activeMobileResize) {
+		if (!activeMobileResize && !appointmentDragActive) {
 			stopMobileEdgeAutoScroll();
 			return;
 		}
@@ -400,11 +448,11 @@
 			if (fromTop >= 0 && fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
 				const proximity =
 					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromTop) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = -(proximity * proximity) * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+				velocity = -proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
 			} else if (fromBottom >= 0 && fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
 				const proximity =
 					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromBottom) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = proximity * proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+				velocity = proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
 			}
 
 			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
@@ -416,7 +464,9 @@
 				);
 			}
 
-			updateMobileResizeFromClientY(pointerY);
+			if (activeMobileResize) {
+				updateMobileResizeFromClientY(pointerY);
+			}
 		}
 
 		mobileEdgeScrollLastTs = ts;
@@ -484,12 +534,6 @@
 		}
 	}
 
-	function bindMobileDragHandle(eventEl: HTMLElement) {
-		eventEl.classList.remove('fc-event-draggable');
-		const dragHandle = eventEl.querySelector('.fc-event__drag-handle');
-		dragHandle?.classList.add('fc-event-draggable');
-	}
-
 	function setupMobileEventTouchZones(info: {
 		el: HTMLElement;
 		event: {
@@ -500,14 +544,18 @@
 		};
 	}) {
 		const eventEl = info.el;
+		eventEl.dataset.mobileEventId = info.event.id;
+		eventEl.classList.add('fc-event-draggable');
+
 		if (eventEl.dataset.mobileTouchZones === '1') {
-			bindMobileDragHandle(eventEl);
+			if (selectedMobileEventId === info.event.id) {
+				eventEl.classList.add('fc-event--mobile-selected');
+			}
 			return;
 		}
 		eventEl.dataset.mobileTouchZones = '1';
 
 		clearMobileResizePreviewStyles(eventEl);
-		bindMobileDragHandle(eventEl);
 
 		const eventId = info.event.id;
 		if (!info.event.start) return;
@@ -1139,16 +1187,20 @@
 				dragScroll: true,
 				snapDuration: '00:30:00',
 				eventDragMinDistance: 10,
-				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
-				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
-				// eventClick still fires on short taps; long-press starts the drag mirror.
-				// Also improves reliability of eventDrop / eventDragStop firing correctly on touch.
-				// Reference: mobile-specific-tweaks
-				eventLongPressDelay: 280,
-				selectLongPressDelay: 280,
-				longPressDelay: 280,
+				// Mobile: 1s hold anywhere on the card enters ghost/drag mode. Short taps select / open edit.
+				eventLongPressDelay: isMobile ? 1000 : 280,
+				selectLongPressDelay: isMobile ? 1000 : 280,
+				longPressDelay: isMobile ? 1000 : 280,
 
 				dateClick: (info) => {
+					if (isMobile && suppressNextDateClick) {
+						suppressNextDateClick = false;
+						return;
+					}
+					if (isMobile && selectedMobileEventId) {
+						clearMobileEventSelection();
+						return;
+					}
 					openJobModal({ start: info.date }, () => refreshAfterUpdate());
 				},
 
@@ -1179,26 +1231,11 @@
 
 					clearMobileResizePreviewStyles(info.el);
 
-					if (!info.el.querySelector('.fc-event__drag-handle')) {
-						const handle = document.createElement('div');
-						handle.className = 'fc-event__drag-handle';
-
-						handle.innerHTML = `
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-								<rect x="3" y="11" width="18" height="2" rx="1"/>
-								<rect x="11" y="3" width="2" height="18" rx="1"/>
-								<polygon points="12,1 8,6 16,6"/>
-								<polygon points="12,23 8,18 16,18"/>
-								<polygon points="1,12 6,8 6,16"/>
-								<polygon points="23,12 18,8 18,16"/>
-							</svg>
-						`;
-
-						info.el.appendChild(handle);
-					}
-
 					if (isMobile && isTimeGrid) {
 						setupMobileEventTouchZones(info);
+						if (selectedMobileEventId === info.event.id) {
+							info.el.classList.add('fc-event--mobile-selected');
+						}
 					}
 
 					// )=- Force the area color on the event element in didMount.
@@ -1291,6 +1328,7 @@
 						return;
 					}
 
+					clearMobileEventSelection();
 					beginCalendarInteraction();
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
@@ -1353,6 +1391,20 @@
 					if (isMobile && isMobileGestureChromeTarget(info.jsEvent.target)) {
 						return;
 					}
+
+					if (isMobile) {
+						if (selectedMobileEventId === info.event.id) {
+							clearMobileEventSelection();
+							clearJobHighlight();
+							openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
+							return;
+						}
+
+						clearJobHighlight();
+						selectMobileEvent(info.event.id!, info.el);
+						return;
+					}
+
 					clearJobHighlight();
 					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
 				},
@@ -1424,6 +1476,7 @@
 			});
 
 			dayApi = api; // expose the local instance to other effects (refetch, etc.)
+			ensureMobileBackgroundDeselectListener();
 
 			api.render();
 
@@ -1437,6 +1490,14 @@
 		return () => {
 			// Do NOT reset calendarInitialized here.
 			// (See comment at declaration for why.)
+			const wrapper = document.querySelector('.split-calendar__day-wrapper');
+			if (wrapper && mobileBackgroundDeselectListenerActive) {
+				wrapper.removeEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
+					capture: true
+				});
+				mobileBackgroundDeselectListenerActive = false;
+			}
+			clearMobileEventSelection();
 			if (api) {
 				api.destroy();
 				api = null;
@@ -2131,43 +2192,44 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 	}
 
-	/* Mobile / touch: larger drag handle + always-visible affordance.
-	   The 16px handle is too small for fingers; long-press anywhere on the event still works,
-	   but a bigger obvious target helps users discover "hold to drag".
-	   Use 24px hit area, higher contrast, and force visible (no hover-only) below 768px.
-	   Also slightly thicker shadow for lift visibility during active long-press drag.
-	   BEM via the existing global fc- classes.
-	   Reference: mobile-specific-tweaks
-	*/
+	/* Mobile / touch: tap to select (shows resize handles), second tap to edit, 1s hold to drag. */
 	@media (max-width: 768px) {
 		:global(.fc-event__drag-handle) {
-			width: 28px;
-			height: 28px;
-			top: 4px;
-			right: 4px;
-			opacity: 0.95;
-			/* Only zone that moves the appointment on mobile (fc-event-draggable lives here). */
-			touch-action: none;
-		}
-
-		:global(.fc-event__drag-handle.fc-event-draggable) {
-			z-index: 25;
+			display: none !important;
 		}
 
 		:global(.fc-event--draggable) {
-			/* Make drag affordance obvious without relying on :hover on touch */
-			box-shadow: 0 0 0 1.5px var(--color-primary);
+			touch-action: pan-y;
 		}
 
-		:global(.fc-event--draggable:active) {
-			/* During the long-press "pop" / active drag start, emphasize the lift */
-			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-			transform: scale(1.01);
+		:global(.fc-event--mobile-selected) {
+			box-shadow:
+				0 0 0 2px var(--color-primary),
+				0 4px 12px rgb(0 0 0 / 0.18);
+			z-index: 12;
+		}
+
+		:global(.fc-event--draggable:active:not(.fc-event-dragging)) {
+			transform: scale(0.995);
+		}
+
+		/* Resize handles appear only after the card is selected. */
+		:global(.fc-timegrid-event .fc-event-resizer) {
+			display: none;
+		}
+
+		:global(.fc-event--mobile-selected .fc-event-resizer) {
+			display: block;
+		}
+
+		:global(.event-completed.fc-event--mobile-selected .fc-event-resizer),
+		:global(.event-cancelled.fc-event--mobile-selected .fc-event-resizer) {
+			display: none !important;
 		}
 
 		/* Touch-friendly event resizing on mobile.
-		   Drag the top or bottom edge (pill handles) to change length; move uses the + handle only.
-		   Avatars sit bottom-right (inset above resizers); time stays top-left clear of drag handle.
+		   Drag the top or bottom edge (pill handles) after selecting the card.
+		   Avatars sit bottom-right (inset above resizers).
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
 			top: auto;
@@ -2183,12 +2245,16 @@
 		}
 
 		:global(.fc-timegrid-event .fc-event-time) {
-			padding-right: 32px;
+			padding-right: 4px;
 		}
 
 		:global(.fc-timegrid-event .fc-event-title) {
-			padding-bottom: 22px;
+			padding-bottom: 8px;
 			padding-top: 2px;
+		}
+
+		:global(.fc-event--mobile-selected .fc-event-title) {
+			padding-bottom: 22px;
 		}
 
 		:global(.fc-event-resizer) {
