@@ -719,6 +719,46 @@
 		return filters.statuses.includes('cancelled') || jumpShowCancelled;
 	}
 
+	// Job window must cover both today AND the focused/selected day (±2 months each way).
+	// A fixed ±2 months from "now" drops appointments moved to September while viewing June.
+	let loadedJobsRangeStart: Date | null = null;
+	let loadedJobsRangeEnd: Date | null = null;
+
+	function getCalendarJobsRange(focusDateStr: string = selectedDate): { start: Date; end: Date } {
+		const today = new Date();
+		today.setHours(12, 0, 0, 0);
+		const focus = parseLocalDate(focusDateStr);
+		const focusMs = isNaN(focus.getTime()) ? today.getTime() : focus.getTime();
+
+		const start = new Date(Math.min(today.getTime(), focusMs));
+		start.setMonth(start.getMonth() - 2);
+		start.setHours(0, 0, 0, 0);
+
+		const end = new Date(Math.max(today.getTime(), focusMs));
+		end.setMonth(end.getMonth() + 2);
+		end.setHours(23, 59, 59, 999);
+
+		return { start, end };
+	}
+
+	function calendarJobsRangeNeedsReload(focusDateStr: string = selectedDate): boolean {
+		const { start, end } = getCalendarJobsRange(focusDateStr);
+		if (!loadedJobsRangeStart || !loadedJobsRangeEnd) return true;
+		return (
+			start.getTime() < loadedJobsRangeStart.getTime() ||
+			end.getTime() > loadedJobsRangeEnd.getTime()
+		);
+	}
+
+	async function reloadJobsForCalendarRange(focusDateStr: string = selectedDate) {
+		const { start, end } = getCalendarJobsRange(focusDateStr);
+		const includeCancelled = shouldIncludeCancelledJobs();
+		await repairJobDateFields();
+		jobs = await getJobsForRange(start, end, includeCancelled);
+		loadedJobsRangeStart = start;
+		loadedJobsRangeEnd = end;
+	}
+
 	function clearJumpCancelledMode() {
 		if (!jumpShowCancelled) return;
 		jumpShowCancelled = false;
@@ -745,14 +785,7 @@
 			const outcome = await applyServerJobRecord(rec);
 			if (outcome === 'skipped') return;
 
-			const includeCancelled = shouldIncludeCancelledJobs();
-			const start = new Date();
-			start.setMonth(start.getMonth() - 2);
-			const end = new Date();
-			end.setMonth(end.getMonth() + 2);
-
-			const fresh = await getJobsForRange(start, end, includeCancelled);
-			jobs.splice(0, jobs.length, ...fresh);
+			await reloadJobsForCalendarRange();
 			dayApi?.refetchEvents();
 		});
 
@@ -890,15 +923,7 @@
 			}
 		});
 
-		const includeCancelled = shouldIncludeCancelledJobs();
-
-		const start = new Date();
-		start.setMonth(start.getMonth() - 2);
-		const end = new Date();
-		end.setMonth(end.getMonth() + 2);
-
-		await repairJobDateFields();
-		jobs = await getJobsForRange(start, end, includeCancelled);
+		await reloadJobsForCalendarRange();
 	}
 
 	async function refreshAfterUpdate() {
@@ -914,15 +939,7 @@
 				await pullJobsFromServer();
 			}
 
-			const includeCancelled = shouldIncludeCancelledJobs();
-
-			const newJobs = await getJobsForRange(
-				new Date(new Date().setMonth(new Date().getMonth() - 2)),
-				new Date(new Date().setMonth(new Date().getMonth() + 2)),
-				includeCancelled
-			);
-
-			jobs.splice(0, jobs.length, ...newJobs);
+			await reloadJobsForCalendarRange();
 			dayApi?.refetchEvents();
 		} catch (e) {
 			toast.dismiss(syncToast);
@@ -1015,9 +1032,8 @@
 
 		try {
 			await updateJobDates(jobId, newDate, newEnd);
-			// Phase 1: optimistic patch for external drops (MonthPicker target).
 			applyOptimisticDatePatch(jobId, newDate, newEnd);
-			handleDateSelect(dateStr);
+			await handleDateSelect(dateStr);
 		} catch (e) {
 			toast.error('Failed to move job');
 		}
@@ -1379,11 +1395,16 @@
 		stepMonthPicker = fn;
 	}
 
-	function handleDateSelect(dateStr: string) {
+	async function handleDateSelect(dateStr: string) {
 		clearJobHighlight();
 		clearJumpCancelledMode();
 		selectedDate = dateStr;
 		syncDateToUrl(dateStr);
+
+		if (calendarJobsRangeNeedsReload(dateStr)) {
+			await reloadJobsForCalendarRange(dateStr);
+		}
+
 		if (dayApi) {
 			dayApi.gotoDate(parseLocalDate(dateStr));
 			dayApi.refetchEvents();
