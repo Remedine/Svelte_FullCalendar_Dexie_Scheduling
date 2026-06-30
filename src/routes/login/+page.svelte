@@ -15,8 +15,9 @@
 	} from '$lib/auth/deviceUnlock';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { page } from '$app/state';
+	import { getLastLoginEmail } from '$lib/auth/sessionPersist';
 
-	let email = $state('');
+	let email = $state(getLastLoginEmail());
 	let password = $state('');
 	let isLoading = $state(false);
 	let error = $state('');
@@ -35,7 +36,12 @@
 	const passkeysAvailable = $derived(canUsePasskeys());
 	const sessionExpiredNotice = $derived(
 		page.url.searchParams.get('session') === 'expired'
-			? 'Your desktop session timed out due to inactivity. Please sign in again.'
+			? 'Your session timed out due to inactivity. Sign in again — your email is remembered for passkey sign-in.'
+			: ''
+	);
+	const rememberedEmailHint = $derived(
+		!sessionExpiredNotice && email
+			? 'Your last sign-in email is filled in below. Use passkey or enter your password.'
 			: ''
 	);
 
@@ -221,6 +227,8 @@
 
 			{#if sessionExpiredNotice && !showForgotPassword}
 				<p class="login-form__notice">{sessionExpiredNotice}</p>
+			{:else if rememberedEmailHint && !showForgotPassword}
+				<p class="login-form__notice login-form__notice--subtle">{rememberedEmailHint}</p>
 			{/if}
 
 			{#if showForgotPassword}
@@ -556,6 +564,12 @@
 		font-size: var(--font-size-sm);
 		line-height: 1.45;
 		text-align: left;
+	}
+
+	.login-form__notice--subtle {
+		background: transparent;
+		padding: 0;
+		margin-bottom: var(--space-4);
 	}
 
 	.login-card__help {

@@ -112,6 +112,10 @@ export async function refreshPbAuthIfNeeded(): Promise<boolean> {
 
 	try {
 		await pb.collection('users').authRefresh();
+		if (pb.authStore.isValid) {
+			const { syncAppSessionPbBackup } = await import('$lib/auth/sessionPersist');
+			await syncAppSessionPbBackup();
+		}
 		return pb.authStore.isValid;
 	} catch (err) {
 		console.warn('[auth] PocketBase token refresh failed', err);

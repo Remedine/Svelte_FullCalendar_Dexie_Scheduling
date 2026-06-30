@@ -66,16 +66,32 @@ export async function restoreSession(): Promise<void> {
 	let user: any = null;
 
 	try {
-		const { db, persistSessionUserId, readPersistedSessionUserId } = await import('$lib/db');
+		const { db, readPersistedSessionUserId } = await import('$lib/db');
 		const { refreshPbAuthIfNeeded, registerAuthRefreshOnVisibility } = await import('$lib/db/pb');
+		const {
+			clearAppSession,
+			persistAppSession,
+			readAppSession,
+			restorePbAuthFromAppSession,
+			setLastLoginEmail,
+			syncAppSessionPbBackup
+		} = await import('$lib/auth/sessionPersist');
 
 		registerAuthRefreshOnVisibility();
+		await restorePbAuthFromAppSession();
 
+		const appSession = await readAppSession();
 		const savedId =
-			localStorage.getItem('currentUserId') || (await readPersistedSessionUserId());
+			localStorage.getItem('currentUserId') ||
+			appSession?.currentUserId ||
+			(await readPersistedSessionUserId());
 
 		if (savedId) {
 			user = await db.users.get(savedId);
+		}
+
+		if (!user && appSession?.email) {
+			user = await db.users.where('email').equalsIgnoreCase(appSession.email).first();
 		}
 
 		if (!user) {
@@ -91,12 +107,13 @@ export async function restoreSession(): Promise<void> {
 			auth.isAuthenticated = true;
 
 			if (user.id) {
-				const id = String(user.id);
-				localStorage.setItem('currentUserId', id);
-				await persistSessionUserId(id);
+				await persistAppSession({
+					userId: String(user.id),
+					email: user.email || appSession?.email
+				});
 			}
 
-			void refreshPbAuthIfNeeded();
+			void refreshPbAuthIfNeeded().then(() => syncAppSessionPbBackup());
 			await applyQuickUnlockIfNeeded(user.id);
 			const { isQuickUnlockDevice } = await import('$lib/utils/device');
 			if (!isQuickUnlockDevice()) {
@@ -111,13 +128,15 @@ export async function restoreSession(): Promise<void> {
 
 			try {
 				const { pb } = await import('$lib/db/pb');
-				if (pb.authStore.isValid) {
+				if (pb.authStore.isValid || pb.authStore.token) {
 					pb.authStore.clear();
 				}
-				localStorage.removeItem('currentUserId');
-				await persistSessionUserId(null);
+				await clearAppSession();
+				if (appSession?.email) {
+					setLastLoginEmail(appSession.email);
+				}
 			} catch {
-				localStorage.removeItem('currentUserId');
+				await clearAppSession();
 			}
 		}
 	} catch (e) {
@@ -151,13 +170,36 @@ export async function enforceDesktopSessionIfExpired(): Promise<boolean> {
 
 	desktopSessionExpiryInProgress = true;
 	try {
-		await logout();
-		const { goto } = await import('$app/navigation');
-		goto('/login?session=expired', { replaceState: true });
+		await expireSessionToLogin('expired');
 		return true;
 	} finally {
 		desktopSessionExpiryInProgress = false;
 	}
+}
+
+/** Sign out to login without wiping offline Dexie data; keeps last email for passkey. */
+export async function expireSessionToLogin(
+	reason: 'expired' | 'default' = 'default'
+): Promise<void> {
+	const email = auth.currentUser?.email;
+	auth.currentUser = null;
+	auth.isAuthenticated = false;
+	auth.locked = false;
+
+	try {
+		const { pb } = await import('$lib/db/pb');
+		pb.authStore.clear();
+	} catch {}
+
+	const { clearAppSession, setLastLoginEmail } = await import('$lib/auth/sessionPersist');
+	const { clearSessionActivity } = await import('$lib/auth/sessionSecurity');
+	clearSessionActivity();
+	await clearAppSession();
+	if (email) setLastLoginEmail(email);
+
+	const { goto } = await import('$app/navigation');
+	const query = reason === 'expired' ? '?session=expired' : '';
+	goto(`/login${query}`, { replaceState: true });
 }
 
 export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
@@ -168,11 +210,16 @@ export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
 }
 
 export async function logout() {
+	const rememberedEmail = auth.currentUser?.email;
 	auth.currentUser = null;
 	auth.isAuthenticated = false;
 	auth.locked = false;
-	localStorage.removeItem('currentUserId');
 	void import('$lib/auth/sessionSecurity').then(({ clearSessionActivity }) => clearSessionActivity());
+	void import('$lib/auth/sessionPersist').then(({ clearAppSession, setLastLoginEmail }) => {
+		void clearAppSession().then(() => {
+			if (rememberedEmail) setLastLoginEmail(rememberedEmail);
+		});
+	});
 
 	try {
 		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
@@ -201,7 +248,6 @@ export async function logout() {
 		await db.delete();
 		await db.open();
 		await restoreDeviceAuth(deviceAuthSnapshot);
-		await persistSessionUserId(null);
 	} catch (err) {
 		console.warn('[auth] Failed to clear local Dexie data on logout', err);
 	}
@@ -218,12 +264,13 @@ export function setCurrentUser(user: any | null) {
 			ensureDeviceAuthMatchesUser(String(user.id));
 		});
 		void import('$lib/auth/sessionSecurity').then(({ markSessionActivity }) => markSessionActivity());
-		const id = user.id.toString();
-		localStorage.setItem('currentUserId', id);
-		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(id));
+		void import('$lib/auth/sessionPersist').then(({ persistAppSession, syncAppSessionPbBackup }) => {
+			void persistAppSession({ userId: String(user.id), email: user.email }).then(() =>
+				syncAppSessionPbBackup()
+			);
+		});
 	} else {
-		localStorage.removeItem('currentUserId');
-		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(null));
+		void import('$lib/auth/sessionPersist').then(({ clearAppSession }) => clearAppSession());
 	}
 }
 

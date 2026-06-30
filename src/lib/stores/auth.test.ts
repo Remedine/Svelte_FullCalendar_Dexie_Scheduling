@@ -46,13 +46,20 @@ describe('auth store (runes $state + session restore)', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('setCurrentUser updates state and persists id to localStorage', () => {
-		const user = { id: 'user-123', name: 'Test User', role: 'crew' };
+	it('setCurrentUser updates state and persists id to localStorage', async () => {
+		const user = {
+			id: 'user-123',
+			name: 'Test User',
+			role: 'crew',
+			email: 'crew@example.com'
+		};
 		setCurrentUser(user);
 
 		expect(auth.currentUser).toEqual(user);
 		expect(auth.isAuthenticated).toBe(true);
-		expect(localStorageMock.getItem('currentUserId')).toBe('user-123');
+		await vi.waitFor(() => {
+			expect(localStorageMock.getItem('currentUserId')).toBe('user-123');
+		});
 	});
 
 	it('setCurrentUser(null) clears state and removes from localStorage', () => {

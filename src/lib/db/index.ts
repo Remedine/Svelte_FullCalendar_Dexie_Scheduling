@@ -245,6 +245,10 @@ export interface User {
 export interface AppSession {
 	id: 'current';
 	currentUserId: string;
+	email?: string;
+	/** Backup PB JWT when localStorage auth is evicted (mobile PWA). */
+	pbToken?: string;
+	pbModelJson?: string;
 }
 
 /** Local quick-unlock settings (PIN / device biometric gate on reopen). */
@@ -459,7 +463,14 @@ db.version(25).stores({
 
 export async function persistSessionUserId(userId: string | null): Promise<void> {
 	if (userId) {
-		await db.appSession.put({ id: 'current', currentUserId: userId });
+		const existing = await db.appSession.get('current');
+		await db.appSession.put({
+			id: 'current',
+			currentUserId: userId,
+			email: existing?.email,
+			pbToken: existing?.pbToken,
+			pbModelJson: existing?.pbModelJson
+		});
 	} else {
 		await db.appSession.delete('current').catch(() => {});
 	}
