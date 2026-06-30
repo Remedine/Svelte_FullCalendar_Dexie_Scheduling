@@ -47,8 +47,8 @@
 
 	const tabs = [
 		{ id: 'scheduling', label: 'Scheduling Options' },
-		{ id: 'security', label: 'App Security' },
-		{ id: 'invoice', label: 'Invoice Options' }
+		{ id: 'invoice', label: 'Invoice Options' },
+		{ id: 'security', label: 'App Security' }
 	] as const;
 
 	let editingOptions = $state<any>({});
