@@ -33,8 +33,8 @@
 
 	// Phase 1: edge-dwell on month picker while dragging an appointment to another day/month.
 	const MONTH_PICKER_EDGE_FRACTION = 0.15;
-	const MONTH_PICKER_EDGE_DWELL_MS = 500;
-	const MONTH_PICKER_EDGE_REPEAT_MS = 400;
+	const MONTH_PICKER_EDGE_DWELL_MS = 1000;
+	const MONTH_PICKER_EDGE_REPEAT_MS = 800;
 
 	let stepMonthPicker: (delta: number) => void = () => {};
 	let monthEdgeDwellTimer: ReturnType<typeof setTimeout> | null = null;
