@@ -208,12 +208,6 @@
 		}
 	}
 
-	function getAreaColor(areaId: string | undefined): string {
-		if (!areaId || !areaOptions.length) return '#64748b';
-		const area = areaOptions.find((a: any) => a.value === areaId);
-		return getDisplayAreaColor(area?.color);
-	}
-
 	function parseJobDate(value: Date | string | undefined): Date | null {
 		if (!value) return null;
 		const date = value instanceof Date ? value : new Date(value);
@@ -415,24 +409,26 @@
              but the job does, we update the client. This keeps the common "client == job area" invariant
              without forcing the user to set it twice. -->
 				<div class="new-job-modal__field">
-					<label for="job-area" class="new-job-modal__label label">Area of Town</label>
+					<span id="job-area-label" class="new-job-modal__label label">Area of Town</span>
 					<div
-						class="area-field-wrapper"
-						style="border-left: 6px solid {getAreaColor(currentJob.areaOfTown)};"
+						class="new-job-modal__area-chips"
+						role="radiogroup"
+						aria-labelledby="job-area-label"
 					>
-						<select
-							id="job-area"
-							class="area-select input"
-							bind:value={currentJob.areaOfTown}
-						>
-							<option value="">Select area...</option>
-							{#each areaOptions as option (option.value)}
-								<option 
-									value={option.value}
-									style="color: {getDisplayAreaColor(option.color)};"
-								>■ {option.label}</option>
-							{/each}
-						</select>
+						{#each areaOptions as option (option.value)}
+							{@const areaColor = getDisplayAreaColor(option.color)}
+							<button
+								type="button"
+								class="new-job-modal__area-chip"
+								class:new-job-modal__area-chip--active={currentJob.areaOfTown === option.value}
+								role="radio"
+								aria-checked={currentJob.areaOfTown === option.value}
+								onclick={() => (currentJob.areaOfTown = option.value)}
+								style="--area-chip-color: {areaColor}; background-color: {areaColor}20; color: {areaColor}; border-color: {areaColor};"
+							>
+								{option.label}
+							</button>
+						{/each}
 					</div>
 				</div>
 
@@ -551,46 +547,50 @@
 			     Cancel Job on next line, right aligned, text-only red (de-emphasized).
 			     Primary actions always visible at bottom of modal view. -->
 			<div class="new-job-modal__footer sticky-footer">
-				<div class="footer-primary">
+				<div class="new-job-modal__footer-bar">
 					<button class="new-job-modal__btn button button--ghost" onclick={closeModal}>
 						{isEditing ? 'Close' : 'Cancel'}
 					</button>
 
-					<button
-						class="new-job-modal__btn button button--primary"
-						class:new-job-modal__btn--reschedule-highlight={showRescheduleHighlight}
-						onclick={saveJob}
-					>
-						{showRescheduleHighlight ? 'Save reschedule' : isEditing ? 'Save Changes' : 'Create Job'}
-					</button>
-				</div>
+					<div class="new-job-modal__footer-end">
+						<button
+							class="new-job-modal__btn button button--primary"
+							class:new-job-modal__btn--reschedule-highlight={showRescheduleHighlight}
+							onclick={saveJob}
+						>
+							{showRescheduleHighlight
+								? 'Save reschedule'
+								: isEditing
+									? 'Save Changes'
+									: 'Create Job'}
+						</button>
 
-				{#if isEditing && currentJob.status === 'cancelled'}
-					<div class="new-job-modal__cancelled-actions">
-						<button
-							type="button"
-							class="new-job-modal__secondary-action"
-							onclick={openUpdateCancelReason}
-						>
-							Update cancel reason
-						</button>
-						<button
-							type="button"
-							class="new-job-modal__secondary-action new-job-modal__secondary-action--reschedule"
-							onclick={startReschedule}
-						>
-							Reschedule
-						</button>
+						{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
+							<button class="cancel-job-text" onclick={() => (showCancelConfirm = true)}>
+								Cancel Job
+							</button>
+						{/if}
+
+						{#if isEditing && currentJob.status === 'cancelled'}
+							<div class="new-job-modal__cancelled-actions">
+								<button
+									type="button"
+									class="new-job-modal__secondary-action"
+									onclick={openUpdateCancelReason}
+								>
+									Update cancel reason
+								</button>
+								<button
+									type="button"
+									class="new-job-modal__secondary-action new-job-modal__secondary-action--reschedule"
+									onclick={startReschedule}
+								>
+									Reschedule
+								</button>
+							</div>
+						{/if}
 					</div>
-				{/if}
-
-				{#if isEditing && currentJob.status !== 'completed' && currentJob.status !== 'cancelled'}
-					<!-- )=- Prevent cancel for completed or already-cancelled jobs.
-               )=- Reference: JOBS_AND_INVOICES_SPEC.md Phase 7 (cancel flow) + Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-					<button class="cancel-job-text" onclick={() => (showCancelConfirm = true)}>
-						Cancel Job
-					</button>
-				{/if}
+				</div>
 			</div>
 		</div>
 	</div>
@@ -813,17 +813,26 @@
 	}
 
 	.new-job-modal__footer {
-		/* base from global .sticky-footer; specific layout kept */
 		display: flex;
 		flex-direction: column;
-		align-items: flex-end; /* all content right aligned */
-		gap: var(--space-2);
+		align-items: stretch;
+		gap: var(--space-1);
 	}
 
-	.footer-primary {
+	.new-job-modal__footer-bar {
 		display: flex;
-		gap: var(--space-2);
-		/* Close and Save Changes on one line, right aligned */
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--space-3);
+		width: 100%;
+	}
+
+	.new-job-modal__footer-end {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-1);
+		min-width: 0;
 	}
 
 	.new-job-modal__btn {
@@ -838,39 +847,37 @@
 		color: var(--color-primary);
 	}
 
-	.area-field-wrapper {
+	.new-job-modal__area-chips {
 		display: flex;
-		align-items: center;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--color-border-strong);
-		border-radius: var(--radius-md);
-		background: var(--color-surface);
-		min-height: 44px; /* match input touch target */
-		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+		flex-wrap: wrap;
+		gap: var(--space-2);
 	}
 
-	.area-field-wrapper:focus-within {
-		border-color: var(--color-primary);
-		box-shadow: var(--focus-ring);
-	}
-
-	.area-select {
-		flex: 1;
-		border: none;
-		background: transparent;
-		padding: var(--space-2) var(--space-4); /* padding + room for native dropdown arrow */
-		font-size: var(--font-size-base);
-		color: var(--color-text);
-		outline: none;
+	.new-job-modal__area-chip {
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
 		cursor: pointer;
-		width: 100%;
-		appearance: none; /* cleaner native look, arrow still shows in most browsers */
+		border: 1px solid;
+		transition:
+			box-shadow var(--transition-fast),
+			filter var(--transition-fast),
+			font-weight var(--transition-fast);
 	}
 
-	/* For the options in the native dropdown: use token bg for dark mode support.
-	   Inline style on each option sets the text color to the area color, making the color visible "next to"/for each option in the list. */
-	.area-select option {
-		background: var(--color-surface);
+	.new-job-modal__area-chip:hover {
+		filter: brightness(1.08);
+	}
+
+	.new-job-modal__area-chip:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--area-chip-color) 45%, transparent);
+	}
+
+	.new-job-modal__area-chip--active {
+		font-weight: var(--font-weight-semibold);
+		box-shadow: 0 0 0 3px var(--area-chip-color);
 	}
 
 	/* Cancel confirmation — stacked above the job form modal (global shell + BEM extensions). */
@@ -994,18 +1001,21 @@
 
 	.cancel-job-text {
 		color: var(--color-danger-emphasis);
-		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
 		background: none;
 		border: none;
 		cursor: pointer;
+		padding: 0;
+		line-height: 1.2;
+		text-align: right;
 	}
 
 	.new-job-modal__cancelled-actions {
 		display: flex;
-		flex-wrap: wrap;
-		justify-content: flex-end;
-		gap: var(--space-2);
-		width: 100%;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-1);
 	}
 
 	.new-job-modal__secondary-action {
@@ -1097,48 +1107,29 @@
 		}
 
 		.new-job-modal__footer {
-			align-items: stretch;
-			width: 100%;
-			box-sizing: border-box;
 			padding: var(--space-2);
 			padding-bottom: max(var(--space-2), env(safe-area-inset-bottom, 0px));
+			gap: 0;
+		}
+
+		.new-job-modal__footer-bar {
+			align-items: center;
 			gap: var(--space-2);
 		}
 
-		.footer-primary {
-			flex-direction: column-reverse;
-			width: 100%;
-			gap: var(--space-2);
-		}
-
-		.footer-primary .new-job-modal__btn {
-			width: 100%;
-			min-width: 0;
-			padding: var(--space-3) var(--space-4);
+		.new-job-modal__footer .new-job-modal__btn {
+			padding: var(--space-2) var(--space-3);
+			min-height: 38px;
 			font-size: var(--font-size-sm);
-			text-align: center;
-			white-space: normal;
 		}
 
-		.cancel-job-text {
-			width: 100%;
-			text-align: center;
-			padding: var(--space-2);
-			min-height: 44px;
-		}
-
-		.new-job-modal__cancelled-actions {
-			flex-direction: column;
-			align-items: stretch;
+		.new-job-modal__footer-end .new-job-modal__btn {
+			white-space: nowrap;
 		}
 
 		.new-job-modal__secondary-action {
-			width: 100%;
-			text-align: center;
-			padding: var(--space-2) var(--space-3);
-			min-height: 44px;
-			font-size: var(--font-size-sm);
-			white-space: normal;
+			padding: var(--space-1) var(--space-2);
+			font-size: var(--font-size-xs);
 		}
 
 		.cancel-confirm-modal__content {
