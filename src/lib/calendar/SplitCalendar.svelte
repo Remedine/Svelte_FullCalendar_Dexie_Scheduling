@@ -1592,43 +1592,46 @@
 						{/if}
 					</summary>
 
-					<!-- Crew -->
+					<!-- Crew: avatar row, highlight border when selected -->
 					<div class="split-calendar__filter-group">
 						<div class="split-calendar__filter-group-label">Crew</div>
-						<div class="split-calendar__filter-options">
-							{#each crewOptions as crew}
-								<label class="split-calendar__filter-option">
-									<input
-										type="checkbox"
-										checked={filters.crew.includes(crew)}
-										onchange={() => toggleFilter('crew', crew)}
-									/>
-									<span class="split-calendar__filter-option-avatar">
-										{#if crewPhotoMap[crew]}
-											<img src={crewPhotoMap[crew]} alt={crew} />
-										{:else}
+						<div class="split-calendar__crew-avatars">
+							{#each crewOptions as crew (crew)}
+								<button
+									type="button"
+									class="split-calendar__crew-avatar"
+									class:split-calendar__crew-avatar--selected={filters.crew.includes(crew)}
+									onclick={() => toggleFilter('crew', crew)}
+									title={crew}
+									aria-label={crew}
+									aria-pressed={filters.crew.includes(crew)}
+								>
+									{#if crewPhotoMap[crew]}
+										<img src={crewPhotoMap[crew]} alt="" />
+									{:else}
+										<span class="split-calendar__crew-avatar-initial">
 											{(crew || '?').charAt(0).toUpperCase()}
-										{/if}
-									</span>
-									<span>{crew}</span>
-								</label>
+										</span>
+									{/if}
+								</button>
 							{/each}
 						</div>
 					</div>
 
-					<!-- Area -->
-					<div class="split-calendar__filter-group">
+					<!-- Area: colored tokens (matches clients/jobs pages) -->
+					<div class="split-calendar__filter-group split-calendar__filter-group--inline">
 						<div class="split-calendar__filter-group-label">Area</div>
-						<div class="split-calendar__filter-options">
-							{#each optionsStore.data?.areasOfTown || [] as area}
-								<label class="split-calendar__filter-option">
-									<input
-										type="checkbox"
-										checked={filters.areas.includes(area.id)}
-										onchange={() => toggleFilter('areas', area.id)}
-									/>
-									<span>{area.label}</span>
-								</label>
+						<div class="split-calendar__area-chips">
+							{#each optionsStore.data?.areasOfTown || [] as area (area.id)}
+								<button
+									type="button"
+									class="area-chip"
+									class:active={filters.areas.includes(area.id)}
+									onclick={() => toggleFilter('areas', area.id)}
+									style="background-color: {area.color}20; color: {area.color}; border-color: {area.color};"
+								>
+									{area.label}
+								</button>
 							{/each}
 						</div>
 					</div>
@@ -1974,6 +1977,17 @@
 		margin-bottom: var(--space-3);
 	}
 
+	.split-calendar__filter-group--inline {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	.split-calendar__filter-group--inline .split-calendar__filter-group-label {
+		margin-bottom: 0;
+	}
+
 	.split-calendar__filter-group-label {
 		font-weight: var(--font-weight-semibold);
 		font-size: var(--font-size-xs);
@@ -1981,6 +1995,67 @@
 		margin-bottom: var(--space-1);
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+	}
+
+	.split-calendar__crew-avatars {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+	}
+
+	.split-calendar__crew-avatar {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		overflow: hidden;
+		border: 2px solid transparent;
+		background: var(--color-surface-alt);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		padding: 0;
+		flex-shrink: 0;
+		transition: border-color var(--transition-fast);
+	}
+
+	.split-calendar__crew-avatar--selected {
+		border-color: var(--color-primary);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
+	}
+
+	.split-calendar__crew-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.split-calendar__crew-avatar-initial {
+		text-transform: uppercase;
+	}
+
+	.split-calendar__area-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+	}
+
+	.area-chip {
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		border: 1px solid;
+		background: var(--color-surface);
+	}
+
+	.area-chip.active {
+		font-weight: var(--font-weight-semibold);
+		box-shadow: 0 0 0 3px currentColor;
 	}
 
 	.split-calendar__filter-options {
@@ -2002,27 +2077,6 @@
 	.split-calendar__filter-option input {
 		margin: 0;
 		accent-color: var(--color-primary);
-	}
-
-	.split-calendar__filter-option-avatar {
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		overflow: hidden;
-		background-color: var(--color-surface-2);
-		flex-shrink: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 9px;
-		font-weight: 600;
-		color: var(--color-text-muted);
-	}
-
-	.split-calendar__filter-option-avatar img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
 	}
 
 	.split-calendar__status--completed {
