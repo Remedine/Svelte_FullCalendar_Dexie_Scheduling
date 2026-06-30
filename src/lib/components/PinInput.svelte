@@ -149,17 +149,20 @@
 	.pin-input {
 		display: flex;
 		justify-content: center;
-		gap: var(--space-3);
+		gap: var(--space-2);
+		max-width: 100%;
 	}
 
 	.pin-input__cell {
-		width: 3rem;
-		height: 3.25rem;
+		flex: 1 1 0;
+		min-width: 0;
+		max-width: 3rem;
+		height: 2.75rem;
 		padding: 0;
 		border: 2px solid var(--color-border-strong);
 		border-radius: var(--radius-md);
 		background: var(--color-surface);
-		font-size: var(--font-size-2xl);
+		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		text-align: center;
 		caret-color: var(--color-primary);
@@ -182,13 +185,8 @@
 	}
 
 	@media (max-width: 380px) {
-		.pin-input {
-			gap: var(--space-2);
-		}
-
 		.pin-input__cell {
-			width: 2.65rem;
-			height: 3rem;
+			max-width: 2.75rem;
 		}
 	}
 </style>

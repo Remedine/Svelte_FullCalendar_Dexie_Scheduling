@@ -129,15 +129,13 @@
 		{#if !settingsReady}
 			<p class="quick-unlock__subtitle">Loading…</p>
 		{:else if pinLockedOut}
-			<p class="quick-unlock__subtitle">
-				PIN entry is locked. Sign in with your email and password.
-			</p>
+			<p class="quick-unlock__subtitle">PIN locked. Sign in with email instead.</p>
 		{:else if bioAvailable && pinAvailable}
-			<p class="quick-unlock__subtitle">Use fingerprint, Face ID, or your 4-digit PIN</p>
+			<p class="quick-unlock__subtitle">Fingerprint, Face ID, or PIN</p>
 		{:else if bioAvailable}
-			<p class="quick-unlock__subtitle">Confirm with fingerprint or Face ID</p>
+			<p class="quick-unlock__subtitle">Use fingerprint or Face ID</p>
 		{:else if pinAvailable}
-			<p class="quick-unlock__subtitle">Enter your 4-digit PIN to continue</p>
+			<p class="quick-unlock__subtitle">Enter your PIN</p>
 		{:else}
 			<p class="quick-unlock__subtitle">Quick unlock is not configured on this device.</p>
 		{/if}
@@ -150,7 +148,7 @@
 					onclick={() => tryBiometric(false)}
 					disabled={loading}
 				>
-					{bioLoading ? 'Checking…' : 'Use fingerprint / Face ID'}
+					{bioLoading ? 'Checking…' : 'Fingerprint / Face ID'}
 				</button>
 			{/if}
 
@@ -160,7 +158,6 @@
 
 			{#if pinAvailable && !pinLockedOut}
 				<div class="quick-unlock__pin-wrap">
-					<p class="quick-unlock__label">Quick PIN</p>
 					<PinInput
 						bind:value={pin}
 						disabled={loading}
@@ -183,48 +180,57 @@
 </div>
 
 <style>
+	/* Mobile-only overlay — compact layout that fits one screen above the PIN keyboard. */
 	.quick-unlock {
 		position: fixed;
 		inset: 0;
 		z-index: 9999;
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: center;
+		min-height: 100dvh;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
 		background: linear-gradient(135deg, var(--color-primary-emphasis), var(--color-primary));
-		padding: var(--space-4);
+		padding: max(var(--space-3), env(safe-area-inset-top, 0px))
+			max(var(--space-3), env(safe-area-inset-right, 0px))
+			max(var(--space-3), env(safe-area-inset-bottom, 0px))
+			max(var(--space-3), env(safe-area-inset-left, 0px));
+		padding-top: max(10dvh, calc(env(safe-area-inset-top, 0px) + var(--space-3)));
 	}
 
 	.quick-unlock__card {
 		width: 100%;
 		max-width: 360px;
 		background: var(--color-surface);
-		border-radius: var(--radius-xl);
-		padding: var(--space-8) var(--space-6);
+		border-radius: var(--radius-lg);
+		padding: var(--space-4) var(--space-4);
 		box-shadow: var(--shadow-lg);
 		text-align: center;
 	}
 
 	.quick-unlock__title {
 		margin: 0 0 var(--space-1);
-		font-size: var(--font-size-2xl);
+		font-size: var(--font-size-xl);
 		color: var(--color-primary-emphasis);
 	}
 
 	.quick-unlock__subtitle {
-		margin: 0 0 var(--space-6);
+		margin: 0 0 var(--space-3);
 		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
-		line-height: 1.5;
+		line-height: 1.35;
 	}
 
 	.quick-unlock__bio-btn {
 		width: 100%;
-		padding: var(--space-4);
+		padding: var(--space-3);
 		border: none;
 		border-radius: var(--radius-md);
 		background: var(--color-primary);
 		color: white;
 		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-base);
 		cursor: pointer;
 	}
 
@@ -238,34 +244,31 @@
 	}
 
 	.quick-unlock__or {
-		margin: var(--space-4) 0;
+		margin: var(--space-2) 0;
 		color: var(--color-text-muted);
-		font-size: var(--font-size-sm);
+		font-size: var(--font-size-xs);
 	}
 
 	.quick-unlock__pin-wrap {
-		margin-bottom: var(--space-2);
-	}
-
-	.quick-unlock__label {
-		margin: 0 0 var(--space-3);
-		font-size: var(--font-size-sm);
-		color: var(--color-text-muted);
+		margin-bottom: 0;
 	}
 
 	.quick-unlock__error {
 		color: var(--color-danger);
-		font-size: var(--font-size-sm);
-		margin: var(--space-3) 0 0;
+		font-size: var(--font-size-xs);
+		line-height: 1.35;
+		margin: var(--space-2) 0 0;
 	}
 
 	.quick-unlock__fallback {
-		margin-top: var(--space-5);
+		margin-top: var(--space-3);
+		padding: var(--space-2);
 		border: none;
 		background: none;
 		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
 		text-decoration: underline;
+		text-underline-offset: 2px;
 		cursor: pointer;
 	}
 

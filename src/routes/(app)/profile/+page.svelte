@@ -856,11 +856,6 @@
 					>
 				</button>
 			</div>
-			{:else}
-				<p class="profile__security-hint">
-					Quick unlock (PIN / fingerprint) is available on mobile only. Desktop sessions use the
-					admin-configured inactivity timeout and require full sign-in again.
-				</p>
 			{/if}
 
 			{#if isMobile && editing === 'quickUnlock'}

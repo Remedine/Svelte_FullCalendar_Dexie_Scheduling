@@ -37,13 +37,11 @@
 	const passkeysAvailable = $derived(canUsePasskeys());
 	const sessionExpiredNotice = $derived(
 		page.url.searchParams.get('session') === 'expired'
-			? 'Your session timed out due to inactivity. Sign in again — your email is remembered for passkey sign-in.'
+			? 'Session timed out. Sign in again — email remembered.'
 			: ''
 	);
 	const rememberedEmailHint = $derived(
-		!sessionExpiredNotice && email
-			? 'Your last sign-in email is filled in below. Use passkey or enter your password.'
-			: ''
+		!sessionExpiredNotice && email ? 'Email prefilled from your last sign-in.' : ''
 	);
 
 	// Session may restore after a PWA foreground retry — return to the app (quick unlock if needed).
@@ -369,7 +367,7 @@
 				{/if}
 			</form>
 
-			<p class="login-card__help">
+			<p class="login-card__help login-card__help--desktop">
 				Sign in with email and password.
 				{#if passkeysAvailable}
 					Passkeys are for signing in — optional device PIN / fingerprint unlock can be set in Profile.
@@ -418,10 +416,90 @@
 		text-align: center;
 	}
 
-	/* Mobile: tighter card padding on small screens for cohesion with the rest of the app. */
-	@media (max-width: 380px) {
+	@media (max-width: 768px) {
+		.login-page {
+			min-height: 100dvh;
+			padding: max(var(--space-2), env(safe-area-inset-top, 0px))
+				max(var(--space-3), env(safe-area-inset-right, 0px))
+				max(var(--space-2), env(safe-area-inset-bottom, 0px))
+				max(var(--space-3), env(safe-area-inset-left, 0px));
+		}
+
 		.login-card {
-			padding: var(--space-6) var(--space-4);
+			padding: var(--space-4) var(--space-4);
+			border-radius: var(--radius-lg);
+		}
+
+		.login-card__title {
+			font-size: var(--font-size-2xl);
+			margin-bottom: 0;
+		}
+
+		.login-card__subtitle {
+			margin-bottom: var(--space-3);
+			font-size: var(--font-size-sm);
+		}
+
+		.login-form__field {
+			margin-bottom: var(--space-3);
+		}
+
+		.login-form__label {
+			margin-bottom: var(--space-1);
+			font-size: var(--font-size-sm);
+		}
+
+		.login-form__input {
+			padding: var(--space-2) var(--space-3);
+			font-size: var(--font-size-base);
+		}
+
+		.login-form__btn {
+			padding: var(--space-3);
+			font-size: var(--font-size-base);
+			margin-top: var(--space-1);
+		}
+
+		.login-form__passkey-btn {
+			padding: var(--space-2);
+			margin-top: var(--space-2);
+		}
+
+		.login-form__notice {
+			margin: 0 0 var(--space-3);
+			padding: var(--space-2);
+			font-size: var(--font-size-xs);
+			line-height: 1.35;
+		}
+
+		.login-form__notice--subtle {
+			display: none;
+		}
+
+		.login-form__error {
+			margin: var(--space-2) 0;
+		}
+
+		.login-card__help--desktop {
+			display: none;
+		}
+
+		.login-forgot__intro,
+		.login-forgot__success {
+			font-size: var(--font-size-xs);
+			line-height: 1.35;
+		}
+
+		.login-forgot__intro {
+			margin-bottom: var(--space-3);
+		}
+
+		.login-forgot__success {
+			padding: var(--space-2);
+		}
+
+		.login-forgot__back {
+			margin-top: var(--space-2);
 		}
 	}
 
@@ -597,5 +675,6 @@
 		margin-top: var(--space-6);
 		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
+		line-height: 1.4;
 	}
 </style>
