@@ -1655,16 +1655,20 @@
 								<span class="split-calendar__filter-section-arrow" aria-hidden="true"></span>
 							</summary>
 							<div class="split-calendar__filter-section-body">
-								<div class="split-calendar__filter-options">
+								<div class="split-calendar__status-chips">
 									{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
-										<label class="split-calendar__filter-option">
-											<input
-												type="checkbox"
-												checked={filters.statuses.includes(status)}
-												onchange={() => toggleFilter('statuses', status)}
-											/>
-											<span class="split-calendar__status split-calendar__status--{status}">{status}</span>
-										</label>
+										<button
+											type="button"
+											class="split-calendar__status-chip split-calendar__status-chip--{status}"
+											class:split-calendar__status-chip--active={filters.statuses.includes(status)}
+											onclick={() => toggleFilter('statuses', status)}
+											aria-pressed={filters.statuses.includes(status)}
+										>
+											{#if filters.statuses.includes(status)}
+												<span class="split-calendar__status-chip-check" aria-hidden="true">✓</span>
+											{/if}
+											{status}
+										</button>
 									{/each}
 								</div>
 							</div>
@@ -2128,32 +2132,75 @@
 		box-shadow: 0 0 0 3px currentColor;
 	}
 
-	.split-calendar__filter-options {
+	.split-calendar__status-chips {
 		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
+		flex-wrap: wrap;
+		gap: var(--space-2);
 	}
 
-	.split-calendar__filter-option {
-		display: flex;
+	.split-calendar__status-chip {
+		display: inline-flex;
 		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-base);
-		padding: 0.1rem 0;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
 		cursor: pointer;
+		border: 1.5px solid var(--color-border-strong);
+		background: var(--color-surface);
+		color: var(--color-text-muted);
+		transition:
+			background var(--transition-fast),
+			color var(--transition-fast),
+			border-color var(--transition-fast),
+			box-shadow var(--transition-fast),
+			transform var(--transition-fast);
+	}
+
+	.split-calendar__status-chip:hover {
+		border-color: var(--color-text-subtle);
 		color: var(--color-text);
 	}
 
-	.split-calendar__filter-option input {
-		margin: 0;
-		accent-color: var(--color-primary);
+	.split-calendar__status-chip-check {
+		font-size: 0.65rem;
+		font-weight: var(--font-weight-bold);
+		line-height: 1;
 	}
 
-	.split-calendar__status--completed {
-		color: var(--color-success);
+	.split-calendar__status-chip--scheduled {
+		--status-chip-color: var(--color-primary-emphasis);
+		--status-chip-soft: var(--color-primary-soft);
 	}
-	.split-calendar__status--cancelled {
-		color: var(--color-danger-emphasis);
+
+	.split-calendar__status-chip--confirmed,
+	.split-calendar__status-chip--completed {
+		--status-chip-color: var(--color-success);
+		--status-chip-soft: var(--color-success-soft);
+	}
+
+	.split-calendar__status-chip--cancelled {
+		--status-chip-color: var(--color-danger-emphasis);
+		--status-chip-soft: var(--color-danger-soft);
+	}
+
+	.split-calendar__status-chip--active {
+		background: var(--status-chip-soft);
+		color: var(--status-chip-color);
+		border-color: var(--status-chip-color);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-chip-color) 30%, transparent);
+	}
+
+	.split-calendar__status-chip--active:hover {
+		color: var(--status-chip-color);
+		border-color: var(--status-chip-color);
+	}
+
+	.split-calendar__status-chip:active {
+		transform: scale(0.97);
 	}
 
 	/* === Visual Drag Handle (Top Right) === */
