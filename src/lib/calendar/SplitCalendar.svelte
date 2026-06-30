@@ -48,6 +48,340 @@
 		return { x: 0, y: 0 };
 	}
 
+	// Mobile touch zones: drag only from handle, resize only from edges, scroll locked during gestures.
+	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 56;
+	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 300;
+
+	let mobileScrollLockDepth = 0;
+	let mobileEdgeScrollPointerY: number | null = null;
+	let mobileEdgeScrollRaf: number | null = null;
+	let mobileEdgeScrollLastTs: number | null = null;
+
+	let activeMobileResize: {
+		eventId: string;
+		eventEl: HTMLElement;
+		harnessEl: HTMLElement;
+		resizeStartEdge: boolean;
+		pointerStartY: number;
+		initialScrollTop: number;
+		initialHarnessTop: number;
+		initialHarnessHeight: number;
+		originalStart: Date;
+		originalEnd: Date;
+		previewStart: Date;
+		previewEnd: Date;
+	} | null = null;
+
+	function getMobileDayScrollEl(): HTMLElement | null {
+		return document.querySelector('.split-calendar__day-wrapper');
+	}
+
+	function lockMobileCalendarScroll() {
+		if (!isMobile) return;
+		mobileScrollLockDepth += 1;
+		if (mobileScrollLockDepth === 1) {
+			document
+				.querySelector('.split-calendar__day-wrapper')
+				?.classList.add('split-calendar__day-wrapper--gesture-lock');
+		}
+	}
+
+	function unlockMobileCalendarScroll() {
+		if (!isMobile) return;
+		mobileScrollLockDepth = Math.max(0, mobileScrollLockDepth - 1);
+		if (mobileScrollLockDepth === 0) {
+			document
+				.querySelector('.split-calendar__day-wrapper')
+				?.classList.remove('split-calendar__day-wrapper--gesture-lock');
+		}
+	}
+
+	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof Element)) return false;
+		return !!(
+			target.closest('.fc-event-resizer') ||
+			target.closest('.fc-event__drag-handle')
+		);
+	}
+
+	function getMobileSlotMetrics(): { slotHeight: number; slotMs: number } {
+		const slotEl =
+			document.querySelector('.fc-timegrid-slot-lane') ||
+			document.querySelector('.fc-timegrid-slot');
+		const slotHeight = slotEl?.getBoundingClientRect().height || 42;
+		const duration = dayApi?.getOption('slotDuration') as
+			| { milliseconds?: number }
+			| string
+			| null
+			| undefined;
+		let slotMs = 30 * 60 * 1000;
+		if (duration && typeof duration === 'object' && typeof duration.milliseconds === 'number') {
+			slotMs = duration.milliseconds;
+		}
+		return { slotHeight, slotMs };
+	}
+
+	function snapMobileResizePreview(
+		originalStart: Date,
+		originalEnd: Date,
+		resizeStartEdge: boolean,
+		slotDelta: number,
+		slotMs: number
+	): { start: Date; end: Date } {
+		if (resizeStartEdge) {
+			const nextStart = new Date(originalStart.getTime() + slotDelta * slotMs);
+			if (nextStart.getTime() >= originalEnd.getTime() - slotMs) {
+				return {
+					start: new Date(originalEnd.getTime() - slotMs),
+					end: originalEnd
+				};
+			}
+			return { start: nextStart, end: originalEnd };
+		}
+
+		const nextEnd = new Date(originalEnd.getTime() + slotDelta * slotMs);
+		if (nextEnd.getTime() <= originalStart.getTime() + slotMs) {
+			return {
+				start: originalStart,
+				end: new Date(originalStart.getTime() + slotMs)
+			};
+		}
+		return { start: originalStart, end: nextEnd };
+	}
+
+	function applyMobileResizePreview(
+		gesture: NonNullable<typeof activeMobileResize>,
+		start: Date,
+		end: Date,
+		slotMs: number
+	) {
+		const { slotHeight } = getMobileSlotMetrics();
+		const startSlotDelta = Math.round((start.getTime() - gesture.originalStart.getTime()) / slotMs);
+		const endSlotDelta = Math.round((end.getTime() - gesture.originalEnd.getTime()) / slotMs);
+
+		if (gesture.resizeStartEdge) {
+			gesture.harnessEl.style.top = `${gesture.initialHarnessTop + startSlotDelta * slotHeight}px`;
+			gesture.harnessEl.style.height = `${Math.max(
+				slotHeight,
+				gesture.initialHarnessHeight - startSlotDelta * slotHeight
+			)}px`;
+			return;
+		}
+
+		gesture.harnessEl.style.height = `${Math.max(
+			slotHeight,
+			gesture.initialHarnessHeight + endSlotDelta * slotHeight
+		)}px`;
+	}
+
+	function getMobileScrollCompensation(gesture: NonNullable<typeof activeMobileResize>): number {
+		const scrollEl = getMobileDayScrollEl();
+		if (!scrollEl) return 0;
+		return scrollEl.scrollTop - gesture.initialScrollTop;
+	}
+
+	function updateMobileResizeFromClientY(clientY: number) {
+		if (!activeMobileResize) return;
+
+		const { slotHeight, slotMs } = getMobileSlotMetrics();
+		const scrollCompensation = getMobileScrollCompensation(activeMobileResize);
+		const slotDelta = Math.round(
+			(clientY - activeMobileResize.pointerStartY + scrollCompensation) / slotHeight
+		);
+		const snapped = snapMobileResizePreview(
+			activeMobileResize.originalStart,
+			activeMobileResize.originalEnd,
+			activeMobileResize.resizeStartEdge,
+			slotDelta,
+			slotMs
+		);
+		activeMobileResize.previewStart = snapped.start;
+		activeMobileResize.previewEnd = snapped.end;
+		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end, slotMs);
+	}
+
+	function stopMobileEdgeAutoScroll() {
+		if (mobileEdgeScrollRaf != null) {
+			cancelAnimationFrame(mobileEdgeScrollRaf);
+			mobileEdgeScrollRaf = null;
+		}
+		mobileEdgeScrollPointerY = null;
+		mobileEdgeScrollLastTs = null;
+	}
+
+	function runMobileEdgeAutoScrollFrame(ts: number) {
+		if (!activeMobileResize) {
+			stopMobileEdgeAutoScroll();
+			return;
+		}
+
+		const scrollEl = getMobileDayScrollEl();
+		const pointerY = mobileEdgeScrollPointerY;
+		if (scrollEl && pointerY != null) {
+			const rect = scrollEl.getBoundingClientRect();
+			let velocity = 0;
+			const fromTop = pointerY - rect.top;
+			const fromBottom = rect.bottom - pointerY;
+
+			if (fromTop >= 0 && fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+				const proximity = (MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromTop) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
+				velocity = -(proximity * proximity) * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			} else if (fromBottom >= 0 && fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+				const proximity =
+					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromBottom) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
+				velocity = proximity * proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			}
+
+			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
+				const dt = Math.min(0.05, (ts - mobileEdgeScrollLastTs) / 1000);
+				const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+				scrollEl.scrollTop = Math.min(
+					maxScroll,
+					Math.max(0, scrollEl.scrollTop + velocity * dt)
+				);
+			}
+
+			updateMobileResizeFromClientY(pointerY);
+		}
+
+		mobileEdgeScrollLastTs = ts;
+		mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
+	}
+
+	function ensureMobileEdgeAutoScrollRunning(clientY: number) {
+		mobileEdgeScrollPointerY = clientY;
+		if (mobileEdgeScrollRaf == null) {
+			mobileEdgeScrollLastTs = performance.now();
+			mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
+		}
+	}
+
+	function clearMobileResizeListeners() {
+		document.removeEventListener('touchmove', handleMobileResizeMove);
+		document.removeEventListener('touchend', handleMobileResizeEnd);
+		document.removeEventListener('touchcancel', handleMobileResizeEnd);
+		stopMobileEdgeAutoScroll();
+	}
+
+	function handleMobileResizeMove(e: TouchEvent) {
+		if (!activeMobileResize) return;
+		const touch = e.touches[0];
+		if (!touch) return;
+
+		ensureMobileEdgeAutoScrollRunning(touch.clientY);
+		e.preventDefault();
+	}
+
+	async function handleMobileResizeEnd() {
+		const gesture = activeMobileResize;
+		activeMobileResize = null;
+		clearMobileResizeListeners();
+		unlockMobileCalendarScroll();
+
+		if (!gesture) return;
+
+		const changed =
+			gesture.previewStart.getTime() !== gesture.originalStart.getTime() ||
+			gesture.previewEnd.getTime() !== gesture.originalEnd.getTime();
+
+		gesture.eventEl.classList.remove('fc-event-resizing');
+		const harness = gesture.harnessEl;
+		if (!changed) {
+			harness.style.removeProperty('height');
+			harness.style.removeProperty('top');
+			dayApi?.refetchEvents();
+			return;
+		}
+
+		try {
+			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			harness.style.removeProperty('height');
+			harness.style.removeProperty('top');
+		} catch {
+			harness.style.removeProperty('height');
+			harness.style.removeProperty('top');
+			dayApi?.refetchEvents();
+			toast.error('Could not resize appointment');
+		}
+	}
+
+	function setupMobileEventTouchZones(info: {
+		el: HTMLElement;
+		event: {
+			id: string;
+			start: Date | null;
+			end: Date | null;
+			extendedProps?: { status?: string };
+		};
+	}) {
+		const eventEl = info.el;
+		if (eventEl.dataset.mobileTouchZones === '1') return;
+		eventEl.dataset.mobileTouchZones = '1';
+
+		// FullCalendar marks the whole card draggable; on mobile that fights resize and scroll.
+		eventEl.classList.remove('fc-event-draggable');
+		const dragHandle = eventEl.querySelector('.fc-event__drag-handle');
+		dragHandle?.classList.add('fc-event-draggable');
+
+		const eventId = info.event.id;
+		if (!info.event.start) return;
+		const originalStart = new Date(info.event.start);
+		const originalEnd = info.event.end
+			? new Date(info.event.end)
+			: new Date(originalStart.getTime() + getMobileSlotMetrics().slotMs);
+
+		eventEl.addEventListener(
+			'touchstart',
+			(e) => {
+				const target = e.target;
+				if (!(target instanceof Element)) return;
+				const resizer = target.closest('.fc-event-resizer');
+				if (!resizer) return;
+
+				const status = info.event.extendedProps?.status;
+				if (status === 'completed' || status === 'cancelled') {
+					toast.error('Cannot resize cancelled or completed jobs');
+					return;
+				}
+
+				const touch = e.changedTouches[0] || e.touches[0];
+				if (!touch) return;
+
+				const harnessEl = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+				if (!harnessEl) return;
+
+				// Own the gesture — FC touch resize needs a separate select step and fights scrolling.
+				e.stopPropagation();
+
+				const scrollEl = getMobileDayScrollEl();
+
+				activeMobileResize = {
+					eventId,
+					eventEl,
+					harnessEl,
+					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
+					pointerStartY: touch.clientY,
+					initialScrollTop: scrollEl?.scrollTop ?? 0,
+					initialHarnessTop: parseFloat(harnessEl.style.top) || 0,
+					initialHarnessHeight: harnessEl.getBoundingClientRect().height,
+					originalStart,
+					originalEnd,
+					previewStart: originalStart,
+					previewEnd: originalEnd
+				};
+
+				eventEl.classList.add('fc-event-resizing');
+				lockMobileCalendarScroll();
+				ensureMobileEdgeAutoScrollRunning(touch.clientY);
+				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
+				document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
+				document.addEventListener('touchcancel', handleMobileResizeEnd, { passive: true });
+			},
+			{ capture: true, passive: true }
+		);
+	}
+
 	let dayEl = $state<HTMLDivElement | null>(null);
 	const initialSearchParams =
 		typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -585,7 +919,8 @@
 				editable: true,
 				// On mobile, allow resizing from both top and bottom edges — doubles the touch targets.
 				eventResizableFromStart: isMobile,
-				dragScroll: true,   /* enable auto-scroll of the time grid when dragging an event near top/bottom edges on mobile */
+				// Mobile scroll lives on .split-calendar__day-wrapper, not .fc-scroller — FC auto-scroll fights it.
+				dragScroll: !isMobile,
 				eventDragMinDistance: 10,
 				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
 				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
@@ -625,11 +960,8 @@
 					// Mobile time-grid: visible bottom grip so users know where to drag after long-press.
 					const isTimeGrid =
 						info.view.type === 'timeGridDay' || info.view.type === 'timeGridWeek';
-					if (isMobile && isTimeGrid && !info.el.querySelector('.fc-event__resize-grip')) {
-						const grip = document.createElement('div');
-						grip.className = 'fc-event__resize-grip';
-						grip.setAttribute('aria-hidden', 'true');
-						info.el.appendChild(grip);
+					if (isMobile && isTimeGrid) {
+						setupMobileEventTouchZones(info);
 					}
 
 					if (!info.el.querySelector('.fc-event__drag-handle')) {
@@ -742,9 +1074,11 @@
 
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
+					lockMobileCalendarScroll();
 				},
 
 				eventDragStop: (info) => {
+					unlockMobileCalendarScroll();
 					originalEventRect = null;
 
 					if (!draggedJobId) return;
@@ -793,8 +1127,19 @@
 				},
 
 				eventClick: (info) => {
+					if (isMobile && isMobileGestureChromeTarget(info.jsEvent.target)) {
+						return;
+					}
 					clearJobHighlight();
 					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
+				},
+
+				eventResizeStart: () => {
+					lockMobileCalendarScroll();
+				},
+
+				eventResizeStop: () => {
+					unlockMobileCalendarScroll();
 				},
 
 				eventDrop: async (info) => {
@@ -1180,8 +1525,15 @@
 			min-height: 0;
 			overflow-y: auto; /* internal scroll for the day's time slots */
 			-webkit-overflow-scrolling: touch;
+			overscroll-behavior: contain;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
+		}
+
+		.split-calendar__day-wrapper--gesture-lock {
+			/* Block finger-scroll during resize/drag; edge auto-scroll still updates scrollTop. */
+			overflow-y: auto;
+			touch-action: none;
 		}
 
 		/* Make the FC container inside fill the remaining height */
@@ -1544,11 +1896,17 @@
 	*/
 	@media (max-width: 768px) {
 		:global(.fc-event__drag-handle) {
-			width: 24px;
-			height: 24px;
+			width: 28px;
+			height: 28px;
+			top: 4px;
+			right: 4px;
 			opacity: 0.95;
-			/* Larger tap target; FC still initiates long-press from the whole event */
+			/* Only zone that moves the appointment on mobile (fc-event-draggable lives here). */
 			touch-action: none;
+		}
+
+		:global(.fc-event__drag-handle.fc-event-draggable) {
+			z-index: 25;
 		}
 
 		:global(.fc-event--draggable) {
@@ -1563,7 +1921,8 @@
 		}
 
 		/* Touch-friendly event resizing on mobile.
-		   FullCalendar flow: long-press (280ms) → drag top or bottom resize edge.
+		   Drag the top or bottom edge (pill handles) to change length; move uses the + handle only.
+		   Hold near the top/bottom of the viewport while resizing to auto-scroll into earlier/later hours.
 		   Crew avatars move to top-left so the bottom edge stays clear for resizing.
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
@@ -1580,31 +1939,51 @@
 
 		:global(.fc-event-resizer) {
 			height: 44px;
-			z-index: 20;
-			background-color: rgba(255, 255, 255, 0.4);
+			z-index: 22;
+			touch-action: none;
+			background-color: rgba(255, 255, 255, 0.2);
 			border-radius: 4px;
 		}
 
 		:global(.fc-event-resizer-end) {
-			bottom: -6px;
+			bottom: -8px;
 		}
 
-		:global(.fc-event-resizer-start) {
-			top: -6px;
-		}
-
-		:global(.fc-event__resize-grip) {
+		:global(.fc-event-resizer-end::after) {
+			content: '';
 			position: absolute;
-			bottom: 6px;
 			left: 50%;
+			bottom: 10px;
 			transform: translateX(-50%);
 			width: 40px;
 			height: 5px;
 			border-radius: 3px;
-			background: rgba(255, 255, 255, 0.9);
+			background: rgba(255, 255, 255, 0.92);
 			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
 			pointer-events: none;
-			z-index: 6;
+		}
+
+		:global(.fc-event-resizer-start) {
+			top: -8px;
+		}
+
+		:global(.fc-event-resizer-start::after) {
+			content: '';
+			position: absolute;
+			left: 50%;
+			top: 10px;
+			transform: translateX(-50%);
+			width: 40px;
+			height: 5px;
+			border-radius: 3px;
+			background: rgba(255, 255, 255, 0.92);
+			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+			pointer-events: none;
+		}
+
+		:global(.fc-event.fc-event-resizing),
+		:global(.fc-event.fc-event-dragging) {
+			touch-action: none;
 		}
 	}
 
