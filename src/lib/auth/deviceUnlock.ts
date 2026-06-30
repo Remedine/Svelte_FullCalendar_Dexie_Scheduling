@@ -172,11 +172,24 @@ export async function restoreDeviceAuth(snapshot: DeviceAuthSettings | undefined
 	await db.deviceAuth.put(snapshot);
 }
 
+/** True when deviceAuth has a real PIN hash and/or registered biometric credential. */
+export function hasUsableUnlockMethod(settings: DeviceAuthSettings | null | undefined): boolean {
+	if (!settings?.enabled) return false;
+	const hasPin = !!settings.pinEnabled && !!settings.pinHash;
+	const hasBio = !!settings.biometricEnabled && !!settings.biometricCredentialId;
+	return hasPin || hasBio;
+}
+
 export async function shouldRequireUnlock(userId?: string | null): Promise<boolean> {
 	const settings = await readSettings();
 	if (!settings?.enabled) return false;
 	if (userId && settings.userId && settings.userId !== userId) return false;
-	return settings.pinEnabled || settings.biometricEnabled;
+	if (!hasUsableUnlockMethod(settings)) {
+		// Partial/corrupt setup (e.g. enabled flag without PIN hash) must not block the app.
+		await disableQuickUnlock();
+		return false;
+	}
+	return true;
 }
 
 export function validatePinFormat(pin: string): string | null {

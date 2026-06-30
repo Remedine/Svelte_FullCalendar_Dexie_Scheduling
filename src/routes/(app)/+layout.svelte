@@ -190,10 +190,12 @@
 		</div>
 	</header>
 
-	<!-- Main Content Area -->
-	<main class="main-content">
+	<!-- Main Content Area (hidden while quick-unlock gate is active) -->
+	<main class="main-content" class:main-content--locked={auth.locked && auth.isAuthenticated}>
 		{#if auth.loading}
 			<div class="loading-screen">Loading...</div>
+		{:else if auth.locked && auth.isAuthenticated}
+			<div class="loading-screen" aria-hidden="true">Locked</div>
 		{:else}
 			{@render children()}
 		{/if}
@@ -519,6 +521,10 @@
 		height: 100%;
 		font-size: var(--font-size-lg);
 		color: var(--color-text-muted);
+	}
+
+	.main-content--locked {
+		overflow: hidden;
 	}
 
 	/* ============================================

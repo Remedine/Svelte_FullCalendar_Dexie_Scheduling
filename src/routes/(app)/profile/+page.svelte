@@ -52,13 +52,14 @@
 	// )=- editing controls which (if any) field is in edit mode. Photo uses direct trigger (no editing state needed).
 	// Only 'name' and 'email' use inline replacement inside the badge rows.
 	// 'password' opens the compact form below the badge.
-	let editing = $state<'password' | 'name' | 'email' | null>(null);
+	let editing = $state<'password' | 'name' | 'email' | 'quickUnlock' | null>(null);
 
 	// )=- Track pending email change (from requestEmailChange) so we can show "pending confirmation" pill + resend in the badge.
 	// Cleared on reload or when a new request overwrites it. Local email is already optimistically set to the pending value.
 	let pendingEmailChange = $state<string | null>(null);
 
 	let quickUnlockOn = $state(false);
+	let quickUnlockStatusLabel = $state('Not configured');
 	let passkeyItems = $state<Array<{ credentialId: string; deviceName: string }>>([]);
 	let setupPin = $state('');
 	let setupPinConfirm = $state('');
@@ -68,7 +69,7 @@
 	let biometricAvailable = $state(false);
 	const passkeysSupported = $derived(canUsePasskeys());
 
-	function startEditing(section: 'password' | 'name' | 'email') {
+	function startEditing(section: 'password' | 'name' | 'email' | 'quickUnlock') {
 		editing = section;
 		error = '';
 		success = '';
@@ -78,6 +79,11 @@
 			confirmNewPassword = '';
 		} else if (section === 'email') {
 			newEmail = auth.currentUser?.email || '';
+		} else if (section === 'quickUnlock') {
+			setupPin = '';
+			setupPinConfirm = '';
+			setupPinConfirmStep = false;
+			setupPinResetKey++;
 		}
 		// name uses live first/last from effect; no reset needed
 	}
@@ -101,7 +107,16 @@
 	});
 
 	async function refreshDeviceAuthUi() {
+		const settings = await getDeviceAuthSettings();
 		quickUnlockOn = await isQuickUnlockEnabled();
+		if (!settings?.enabled) {
+			quickUnlockStatusLabel = 'Not configured';
+		} else {
+			const parts: string[] = [];
+			if (settings.pinEnabled && settings.pinHash) parts.push('PIN');
+			if (settings.biometricEnabled && settings.biometricCredentialId) parts.push('Biometric');
+			quickUnlockStatusLabel = parts.length ? parts.join(' + ') : 'Not configured';
+		}
 		biometricAvailable = await isPlatformAuthenticatorAvailable();
 		if (passkeysSupported && pb.authStore.isValid) {
 			passkeyItems = await listPasskeys();
@@ -120,6 +135,7 @@
 			return;
 		}
 		error = '';
+		success = 'PIN entered — confirm it below';
 		setupPin = code;
 		setupPinConfirmStep = true;
 		setupPinConfirm = '';
@@ -141,7 +157,7 @@
 		if (!auth.currentUser) return;
 		loading = true;
 		error = '';
-		success = '';
+		success = 'Saving…';
 		try {
 			await enableQuickUnlock({
 				userId: String(auth.currentUser.id),
@@ -153,9 +169,11 @@
 			setupPin = '';
 			setupPinConfirm = '';
 			setupPinConfirmStep = false;
-			success = 'Quick unlock enabled for this device';
+			success = 'Quick unlock saved for this device';
+			editing = null;
 			await refreshDeviceAuthUi();
 		} catch (e: any) {
+			success = '';
 			error = e?.message || 'Could not enable quick unlock';
 		} finally {
 			loading = false;
@@ -180,6 +198,7 @@
 			return;
 		}
 		loading = true;
+		success = 'Saving…';
 		try {
 			await enableQuickUnlock({
 				userId: String(auth.currentUser.id),
@@ -187,9 +206,11 @@
 				displayName: auth.currentUser.name || auth.currentUser.email || 'User',
 				enableBiometric: true
 			});
-			success = 'Quick unlock enabled for this device';
+			success = 'Quick unlock saved for this device';
+			editing = null;
 			await refreshDeviceAuthUi();
 		} catch (e: any) {
+			success = '';
 			error = e?.message || 'Could not enable quick unlock';
 		} finally {
 			loading = false;
@@ -198,16 +219,21 @@
 
 	async function turnOffQuickUnlock() {
 		loading = true;
+		error = '';
+		success = '';
 		try {
 			await disableQuickUnlock();
 			quickUnlockOn = false;
 			success = 'Quick unlock disabled on this device';
+			editing = null;
 		} catch (e: any) {
 			error = e?.message || 'Could not disable quick unlock';
 		} finally {
 			loading = false;
 		}
 	}
+
+
 
 	async function addPasskey() {
 		loading = true;
@@ -782,75 +808,127 @@
          Stacked vertically for consistency with name/email. Pencil icon-only.
          BEM: profile__security, profile__security-item, profile__security-label. -->
 		<div class="profile__security">
-			<div class="profile__security-item profile__security-item--stacked">
-				<span class="profile__security-label">Quick unlock (this device)</span>
-				<p class="profile__security-hint">
-					Unlock this device after you've signed in — PIN or fingerprint when returning to the app.
-					Does not replace your account password.
-				</p>
-				{#if quickUnlockOn}
-					<p class="profile__security-status">Enabled on this device</p>
-					<button
-						type="button"
-						class="profile__secondary-btn"
-						onclick={turnOffQuickUnlock}
-						disabled={loading}
+			<div class="profile__security-item">
+				<div class="profile__security-item-main">
+					<span class="profile__security-label">Quick unlock (this device)</span>
+					<span class="profile__security-status">{quickUnlockStatusLabel}</span>
+				</div>
+				<button
+					class="profile__edit-btn"
+					onclick={() => startEditing('quickUnlock')}
+					title="Set up quick unlock"
+					disabled={loading || (editing !== null && editing !== 'quickUnlock')}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.25"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
 					>
-						Disable quick unlock
-					</button>
-				{:else}
-					{#if biometricAvailable}
-						<label class="profile__security-check">
-							<input type="checkbox" bind:checked={setupUseBiometric} disabled={loading} />
-							Use fingerprint / Face ID
-						</label>
-					{/if}
-					<p class="profile__security-hint profile__security-hint--pin">
-						{setupPinConfirmStep ? 'Confirm your 4-digit PIN' : '4-digit PIN (optional)'}
+				</button>
+			</div>
+
+			{#if editing === 'quickUnlock'}
+				<div class="profile__inline-form profile__inline-form--quick-unlock">
+					<p class="profile__security-hint">
+						Optional layer for this device — PIN or fingerprint when you return to the app. Does not
+						change your account password.
 					</p>
-					{#if setupPinConfirmStep}
-						<PinInput
-							bind:value={setupPinConfirm}
-							disabled={loading}
-							hasError={!!error}
-							resetKey={setupPinResetKey}
-							onComplete={onProfilePinConfirmComplete}
-						/>
-						<button
-							type="button"
-							class="profile__link-btn"
-							onclick={() => {
-								setupPinConfirmStep = false;
-								setupPin = '';
-								setupPinConfirm = '';
-								setupPinResetKey++;
-								error = '';
-							}}
-							disabled={loading}
-						>
-							Change PIN
-						</button>
-					{:else}
-						<PinInput
-							bind:value={setupPin}
-							disabled={loading}
-							hasError={!!error}
-							resetKey={setupPinResetKey}
-							onComplete={onProfilePinFirstComplete}
-						/>
-					{/if}
-					{#if !setupPinConfirmStep && !setupPin && setupUseBiometric && biometricAvailable}
+					{#if quickUnlockOn}
+						<p class="profile__security-status">Currently: {quickUnlockStatusLabel}</p>
 						<button
 							type="button"
 							class="profile__secondary-btn"
-							onclick={saveQuickUnlock}
+							onclick={turnOffQuickUnlock}
 							disabled={loading}
 						>
-							Enable biometric only
+							Disable quick unlock
 						</button>
+						<p class="profile__security-hint">
+							To change your PIN, disable quick unlock and set it up again.
+						</p>
+					{:else}
+						{#if biometricAvailable}
+							<label class="profile__security-check">
+								<input type="checkbox" bind:checked={setupUseBiometric} disabled={loading} />
+								Use fingerprint / Face ID
+							</label>
+						{/if}
+						<p class="profile__security-hint profile__security-hint--pin">
+							{setupPinConfirmStep ? 'Step 2 — confirm your 4-digit PIN' : 'Step 1 — choose a 4-digit PIN (optional)'}
+						</p>
+						{#if setupPinConfirmStep}
+							<PinInput
+								bind:value={setupPinConfirm}
+								disabled={loading}
+								hasError={!!error}
+								resetKey={setupPinResetKey}
+								onComplete={onProfilePinConfirmComplete}
+							/>
+							<button
+								type="button"
+								class="profile__link-btn"
+								onclick={() => {
+									setupPinConfirmStep = false;
+									setupPin = '';
+									setupPinConfirm = '';
+									setupPinResetKey++;
+									error = '';
+									success = '';
+								}}
+								disabled={loading}
+							>
+								Start over
+							</button>
+						{:else}
+							<PinInput
+								bind:value={setupPin}
+								disabled={loading}
+								hasError={!!error}
+								resetKey={setupPinResetKey}
+								onComplete={onProfilePinFirstComplete}
+							/>
+						{/if}
+						{#if !setupPinConfirmStep && !setupPin && setupUseBiometric && biometricAvailable}
+							<button
+								type="button"
+								class="profile__secondary-btn"
+								onclick={saveQuickUnlock}
+								disabled={loading}
+							>
+								{loading ? 'Saving…' : 'Save biometric only'}
+							</button>
+						{/if}
 					{/if}
-				{/if}
-			</div>
+					<div class="profile__field-actions profile__field-actions--end">
+						<button
+							onclick={cancelEditing}
+							class="profile__icon-btn profile__icon-btn--cancel"
+							title="Cancel"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="3"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
+								></line></svg
+							>
+						</button>
+					</div>
+				</div>
+			{/if}
 
 			{#if passkeysSupported}
 				<div class="profile__security-item profile__security-item--stacked">
@@ -1222,6 +1300,13 @@
 		padding: var(--space-1) 0;
 	}
 
+	.profile__security-item-main {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+
 	.profile__security-label {
 		font-size: var(--font-size-base);
 		font-weight: var(--font-weight-medium);
@@ -1307,8 +1392,15 @@
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
 	}
-	.profile__inline-form--password {
+	.profile__inline-form--password,
+	.profile__inline-form--quick-unlock {
 		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.profile__field-actions--end {
+		justify-content: flex-end;
+		margin-top: var(--space-2);
 	}
 	.profile__password-fields {
 		display: flex;

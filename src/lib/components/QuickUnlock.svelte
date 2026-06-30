@@ -1,13 +1,17 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { unlockApp } from '$lib/stores/auth.svelte';
 	import PinInput from '$lib/components/PinInput.svelte';
 	import {
 		MAX_PIN_ATTEMPTS,
+		disableQuickUnlock,
 		getDeviceAuthSettings,
 		getPinAttemptsRemaining,
+		hasUsableUnlockMethod,
 		unlockWithBiometric,
 		verifyPinUnlock
 	} from '$lib/auth/deviceUnlock';
+	import type { DeviceAuthSettings } from '$lib/auth/deviceUnlock';
 
 	let pin = $state('');
 	let error = $state('');
@@ -15,27 +19,51 @@
 	let pinLoading = $state(false);
 	let pinResetKey = $state(0);
 	let attemptsRemaining = $state(MAX_PIN_ATTEMPTS);
-	let settings = $state<Awaited<ReturnType<typeof getDeviceAuthSettings>>>(null);
+	let settings = $state<DeviceAuthSettings | null | undefined>(undefined);
 	let bioAutoAttempted = $state(false);
 
+	const settingsReady = $derived(settings !== undefined);
 	const pinLockedOut = $derived(attemptsRemaining <= 0);
+	const pinAvailable = $derived(!!settings?.pinEnabled && !!settings?.pinHash);
+	const bioAvailable = $derived(
+		!!settings?.biometricEnabled && !!settings?.biometricCredentialId
+	);
 
 	$effect(() => {
-		void getDeviceAuthSettings().then((s) => {
+		void (async () => {
+			const s = await getDeviceAuthSettings();
 			settings = s;
-		});
-		attemptsRemaining = getPinAttemptsRemaining();
+			attemptsRemaining = getPinAttemptsRemaining();
+
+			if (s && !hasUsableUnlockMethod(s)) {
+				await disableQuickUnlock();
+				unlockApp();
+			}
+		})();
 	});
 
-	// )=- Try biometric immediately when the overlay opens (PIN remains fallback).
+	// Prevent browser back from bypassing the lock overlay.
+	onMount(() => {
+		const lockState = { ccwLocked: true };
+		history.pushState(lockState, '');
+
+		const onPopState = (event: PopStateEvent) => {
+			if (event.state?.ccwLocked) return;
+			history.pushState(lockState, '');
+		};
+
+		window.addEventListener('popstate', onPopState);
+		return () => window.removeEventListener('popstate', onPopState);
+	});
+
 	$effect(() => {
-		if (!settings?.biometricEnabled || bioAutoAttempted || pinLockedOut) return;
+		if (!settingsReady || !bioAvailable || bioAutoAttempted || pinLockedOut) return;
 		bioAutoAttempted = true;
 		void tryBiometric(true);
 	});
 
 	async function tryBiometric(silent = false) {
-		if (pinLockedOut) return;
+		if (pinLockedOut || !bioAvailable) return;
 		bioLoading = true;
 		if (!silent) error = '';
 		try {
@@ -94,56 +122,63 @@
 	const loading = $derived(bioLoading || pinLoading);
 </script>
 
-<div class="quick-unlock">
+<div class="quick-unlock" role="dialog" aria-modal="true" aria-labelledby="quick-unlock-title">
 	<div class="quick-unlock__card">
-		<h2 class="quick-unlock__title">Unlock app</h2>
-		<p class="quick-unlock__subtitle">
-			{#if pinLockedOut}
-				PIN entry is locked. Sign in with your email and password.
-			{:else if settings?.biometricEnabled && settings?.pinEnabled}
-				Use fingerprint, Face ID, or your 4-digit PIN
-			{:else if settings?.biometricEnabled}
-				Confirm with fingerprint or Face ID
-			{:else}
-				Enter your 4-digit PIN to continue
-			{/if}
-		</p>
+		<h2 id="quick-unlock-title" class="quick-unlock__title">Unlock app</h2>
 
-		{#if settings?.biometricEnabled && !pinLockedOut}
-			<button
-				type="button"
-				class="quick-unlock__bio-btn"
-				onclick={() => tryBiometric(false)}
-				disabled={loading}
-			>
-				{bioLoading ? 'Checking…' : 'Use fingerprint / Face ID'}
+		{#if !settingsReady}
+			<p class="quick-unlock__subtitle">Loading…</p>
+		{:else if pinLockedOut}
+			<p class="quick-unlock__subtitle">
+				PIN entry is locked. Sign in with your email and password.
+			</p>
+		{:else if bioAvailable && pinAvailable}
+			<p class="quick-unlock__subtitle">Use fingerprint, Face ID, or your 4-digit PIN</p>
+		{:else if bioAvailable}
+			<p class="quick-unlock__subtitle">Confirm with fingerprint or Face ID</p>
+		{:else if pinAvailable}
+			<p class="quick-unlock__subtitle">Enter your 4-digit PIN to continue</p>
+		{:else}
+			<p class="quick-unlock__subtitle">Quick unlock is not configured on this device.</p>
+		{/if}
+
+		{#if settingsReady}
+			{#if bioAvailable && !pinLockedOut}
+				<button
+					type="button"
+					class="quick-unlock__bio-btn"
+					onclick={() => tryBiometric(false)}
+					disabled={loading}
+				>
+					{bioLoading ? 'Checking…' : 'Use fingerprint / Face ID'}
+				</button>
+			{/if}
+
+			{#if bioAvailable && pinAvailable && !pinLockedOut}
+				<p class="quick-unlock__or">or</p>
+			{/if}
+
+			{#if pinAvailable && !pinLockedOut}
+				<div class="quick-unlock__pin-wrap">
+					<p class="quick-unlock__label">Quick PIN</p>
+					<PinInput
+						bind:value={pin}
+						disabled={loading}
+						hasError={!!error}
+						resetKey={pinResetKey}
+						onComplete={tryPin}
+					/>
+				</div>
+			{/if}
+
+			{#if error}
+				<p class="quick-unlock__error" role="alert">{error}</p>
+			{/if}
+
+			<button type="button" class="quick-unlock__fallback" onclick={useFullLogin} disabled={loading}>
+				Sign in with email instead
 			</button>
 		{/if}
-
-		{#if settings?.biometricEnabled && settings?.pinEnabled && !pinLockedOut}
-			<p class="quick-unlock__or">or</p>
-		{/if}
-
-		{#if settings?.pinEnabled && !pinLockedOut}
-			<div class="quick-unlock__pin-wrap">
-				<p class="quick-unlock__label">Quick PIN</p>
-				<PinInput
-					bind:value={pin}
-					disabled={loading}
-					hasError={!!error}
-					resetKey={pinResetKey}
-					onComplete={tryPin}
-				/>
-			</div>
-		{/if}
-
-		{#if error}
-			<p class="quick-unlock__error" role="alert">{error}</p>
-		{/if}
-
-		<button type="button" class="quick-unlock__fallback" onclick={useFullLogin} disabled={loading}>
-			Sign in with email instead
-		</button>
 	</div>
 </div>
 

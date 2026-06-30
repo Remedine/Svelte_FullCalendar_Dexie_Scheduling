@@ -20,7 +20,9 @@ import {
 	getPinAttemptsRemaining,
 	recordFailedPinAttempt,
 	clearPinAttempts,
-	getIdleLockMs
+	getIdleLockMs,
+	hasUsableUnlockMethod,
+	shouldRequireUnlock
 } from './deviceUnlock';
 
 describe('deviceUnlock', () => {
@@ -112,5 +114,40 @@ describe('deviceUnlock', () => {
 		const db = (await import('$lib/db')).db;
 		await db.options.delete('1');
 		await expect(getIdleLockMs()).resolves.toBe(IDLE_LOCK_MS);
+	});
+
+	it('hasUsableUnlockMethod requires stored credentials', () => {
+		expect(hasUsableUnlockMethod(null)).toBe(false);
+		expect(
+			hasUsableUnlockMethod({
+				id: 'current',
+				enabled: true,
+				pinEnabled: true,
+				biometricEnabled: false
+			})
+		).toBe(false);
+		expect(
+			hasUsableUnlockMethod({
+				id: 'current',
+				enabled: true,
+				pinEnabled: true,
+				biometricEnabled: false,
+				pinHash: '$2a$10$hash'
+			})
+		).toBe(true);
+	});
+
+	it('shouldRequireUnlock clears corrupt deviceAuth instead of locking', async () => {
+		const db = (await import('$lib/db')).db;
+		await db.deviceAuth.put({
+			id: 'current',
+			enabled: true,
+			pinEnabled: true,
+			biometricEnabled: false,
+			userId: 'user-1'
+		});
+
+		await expect(shouldRequireUnlock('user-1')).resolves.toBe(false);
+		await expect(db.deviceAuth.get('current')).resolves.toBeUndefined();
 	});
 });
