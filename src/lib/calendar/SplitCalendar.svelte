@@ -100,6 +100,21 @@
 		}
 	}
 
+	function resetMobileGestureState() {
+		mobileScrollLockDepth = 0;
+		document
+			.querySelector('.split-calendar__day-wrapper')
+			?.classList.remove('split-calendar__day-wrapper--gesture-lock');
+		if (activeMobileResize) {
+			activeMobileResize.eventEl.classList.remove('fc-event-resizing');
+			activeMobileResize.harnessEl.style.removeProperty('height');
+			activeMobileResize.harnessEl.style.removeProperty('top');
+			activeMobileResize = null;
+		}
+		clearMobileResizeListeners();
+		stopMobileDragEdgeScroll();
+	}
+
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
 		if (!(target instanceof Element)) return false;
 		return !!(
@@ -343,7 +358,14 @@
 		mobileDragLastClientX = x;
 		mobileDragLastClientY = y;
 		document.addEventListener('touchmove', handleMobileDragTouchMove, { passive: true });
+		document.addEventListener('touchcancel', handleMobileDragTouchCancel, { passive: true });
 		ensureMobileEdgeAutoScrollRunning(y);
+	}
+
+	function handleMobileDragTouchCancel() {
+		if (!activeMobileDrag) return;
+		stopMobileDragEdgeScroll();
+		unlockMobileCalendarScroll();
 	}
 
 	function stopMobileDragEdgeScroll() {
@@ -351,6 +373,7 @@
 		activeMobileDrag = false;
 		mobileDragTouchTarget = null;
 		document.removeEventListener('touchmove', handleMobileDragTouchMove);
+		document.removeEventListener('touchcancel', handleMobileDragTouchCancel);
 		stopMobileEdgeAutoScroll();
 	}
 
@@ -992,7 +1015,8 @@
 				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				height: isMobile ? '100%' : 'auto',
+				// Mobile uses auto height so all slots render tall; .split-calendar__day-wrapper scrolls.
+				height: 'auto',
 				allDaySlot: true,
 				slotMinTime: calendarSlotBounds.slotMinTime,
 				slotMaxTime: calendarSlotBounds.slotMaxTime,
@@ -1223,11 +1247,12 @@
 				},
 
 				eventResizeStart: () => {
-					lockMobileCalendarScroll();
+					// Mobile resize is handled by setupMobileEventTouchZones (custom gesture).
+					if (!isMobile) lockMobileCalendarScroll();
 				},
 
 				eventResizeStop: () => {
-					unlockMobileCalendarScroll();
+					if (!isMobile) unlockMobileCalendarScroll();
 				},
 
 				eventDrop: async (info) => {
@@ -1302,6 +1327,7 @@
 		return () => {
 			// Do NOT reset calendarInitialized here.
 			// (See comment at declaration for why.)
+			resetMobileGestureState();
 			if (api) {
 				api.destroy();
 				api = null;
@@ -1614,19 +1640,20 @@
 			overflow-y: auto; /* internal scroll for the day's time slots */
 			-webkit-overflow-scrolling: touch;
 			overscroll-behavior: contain;
+			touch-action: pan-y;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
 		}
 
 		.split-calendar__day-wrapper--gesture-lock {
-			/* Block finger-scroll during resize/drag; edge auto-scroll still updates scrollTop. */
-			overflow-y: auto;
+			/* Only active during move/resize — blocks accidental finger-scroll, not scrollTop. */
 			touch-action: none;
 		}
 
-		/* Make the FC container inside fill the remaining height */
+		/* Let FullCalendar auto height expand; wrapper scrolls the full slot list. */
 		.split-calendar__day {
-			height: 100%;
+			height: auto;
+			overflow: visible;
 		}
 	}
 
@@ -2069,8 +2096,7 @@
 			pointer-events: none;
 		}
 
-		:global(.fc-event.fc-event-resizing),
-		:global(.fc-event.fc-event-dragging) {
+		:global(.fc-event.fc-event-resizing) {
 			touch-action: none;
 		}
 	}
