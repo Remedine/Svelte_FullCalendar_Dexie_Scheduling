@@ -129,6 +129,8 @@ export function unlockApp(): void {
 
 export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
 	if (!auth.isAuthenticated || !auth.currentUser) return;
+	const { isWithinFreshLoginGrace } = await import('$lib/auth/deviceUnlock');
+	if (isWithinFreshLoginGrace()) return;
 	await applyQuickUnlockIfNeeded(auth.currentUser.id);
 }
 
@@ -177,9 +179,10 @@ export function setCurrentUser(user: any | null) {
 	auth.locked = false;
 
 	if (user?.id) {
-		void import('$lib/auth/deviceUnlock').then(({ ensureDeviceAuthMatchesUser }) =>
-			ensureDeviceAuthMatchesUser(String(user.id))
-		);
+		void import('$lib/auth/deviceUnlock').then(({ ensureDeviceAuthMatchesUser, markFreshLogin }) => {
+			markFreshLogin();
+			ensureDeviceAuthMatchesUser(String(user.id));
+		});
 		const id = user.id.toString();
 		localStorage.setItem('currentUserId', id);
 		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(id));

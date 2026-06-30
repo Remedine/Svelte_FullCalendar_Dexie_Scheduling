@@ -26,6 +26,10 @@ export const IDLE_LOCK_MS = DEFAULT_IDLE_LOCK_MS;
 const HIDDEN_AT_KEY = 'ccw_app_hidden_at';
 const QUICK_UNLOCK_DECLINED_KEY = 'ccw_quick_unlock_declined';
 const PIN_ATTEMPTS_KEY = 'ccw_pin_attempts';
+const FRESH_LOGIN_UNTIL_KEY = 'ccw_fresh_login_until';
+
+/** Grace period after sign-in — avoids re-lock when WebAuthn/OS UI toggles visibility. */
+export const FRESH_LOGIN_GRACE_MS = 90_000;
 
 function bufferToBase64url(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
@@ -84,6 +88,19 @@ export function markAppHidden(): void {
 export function clearAppHidden(): void {
 	if (!browser) return;
 	sessionStorage.removeItem(HIDDEN_AT_KEY);
+}
+
+export function markFreshLogin(): void {
+	if (!browser) return;
+	sessionStorage.setItem(FRESH_LOGIN_UNTIL_KEY, String(Date.now() + FRESH_LOGIN_GRACE_MS));
+	clearAppHidden();
+	clearPinAttempts();
+}
+
+export function isWithinFreshLoginGrace(): boolean {
+	if (!browser) return false;
+	const until = Number(sessionStorage.getItem(FRESH_LOGIN_UNTIL_KEY) || 0);
+	return Number.isFinite(until) && Date.now() < until;
 }
 
 export async function getIdleLockMs(): Promise<number> {

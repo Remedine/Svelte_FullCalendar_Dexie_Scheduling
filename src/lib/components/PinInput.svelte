@@ -22,14 +22,21 @@
 
 	let cells: HTMLInputElement[] = $state([]);
 	let digits = $state<string[]>(Array(PIN_LENGTH).fill(''));
+	let prevResetKey = -1;
+	let lastEmitted = '';
 
 	function syncFromValue(pin: string) {
 		const chars = pin.replace(/\D/g, '').slice(0, PIN_LENGTH).split('');
 		digits = Array.from({ length: PIN_LENGTH }, (_, i) => chars[i] ?? '');
+		for (let i = 0; i < PIN_LENGTH; i++) {
+			if (cells[i]) cells[i].value = digits[i];
+		}
 	}
 
 	function emitValue() {
-		value = digits.join('');
+		const next = digits.join('');
+		lastEmitted = next;
+		if (value !== next) value = next;
 	}
 
 	function focusCell(index: number) {
@@ -38,24 +45,23 @@
 
 	function clearAll(focusFirst = true) {
 		digits = Array(PIN_LENGTH).fill('');
-		emitValue();
 		for (const el of cells) {
 			if (el) el.value = '';
 		}
+		emitValue();
 		if (focusFirst && autofocus && !disabled) focusCell(0);
 	}
 
 	$effect(() => {
-		syncFromValue(value);
-	});
-
-	$effect(() => {
-		void resetKey;
+		if (resetKey === prevResetKey) return;
+		prevResetKey = resetKey;
 		clearAll(true);
 	});
 
 	$effect(() => {
-		if (autofocus && !disabled) focusCell(0);
+		if (value === lastEmitted) return;
+		lastEmitted = value;
+		syncFromValue(value);
 	});
 
 	function tryComplete() {

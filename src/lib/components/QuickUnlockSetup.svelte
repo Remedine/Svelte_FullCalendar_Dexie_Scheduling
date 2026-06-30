@@ -18,6 +18,8 @@
 
 	let { userId, email, displayName, onComplete, onSkip }: Props = $props();
 
+	const resolvedUserId = $derived(userId || '');
+
 	let pin = $state('');
 	let confirmPin = $state('');
 	let confirmStep = $state(false);
@@ -84,7 +86,7 @@
 		loading = true;
 		try {
 			await enableQuickUnlock({
-				userId,
+				userId: resolvedUserId,
 				email,
 				displayName,
 				enableBiometric: true
@@ -108,7 +110,7 @@
 		error = '';
 		try {
 			await enableQuickUnlock({
-				userId,
+				userId: resolvedUserId,
 				email,
 				displayName,
 				pin: code,
@@ -190,7 +192,7 @@
 			type="button"
 			class="quick-unlock-setup__skip"
 			onclick={() => {
-				declineQuickUnlockSetup(userId);
+				if (resolvedUserId) declineQuickUnlockSetup(resolvedUserId);
 				onSkip();
 			}}
 			disabled={loading}

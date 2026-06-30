@@ -22,7 +22,9 @@ import {
 	clearPinAttempts,
 	getIdleLockMs,
 	hasUsableUnlockMethod,
-	shouldRequireUnlock
+	shouldRequireUnlock,
+	markFreshLogin,
+	isWithinFreshLoginGrace
 } from './deviceUnlock';
 
 describe('deviceUnlock', () => {
@@ -135,6 +137,14 @@ describe('deviceUnlock', () => {
 				pinHash: '$2a$10$hash'
 			})
 		).toBe(true);
+	});
+
+	it('fresh login grace suppresses immediate re-lock window', () => {
+		expect(isWithinFreshLoginGrace()).toBe(false);
+		markFreshLogin();
+		expect(isWithinFreshLoginGrace()).toBe(true);
+		sessionStorage.setItem('ccw_fresh_login_until', String(Date.now() - 1));
+		expect(isWithinFreshLoginGrace()).toBe(false);
 	});
 
 	it('shouldRequireUnlock clears corrupt deviceAuth instead of locking', async () => {

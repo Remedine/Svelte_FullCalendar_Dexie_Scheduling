@@ -65,7 +65,7 @@
 		}
 	}
 
-	async function continueAfterAuth(localUser: User) {
+	async function continueAfterAuth(localUser: User, opts?: { skipQuickUnlockOffer?: boolean }) {
 		if (localUser.verified === false) {
 			welcomeUser = localUser;
 			showWelcome = true;
@@ -76,7 +76,10 @@
 			showForcePhoto = true;
 			return;
 		}
-		if (await shouldOfferQuickUnlockSetup(String(localUser.id))) {
+		if (
+			!opts?.skipQuickUnlockOffer &&
+			(await shouldOfferQuickUnlockSetup(String(localUser.id)))
+		) {
 			quickUnlockUser = localUser;
 			showQuickUnlockSetup = true;
 			return;
@@ -107,7 +110,7 @@
 			clearTimeout(loginUiTimeout);
 			email = normalizedEmail;
 			isLoading = false;
-			await continueAfterAuth(localUser);
+			await continueAfterAuth(localUser, { skipQuickUnlockOffer: true });
 		} catch (err: any) {
 			clearTimeout(loginUiTimeout);
 			error = err?.message || 'Passkey sign-in failed';
