@@ -169,17 +169,12 @@
 	class:month-picker--drag-active={appointmentDragActive}
 >
 	<div class="month-picker__header">
-		<button class="month-picker__nav" onclick={() => changeMonth(-1)} aria-label="Previous month">←</button>
-
 		<div class="month-picker__title">
 			{monthNames[currentMonth]}
 			{currentYear}
 		</div>
 
-		<div class="month-picker__header-actions">
-			<button class="month-picker__today-btn" onclick={goToToday}>Today</button>
-			<button class="month-picker__nav" onclick={() => changeMonth(1)} aria-label="Next month">→</button>
-		</div>
+		<button class="month-picker__today-btn" onclick={goToToday}>Today</button>
 	</div>
 
 	<div class="month-picker__weekdays">
@@ -216,6 +211,23 @@
 			</button>
 		{/each}
 	</div>
+
+	<div class="month-picker__footer">
+		<button
+			class="month-picker__nav month-picker__nav--prev"
+			onclick={() => changeMonth(-1)}
+			aria-label="Previous month"
+		>
+			←
+		</button>
+		<button
+			class="month-picker__nav month-picker__nav--next"
+			onclick={() => changeMonth(1)}
+			aria-label="Next month"
+		>
+			→
+		</button>
+	</div>
 </div>
 
 <style>
@@ -235,29 +247,40 @@
 		margin-bottom: var(--space-2);
 	}
 
-	.month-picker__header-actions {
+	.month-picker__footer {
 		display: flex;
-		align-items: center;
-		gap: var(--space-1);
+		gap: var(--space-2);
+		margin-top: var(--space-2);
 	}
 
 	.month-picker__nav {
-		width: 28px;
-		height: 28px;
+		flex: 1;
+		min-height: 40px;
 		border: 1px solid var(--color-border);
 		background: var(--color-surface-alt);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: var(--font-size-base);
+		font-size: var(--font-size-lg);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		color: var(--color-text);
-		transition: background var(--transition-fast);
+		transition:
+			background var(--transition-fast),
+			border-color var(--transition-fast),
+			box-shadow var(--transition-fast);
 	}
 
 	.month-picker__nav:hover {
 		background: var(--color-border);
+	}
+
+	.month-picker__nav--prev {
+		padding-right: var(--space-1);
+	}
+
+	.month-picker__nav--next {
+		padding-left: var(--space-1);
 	}
 
 	.month-picker__today-btn {

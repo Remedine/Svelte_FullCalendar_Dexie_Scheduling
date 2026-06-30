@@ -110,9 +110,8 @@
 			}
 		}
 
-		const navButtons = picker.querySelectorAll<HTMLElement>('.month-picker__nav');
-		const leftNav = navButtons[0] ?? null;
-		const rightNav = navButtons.length > 1 ? navButtons[navButtons.length - 1] : null;
+		const leftNav = picker.querySelector<HTMLElement>('.month-picker__nav--prev');
+		const rightNav = picker.querySelector<HTMLElement>('.month-picker__nav--next');
 
 		let side: 'left' | 'right' | null = null;
 		if (isPointerInElement(clientX, clientY, leftNav, MONTH_PICKER_NAV_HIT_PAD_PX)) {
@@ -2245,12 +2244,16 @@
 		outline-offset: 1px;
 	}
 
-	:global(.month-picker--edge-left) {
-		box-shadow: inset 4px 0 0 var(--color-primary);
+	:global(.month-picker--edge-left .month-picker__nav--prev) {
+		background: var(--color-primary-soft);
+		border-color: var(--color-primary);
+		box-shadow: inset 0 -3px 0 var(--color-primary);
 	}
 
-	:global(.month-picker--edge-right) {
-		box-shadow: inset -4px 0 0 var(--color-primary);
+	:global(.month-picker--edge-right .month-picker__nav--next) {
+		background: var(--color-primary-soft);
+		border-color: var(--color-primary);
+		box-shadow: inset 0 -3px 0 var(--color-primary);
 	}
 
 	:global(.month-picker--drag-active) {
@@ -2283,10 +2286,14 @@
 			font-size: var(--font-size-xs);
 		}
 
+		:global(.month-picker__footer) {
+			margin-top: 4px;
+			gap: 4px;
+		}
+
 		:global(.month-picker__nav) {
-			width: 22px;
-			height: 22px;
-			font-size: var(--font-size-sm);
+			min-height: 44px;
+			font-size: var(--font-size-lg);
 		}
 
 		:global(.month-picker__today-btn) {
