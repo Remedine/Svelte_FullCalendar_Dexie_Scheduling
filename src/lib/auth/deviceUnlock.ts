@@ -7,19 +7,25 @@ export interface DeviceAuthSettings {
 	pinEnabled: boolean;
 	biometricEnabled: boolean;
 	pinHash?: string;
+	pinLength?: number;
 	biometricCredentialId?: string;
 	userId?: string;
 	email?: string;
 }
 
-const MIN_PIN_LENGTH = 4;
-const MAX_PIN_LENGTH = 8;
+export const PIN_LENGTH = 4;
+export const MAX_PIN_ATTEMPTS = 5;
 
-/** Re-lock only after the app was in the background at least this long (2 hours). */
-export const IDLE_LOCK_MS = 2 * 60 * 60 * 1000;
+/** Default re-lock idle: 2 hours (overridable in Admin → Options). */
+export const DEFAULT_IDLE_LOCK_MINUTES = 120;
+export const DEFAULT_IDLE_LOCK_MS = DEFAULT_IDLE_LOCK_MINUTES * 60 * 1000;
+
+/** @deprecated Use getIdleLockMs() — kept for tests */
+export const IDLE_LOCK_MS = DEFAULT_IDLE_LOCK_MS;
 
 const HIDDEN_AT_KEY = 'ccw_app_hidden_at';
 const QUICK_UNLOCK_DECLINED_KEY = 'ccw_quick_unlock_declined';
+const PIN_ATTEMPTS_KEY = 'ccw_pin_attempts';
 
 function bufferToBase64url(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
@@ -80,8 +86,44 @@ export function clearAppHidden(): void {
 	sessionStorage.removeItem(HIDDEN_AT_KEY);
 }
 
+export async function getIdleLockMs(): Promise<number> {
+	try {
+		const { db } = await import('$lib/db');
+		const opts = await db.options.get('1');
+		const minutes = Number(opts?.quickUnlockIdleMinutes);
+		if (Number.isFinite(minutes) && minutes >= 1 && minutes <= 24 * 60) {
+			return minutes * 60 * 1000;
+		}
+	} catch {
+		// Dexie may be unavailable during teardown
+	}
+	return DEFAULT_IDLE_LOCK_MS;
+}
+
+export function getPinAttemptsRemaining(): number {
+	if (!browser) return MAX_PIN_ATTEMPTS;
+	const used = Number(sessionStorage.getItem(PIN_ATTEMPTS_KEY) || 0);
+	return Math.max(0, MAX_PIN_ATTEMPTS - used);
+}
+
+export function recordFailedPinAttempt(): number {
+	if (!browser) return 0;
+	const used = Number(sessionStorage.getItem(PIN_ATTEMPTS_KEY) || 0) + 1;
+	sessionStorage.setItem(PIN_ATTEMPTS_KEY, String(used));
+	return Math.max(0, MAX_PIN_ATTEMPTS - used);
+}
+
+export function clearPinAttempts(): void {
+	if (!browser) return;
+	sessionStorage.removeItem(PIN_ATTEMPTS_KEY);
+}
+
+export type PinVerifyResult =
+	| { ok: true }
+	| { ok: false; remaining: number; lockedOut: boolean };
+
 /** True when the app was backgrounded long enough to require quick unlock again. */
-export function shouldLockAfterReturn(idleMs: number = IDLE_LOCK_MS): boolean {
+export function shouldLockAfterReturn(idleMs: number = DEFAULT_IDLE_LOCK_MS): boolean {
 	if (!browser) return false;
 	const raw = sessionStorage.getItem(HIDDEN_AT_KEY);
 	if (!raw) return false;
@@ -138,10 +180,7 @@ export async function shouldRequireUnlock(userId?: string | null): Promise<boole
 }
 
 export function validatePinFormat(pin: string): string | null {
-	if (!/^\d+$/.test(pin)) return 'PIN must contain only digits';
-	if (pin.length < MIN_PIN_LENGTH || pin.length > MAX_PIN_LENGTH) {
-		return `PIN must be ${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`;
-	}
+	if (!/^\d{4}$/.test(pin)) return `PIN must be exactly ${PIN_LENGTH} digits`;
 	return null;
 }
 
@@ -212,12 +251,14 @@ export async function enableQuickUnlock(opts: {
 		pinEnabled: !!pin,
 		biometricEnabled: !!biometricCredentialId,
 		pinHash: pin ? await bcrypt.hash(pin, 10) : undefined,
+		pinLength: pin ? PIN_LENGTH : undefined,
 		biometricCredentialId,
 		userId: opts.userId,
 		email: opts.email
 	};
 	await db.deviceAuth.put(settings);
 	clearQuickUnlockDecline();
+	clearPinAttempts();
 }
 
 export async function disableQuickUnlock(): Promise<void> {
@@ -226,10 +267,28 @@ export async function disableQuickUnlock(): Promise<void> {
 	clearQuickUnlockDecline();
 }
 
-export async function verifyPinUnlock(pin: string): Promise<boolean> {
+export async function verifyPinUnlock(pin: string): Promise<PinVerifyResult> {
+	if (getPinAttemptsRemaining() <= 0) {
+		return { ok: false, remaining: 0, lockedOut: true };
+	}
+
+	if (validatePinFormat(pin)) {
+		return { ok: false, remaining: getPinAttemptsRemaining(), lockedOut: false };
+	}
+
 	const settings = await readSettings();
-	if (!settings?.enabled || !settings.pinEnabled || !settings.pinHash) return false;
-	return bcrypt.compare(pin, settings.pinHash);
+	if (!settings?.enabled || !settings.pinEnabled || !settings.pinHash) {
+		return { ok: false, remaining: getPinAttemptsRemaining(), lockedOut: false };
+	}
+
+	const match = await bcrypt.compare(pin, settings.pinHash);
+	if (match) {
+		clearPinAttempts();
+		return { ok: true };
+	}
+
+	const remaining = recordFailedPinAttempt();
+	return { ok: false, remaining, lockedOut: remaining <= 0 };
 }
 
 export async function unlockWithBiometric(): Promise<boolean> {
@@ -254,6 +313,7 @@ export async function unlockWithBiometric(): Promise<boolean> {
 			}
 		})) as PublicKeyCredential | null;
 
+		if (assertion) clearPinAttempts();
 		return !!assertion;
 	} catch {
 		return false;

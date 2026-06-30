@@ -198,8 +198,9 @@ if (browser) {
 			void import('$lib/auth/deviceUnlock').then(({ markAppHidden }) => markAppHidden());
 		} else if (document.visibilityState === 'visible') {
 			void import('$lib/auth/deviceUnlock').then(
-				async ({ shouldLockAfterReturn, clearAppHidden }) => {
-					if (shouldLockAfterReturn()) {
+				async ({ shouldLockAfterReturn, clearAppHidden, getIdleLockMs }) => {
+					const idleMs = await getIdleLockMs();
+					if (shouldLockAfterReturn(idleMs)) {
 						await lockAppIfQuickUnlockEnabled();
 					}
 					clearAppHidden();

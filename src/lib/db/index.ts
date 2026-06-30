@@ -287,6 +287,8 @@ export interface AppOptions {
 	calendarDayStartHour?: number;
 	/** Calendar day view ends at this hour (1–24, local; e.g. 22 = 10 PM). */
 	calendarDayEndHour?: number;
+	/** Minutes of background idle before quick-unlock re-prompts (default 120). */
+	quickUnlockIdleMinutes?: number;
 	/** Letterhead + invoice numbering (Admin → Options → Invoice). */
 	businessName?: string;
 	businessStreet?: string;

@@ -13,12 +13,14 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { db, updateUser, getUserPhotoSrc } from '$lib/db';
 	import { pb } from '$lib/db/pb';
+	import PinInput from '$lib/components/PinInput.svelte';
 	import {
 		disableQuickUnlock,
 		enableQuickUnlock,
 		getDeviceAuthSettings,
 		isPlatformAuthenticatorAvailable,
 		isQuickUnlockEnabled,
+		PIN_LENGTH,
 		validatePinFormat
 	} from '$lib/auth/deviceUnlock';
 	import {
@@ -60,6 +62,8 @@
 	let passkeyItems = $state<Array<{ credentialId: string; deviceName: string }>>([]);
 	let setupPin = $state('');
 	let setupPinConfirm = $state('');
+	let setupPinConfirmStep = $state(false);
+	let setupPinResetKey = $state(0);
 	let setupUseBiometric = $state(true);
 	let biometricAvailable = $state(false);
 	const passkeysSupported = $derived(canUsePasskeys());
@@ -108,24 +112,71 @@
 		if (auth.currentUser) void refreshDeviceAuthUi();
 	});
 
+	function onProfilePinFirstComplete(code: string) {
+		const pinErr = validatePinFormat(code);
+		if (pinErr) {
+			error = pinErr;
+			setupPinResetKey++;
+			return;
+		}
+		error = '';
+		setupPin = code;
+		setupPinConfirmStep = true;
+		setupPinConfirm = '';
+	}
+
+	function onProfilePinConfirmComplete(code: string) {
+		if (code !== setupPin) {
+			error = 'PINs do not match. Try again.';
+			setupPinConfirmStep = false;
+			setupPin = '';
+			setupPinConfirm = '';
+			setupPinResetKey++;
+			return;
+		}
+		void saveQuickUnlockWithPin(code);
+	}
+
+	async function saveQuickUnlockWithPin(pin: string) {
+		if (!auth.currentUser) return;
+		loading = true;
+		error = '';
+		success = '';
+		try {
+			await enableQuickUnlock({
+				userId: String(auth.currentUser.id),
+				email: (auth.currentUser.email || '').trim().toLowerCase(),
+				displayName: auth.currentUser.name || auth.currentUser.email || 'User',
+				pin,
+				enableBiometric: setupUseBiometric && biometricAvailable
+			});
+			setupPin = '';
+			setupPinConfirm = '';
+			setupPinConfirmStep = false;
+			success = 'Quick unlock enabled for this device';
+			await refreshDeviceAuthUi();
+		} catch (e: any) {
+			error = e?.message || 'Could not enable quick unlock';
+		} finally {
+			loading = false;
+		}
+	}
+
 	async function saveQuickUnlock() {
 		if (!auth.currentUser) return;
 		error = '';
 		success = '';
-		const wantsPin = setupPin.length > 0;
+		const wantsPin = setupPin.length === PIN_LENGTH;
 		if (wantsPin) {
-			const pinErr = validatePinFormat(setupPin);
-			if (pinErr) {
-				error = pinErr;
+			if (!setupPinConfirmStep || setupPin !== setupPinConfirm) {
+				error = 'Enter and confirm your 4-digit PIN';
 				return;
 			}
-			if (setupPin !== setupPinConfirm) {
-				error = 'PINs do not match';
-				return;
-			}
+			await saveQuickUnlockWithPin(setupPin);
+			return;
 		}
-		if (!wantsPin && !(setupUseBiometric && biometricAvailable)) {
-			error = 'Set a PIN and/or enable biometric unlock';
+		if (!(setupUseBiometric && biometricAvailable)) {
+			error = 'Set a 4-digit PIN and/or enable biometric unlock';
 			return;
 		}
 		loading = true;
@@ -134,11 +185,8 @@
 				userId: String(auth.currentUser.id),
 				email: (auth.currentUser.email || '').trim().toLowerCase(),
 				displayName: auth.currentUser.name || auth.currentUser.email || 'User',
-				pin: wantsPin ? setupPin : undefined,
-				enableBiometric: setupUseBiometric && biometricAvailable
+				enableBiometric: true
 			});
-			setupPin = '';
-			setupPinConfirm = '';
 			success = 'Quick unlock enabled for this device';
 			await refreshDeviceAuthUi();
 		} catch (e: any) {
@@ -757,30 +805,50 @@
 							Use fingerprint / Face ID
 						</label>
 					{/if}
-					<input
-						class="profile__input profile__input--compact"
-						type="password"
-						inputmode="numeric"
-						placeholder="Quick PIN (4–8 digits, optional)"
-						bind:value={setupPin}
-						disabled={loading}
-					/>
-					<input
-						class="profile__input profile__input--compact"
-						type="password"
-						inputmode="numeric"
-						placeholder="Confirm PIN"
-						bind:value={setupPinConfirm}
-						disabled={loading}
-					/>
-					<button
-						type="button"
-						class="profile__secondary-btn"
-						onclick={saveQuickUnlock}
-						disabled={loading}
-					>
-						Enable quick unlock
-					</button>
+					<p class="profile__security-hint profile__security-hint--pin">
+						{setupPinConfirmStep ? 'Confirm your 4-digit PIN' : '4-digit PIN (optional)'}
+					</p>
+					{#if setupPinConfirmStep}
+						<PinInput
+							bind:value={setupPinConfirm}
+							disabled={loading}
+							hasError={!!error}
+							resetKey={setupPinResetKey}
+							onComplete={onProfilePinConfirmComplete}
+						/>
+						<button
+							type="button"
+							class="profile__link-btn"
+							onclick={() => {
+								setupPinConfirmStep = false;
+								setupPin = '';
+								setupPinConfirm = '';
+								setupPinResetKey++;
+								error = '';
+							}}
+							disabled={loading}
+						>
+							Change PIN
+						</button>
+					{:else}
+						<PinInput
+							bind:value={setupPin}
+							disabled={loading}
+							hasError={!!error}
+							resetKey={setupPinResetKey}
+							onComplete={onProfilePinFirstComplete}
+						/>
+					{/if}
+					{#if !setupPinConfirmStep && !setupPin && setupUseBiometric && biometricAvailable}
+						<button
+							type="button"
+							class="profile__secondary-btn"
+							onclick={saveQuickUnlock}
+							disabled={loading}
+						>
+							Enable biometric only
+						</button>
+					{/if}
 				{/if}
 			</div>
 

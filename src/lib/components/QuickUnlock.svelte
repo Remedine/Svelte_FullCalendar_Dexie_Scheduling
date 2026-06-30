@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { unlockApp } from '$lib/stores/auth.svelte';
+	import PinInput from '$lib/components/PinInput.svelte';
 	import {
+		MAX_PIN_ATTEMPTS,
 		getDeviceAuthSettings,
+		getPinAttemptsRemaining,
 		unlockWithBiometric,
 		verifyPinUnlock
 	} from '$lib/auth/deviceUnlock';
@@ -10,23 +13,29 @@
 	let error = $state('');
 	let bioLoading = $state(false);
 	let pinLoading = $state(false);
+	let pinResetKey = $state(0);
+	let attemptsRemaining = $state(MAX_PIN_ATTEMPTS);
 	let settings = $state<Awaited<ReturnType<typeof getDeviceAuthSettings>>>(null);
 	let bioAutoAttempted = $state(false);
+
+	const pinLockedOut = $derived(attemptsRemaining <= 0);
 
 	$effect(() => {
 		void getDeviceAuthSettings().then((s) => {
 			settings = s;
 		});
+		attemptsRemaining = getPinAttemptsRemaining();
 	});
 
 	// )=- Try biometric immediately when the overlay opens (PIN remains fallback).
 	$effect(() => {
-		if (!settings?.biometricEnabled || bioAutoAttempted) return;
+		if (!settings?.biometricEnabled || bioAutoAttempted || pinLockedOut) return;
 		bioAutoAttempted = true;
 		void tryBiometric(true);
 	});
 
 	async function tryBiometric(silent = false) {
+		if (pinLockedOut) return;
 		bioLoading = true;
 		if (!silent) error = '';
 		try {
@@ -46,31 +55,32 @@
 		}
 	}
 
-	async function tryPin() {
-		if (!pin.trim()) {
-			error = 'Enter your PIN';
+	async function tryPin(code: string) {
+		if (pinLockedOut) {
+			error = 'Too many incorrect PIN attempts. Sign in with email instead.';
 			return;
 		}
 		pinLoading = true;
 		error = '';
 		try {
-			const ok = await verifyPinUnlock(pin);
-			if (ok) {
+			const result = await verifyPinUnlock(code);
+			attemptsRemaining = result.ok ? MAX_PIN_ATTEMPTS : result.remaining;
+
+			if (result.ok) {
 				pin = '';
 				unlockApp();
+			} else if (result.lockedOut) {
+				error = 'Too many incorrect PIN attempts. Sign in with email instead.';
+				pinResetKey++;
 			} else {
-				error = 'Incorrect PIN';
-				pin = '';
+				error =
+					result.remaining === 1
+						? 'Incorrect PIN. One attempt remaining.'
+						: `Incorrect PIN. ${result.remaining} attempts remaining.`;
+				pinResetKey++;
 			}
 		} finally {
 			pinLoading = false;
-		}
-	}
-
-	function onPinInput() {
-		error = '';
-		if (pin.length >= 4 && settings?.pinEnabled) {
-			void tryPin();
 		}
 	}
 
@@ -88,16 +98,18 @@
 	<div class="quick-unlock__card">
 		<h2 class="quick-unlock__title">Unlock app</h2>
 		<p class="quick-unlock__subtitle">
-			{#if settings?.biometricEnabled && settings?.pinEnabled}
-				Use fingerprint, Face ID, or your quick PIN
+			{#if pinLockedOut}
+				PIN entry is locked. Sign in with your email and password.
+			{:else if settings?.biometricEnabled && settings?.pinEnabled}
+				Use fingerprint, Face ID, or your 4-digit PIN
 			{:else if settings?.biometricEnabled}
 				Confirm with fingerprint or Face ID
 			{:else}
-				Enter your quick PIN to continue
+				Enter your 4-digit PIN to continue
 			{/if}
 		</p>
 
-		{#if settings?.biometricEnabled}
+		{#if settings?.biometricEnabled && !pinLockedOut}
 			<button
 				type="button"
 				class="quick-unlock__bio-btn"
@@ -108,36 +120,21 @@
 			</button>
 		{/if}
 
-		{#if settings?.biometricEnabled && settings?.pinEnabled}
+		{#if settings?.biometricEnabled && settings?.pinEnabled && !pinLockedOut}
 			<p class="quick-unlock__or">or</p>
 		{/if}
 
-		{#if settings?.pinEnabled}
-			<form
-				class="quick-unlock__pin-form"
-				onsubmit={(e) => {
-					e.preventDefault();
-					tryPin();
-				}}
-			>
-				<label class="quick-unlock__label" for="quick-unlock-pin">Quick PIN</label>
-				<input
-					id="quick-unlock-pin"
-					class="quick-unlock__pin-input"
-					type="password"
-					inputmode="numeric"
-					pattern="[0-9]*"
-					maxlength="8"
-					autocomplete="off"
-					placeholder="••••"
+		{#if settings?.pinEnabled && !pinLockedOut}
+			<div class="quick-unlock__pin-wrap">
+				<p class="quick-unlock__label">Quick PIN</p>
+				<PinInput
 					bind:value={pin}
-					oninput={onPinInput}
 					disabled={loading}
+					hasError={!!error}
+					resetKey={pinResetKey}
+					onComplete={tryPin}
 				/>
-				<button type="submit" class="quick-unlock__pin-btn" disabled={loading || !pin.trim()}>
-					{pinLoading ? 'Checking…' : 'Unlock with PIN'}
-				</button>
-			</form>
+			</div>
 		{/if}
 
 		{#if error}
@@ -211,42 +208,14 @@
 		font-size: var(--font-size-sm);
 	}
 
-	.quick-unlock__pin-form {
-		text-align: left;
+	.quick-unlock__pin-wrap {
+		margin-bottom: var(--space-2);
 	}
 
 	.quick-unlock__label {
-		display: block;
-		margin-bottom: var(--space-2);
+		margin: 0 0 var(--space-3);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
-	}
-
-	.quick-unlock__pin-input {
-		width: 100%;
-		padding: var(--space-3);
-		margin-bottom: var(--space-3);
-		border: 2px solid var(--color-border-strong);
-		border-radius: var(--radius-md);
-		font-size: var(--font-size-xl);
-		letter-spacing: 0.3em;
-		text-align: center;
-	}
-
-	.quick-unlock__pin-btn {
-		width: 100%;
-		padding: var(--space-3);
-		border: none;
-		border-radius: var(--radius-md);
-		background: var(--color-primary);
-		color: white;
-		font-weight: var(--font-weight-semibold);
-		cursor: pointer;
-	}
-
-	.quick-unlock__pin-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.quick-unlock__error {

@@ -34,7 +34,7 @@
 	});
 
 	let isSaving = $state(false);
-	let activeTab = $state<'scheduling' | 'invoice'>('scheduling');
+	let activeTab = $state<'scheduling' | 'security' | 'invoice'>('scheduling');
 
 	// )=- One-time flag to ensure options load/pull happens only once, preventing repeated pull attempts and error spam if pull fails.
 	let optionsInitialized = $state(false);
@@ -47,6 +47,7 @@
 
 	const tabs = [
 		{ id: 'scheduling', label: 'Scheduling Options' },
+		{ id: 'security', label: 'App Security' },
 		{ id: 'invoice', label: 'Invoice Options' }
 	] as const;
 
@@ -96,6 +97,7 @@
 				crewAssignmentHour: 7,
 				calendarDayStartHour: 6,
 				calendarDayEndHour: 22,
+				quickUnlockIdleMinutes: 120,
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
@@ -140,6 +142,12 @@
 			return;
 		}
 
+		const idleMinutes = Number(editingOptions.quickUnlockIdleMinutes ?? 120);
+		if (Number.isNaN(idleMinutes) || idleMinutes < 1 || idleMinutes > 24 * 60) {
+			toast.error('Quick unlock idle time must be between 1 and 1440 minutes.');
+			return;
+		}
+
 		isSaving = true;
 
 		try {
@@ -147,6 +155,7 @@
 				...editingOptions,
 				calendarDayStartHour: calStart,
 				calendarDayEndHour: calEnd,
+				quickUnlockIdleMinutes: idleMinutes,
 				crewAssignmentHour: hour,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'
@@ -478,6 +487,31 @@
 				>
 					+ Add New Reason
 				</button>
+			</div>
+		{:else if activeTab === 'security'}
+			<h2>App Security</h2>
+
+			<div class="form-section">
+				<h3>Quick unlock idle time</h3>
+				<p class="options-page__help">
+					After a crew member unlocks the app, how long the app can stay in the background before
+					asking for their PIN or biometric again. Does not affect sign-in — only the device unlock
+					layer.
+				</p>
+				<div class="form-grid">
+					<label for="opt-idle-minutes" class="label">Re-lock after (minutes)</label>
+					<input
+						id="opt-idle-minutes"
+						type="number"
+						min="1"
+						max="1440"
+						class="input"
+						bind:value={editingOptions.quickUnlockIdleMinutes}
+					/>
+				</div>
+				<p class="options-page__help">
+					Default is 120 minutes (2 hours). Common values: 15, 30, 60, 120.
+				</p>
 			</div>
 		{:else if activeTab === 'invoice'}
 			<h2>Invoice & Billing Settings</h2>
