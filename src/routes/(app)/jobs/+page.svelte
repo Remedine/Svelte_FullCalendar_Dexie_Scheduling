@@ -12,7 +12,7 @@
 	import { pullJobsFromServer, pullUsersFromServer, pullInvoicesFromServer, pb } from '$lib/db/pb';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto, replaceState } from '$app/navigation';
-	import { page } from '$app/state';
+	import { page as appPage } from '$app/state';
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
@@ -162,11 +162,11 @@
 	$effect(() => {
 		if (loading) return;
 
-		const jobId = page.url.searchParams.get('jobId');
+		const jobId = appPage.url.searchParams.get('jobId');
 		if (!jobId || jobDeepLinkHandled === jobId) return;
 
 		jobDeepLinkHandled = jobId;
-		const initialTab = page.url.searchParams.get('tab') === 'invoice' ? 'invoice' : 'job';
+		const initialTab = appPage.url.searchParams.get('tab') === 'invoice' ? 'invoice' : 'job';
 
 		const openFromDeepLink = async () => {
 			let job =
@@ -182,7 +182,7 @@
 
 			await loadJobs();
 
-			const url = new URL(page.url);
+			const url = new URL(appPage.url);
 			url.searchParams.delete('jobId');
 			url.searchParams.delete('tab');
 			replaceState(url.pathname + url.search, {});
