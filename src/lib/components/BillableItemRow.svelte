@@ -350,7 +350,9 @@
 	}
 
 	.billable-item-row__type-toggle {
-		display: flex;
+		display: inline-flex;
+		width: fit-content;
+		max-width: 100%;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
 		overflow: hidden;
@@ -365,6 +367,7 @@
 		cursor: pointer;
 		color: var(--color-text);
 		white-space: nowrap;
+		flex: 0 0 auto;
 	}
 
 	.billable-item-row__type-toggle button.active {
@@ -517,11 +520,23 @@
 		width: 4.5rem;
 	}
 
+	@media (max-width: 768px) {
+		.billable-item-row {
+			padding: var(--space-2);
+			margin-bottom: var(--space-2);
+			border-radius: var(--radius-md);
+		}
+	}
+
 	/* Mobile: stack calc row */
 	@container billable-row (max-width: 520px) {
 		.billable-item-row__details-line {
 			flex-direction: column;
 			align-items: stretch;
+		}
+
+		.billable-item-row__type-toggle {
+			align-self: flex-start;
 		}
 
 		.billable-item-row__calc {

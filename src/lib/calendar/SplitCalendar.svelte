@@ -628,7 +628,7 @@
 	let jumpShowCancelled = $state(initialSearchParams?.get('status') === 'cancelled');
 	let hasScrolledToHighlight = false;
 
-	const CALENDAR_STATUS_FILTERS = ['scheduled', 'confirmed', 'completed', 'cancelled'] as const;
+	const CALENDAR_STATUS_FILTERS = ['scheduled', 'completed', 'cancelled'] as const;
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
@@ -1656,7 +1656,7 @@
 							</summary>
 							<div class="split-calendar__filter-section-body">
 								<div class="split-calendar__status-chips">
-									{#each ['scheduled', 'confirmed', 'completed', 'cancelled'] as status}
+									{#each ['scheduled', 'completed', 'cancelled'] as status}
 										<button
 											type="button"
 											class="split-calendar__status-chip split-calendar__status-chip--{status}"
@@ -2078,8 +2078,8 @@
 	}
 
 	.split-calendar__crew-avatar {
-		width: 32px;
-		height: 32px;
+		width: 42px;
+		height: 42px;
 		border-radius: 50%;
 		overflow: hidden;
 		border: 2px solid transparent;
@@ -2087,7 +2087,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 11px;
+		font-size: 14px;
 		font-weight: 600;
 		color: var(--color-text-muted);
 		cursor: pointer;
@@ -2176,7 +2176,6 @@
 		--status-chip-soft: var(--color-primary-soft);
 	}
 
-	.split-calendar__status-chip--confirmed,
 	.split-calendar__status-chip--completed {
 		--status-chip-color: var(--color-success);
 		--status-chip-soft: var(--color-success-soft);

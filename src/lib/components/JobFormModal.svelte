@@ -757,8 +757,8 @@
 	}
 
 	.new-job-modal__crew-avatar {
-		width: 32px;
-		height: 32px;
+		width: 42px;
+		height: 42px;
 		border-radius: 50%;
 		overflow: hidden;
 		border: 2px solid transparent;
@@ -766,7 +766,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 11px;
+		font-size: 14px;
 		font-weight: 600;
 		color: var(--color-text-muted);
 		cursor: pointer;
@@ -1075,6 +1075,70 @@
 
 		.new-job-modal__form {
 			margin-top: var(--space-2);
+			padding: 0 var(--space-2);
+			gap: var(--space-3);
+		}
+
+		.new-job-modal__field-group {
+			gap: var(--space-2);
+		}
+
+		.new-job-modal__crew-grid {
+			gap: var(--space-2);
+		}
+
+		.billable-items {
+			padding: var(--space-1);
+		}
+
+		.totals-summary {
+			padding: var(--space-2) var(--space-3);
+			margin-bottom: var(--space-2);
+		}
+
+		.new-job-modal__footer {
+			align-items: stretch;
+			width: 100%;
+			box-sizing: border-box;
+			padding: var(--space-2);
+			padding-bottom: max(var(--space-2), env(safe-area-inset-bottom, 0px));
+			gap: var(--space-2);
+		}
+
+		.footer-primary {
+			flex-direction: column-reverse;
+			width: 100%;
+			gap: var(--space-2);
+		}
+
+		.footer-primary .new-job-modal__btn {
+			width: 100%;
+			min-width: 0;
+			padding: var(--space-3) var(--space-4);
+			font-size: var(--font-size-sm);
+			text-align: center;
+			white-space: normal;
+		}
+
+		.cancel-job-text {
+			width: 100%;
+			text-align: center;
+			padding: var(--space-2);
+			min-height: 44px;
+		}
+
+		.new-job-modal__cancelled-actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.new-job-modal__secondary-action {
+			width: 100%;
+			text-align: center;
+			padding: var(--space-2) var(--space-3);
+			min-height: 44px;
+			font-size: var(--font-size-sm);
+			white-space: normal;
 		}
 
 		.cancel-confirm-modal__content {
@@ -1083,7 +1147,7 @@
 		}
 
 		.cancel-confirm-modal__body {
-			padding: var(--space-4) var(--space-3) var(--space-2);
+			padding: var(--space-3) var(--space-2) var(--space-2);
 			gap: var(--space-3);
 		}
 
@@ -1099,8 +1163,8 @@
 		.cancel-confirm-modal__footer {
 			flex-direction: column-reverse;
 			align-items: stretch;
-			padding: var(--space-3);
-			padding-bottom: max(var(--space-3), env(safe-area-inset-bottom, 0px));
+			padding: var(--space-2);
+			padding-bottom: max(var(--space-2), env(safe-area-inset-bottom, 0px));
 			gap: var(--space-2);
 		}
 
