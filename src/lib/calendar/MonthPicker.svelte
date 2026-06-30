@@ -12,6 +12,7 @@
 		onDateSelect,
 		onRegisterNavigator,
 		onVisibleMonthChange,
+		onDragDayHover,
 		appointmentDragActive = false
 	}: {
 		jobs?: any[];
@@ -19,6 +20,7 @@
 		onDateSelect?: (dateStr: string) => void;
 		onRegisterNavigator?: (stepMonth: (delta: number) => void) => void;
 		onVisibleMonthChange?: (year: number, month: number) => void;
+		onDragDayHover?: (dateStr: string | null) => void;
 		appointmentDragActive?: boolean;
 	} = $props();
 
@@ -153,6 +155,13 @@
 		onVisibleMonthChange?.(currentYear, currentMonth);
 	});
 
+	$effect(() => {
+		if (!appointmentDragActive) {
+			dragOverDay = null;
+			onDragDayHover?.(null);
+		}
+	});
+
 	// Keep the visible month in sync when the parent sets selectedDate (e.g. jump from job details).
 	$effect(() => {
 		const dateStr = selectedDate;
@@ -196,8 +205,12 @@
 				ondragover={(e) => {
 					e.preventDefault();
 					dragOverDay = day;
+					onDragDayHover?.(toDateString(day.date));
 				}}
-				ondragleave={() => (dragOverDay = null)}
+				ondragleave={() => {
+					dragOverDay = null;
+					onDragDayHover?.(null);
+				}}
 			>
 				<span class="month-picker__number">{day.date.getDate()}</span>
 
@@ -211,6 +224,16 @@
 			</button>
 		{/each}
 	</div>
+
+	{#if appointmentDragActive}
+		<div class="month-picker__drag-context" aria-live="polite">
+			<span class="month-picker__drag-context-month">
+				{monthNames[currentMonth]}
+				{currentYear}
+			</span>
+			<span class="month-picker__drag-context-hint">Drop on a day · ← → change month</span>
+		</div>
+	{/if}
 
 	<div class="month-picker__footer">
 		<button
@@ -245,6 +268,36 @@
 		justify-content: space-between;
 		align-items: center;
 		margin-bottom: var(--space-2);
+	}
+
+	.month-picker__drag-context {
+		display: none;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+		margin-top: var(--space-1);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		background: var(--color-primary-soft);
+		border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+		text-align: center;
+	}
+
+	.month-picker--drag-active .month-picker__drag-context {
+		display: flex;
+	}
+
+	.month-picker__drag-context-month {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-primary-emphasis);
+		line-height: 1.2;
+	}
+
+	.month-picker__drag-context-hint {
+		font-size: 10px;
+		color: var(--color-text-muted);
+		line-height: 1.2;
 	}
 
 	.month-picker__footer {
@@ -384,5 +437,32 @@
 		border-radius: 50%;
 		/* subtle border for visibility on any bg; color comes from inline area color */
 		border: 1px solid var(--color-border);
+	}
+
+	@media (max-width: 768px) {
+		.month-picker--drag-active .month-picker__header {
+			position: sticky;
+			top: 0;
+			z-index: 2;
+			margin: -4px -6px var(--space-1);
+			padding: 4px 6px;
+			background: var(--color-surface);
+			box-shadow: 0 1px 0 var(--color-border);
+		}
+
+		.month-picker--drag-active .month-picker__title {
+			font-size: var(--font-size-sm);
+			font-weight: var(--font-weight-bold);
+			color: var(--color-primary-emphasis);
+		}
+
+		.month-picker__drag-context {
+			margin-top: 2px;
+			padding: 4px 6px;
+		}
+
+		.month-picker__drag-context-month {
+			font-size: var(--font-size-xs);
+		}
 	}
 </style>
