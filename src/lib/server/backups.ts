@@ -95,6 +95,40 @@ export async function deleteBackup(name: string): Promise<void> {
 	}
 }
 
+export async function uploadPbBackup(file: File | Blob, filename: string): Promise<BackupListItem> {
+	const form = new FormData();
+	form.append('file', file, filename);
+	const res = await internalFetch('/api/internal/backups/upload', {
+		method: 'POST',
+		body: form
+	});
+	if (!res.ok) {
+		const text = await res.text().catch(() => '');
+		throw new Error(`Backup upload failed (${res.status}): ${text}`);
+	}
+	return (await res.json()) as BackupListItem;
+}
+
+export type RestoreBackupResult = {
+	started: boolean;
+	name: string;
+	message: string;
+};
+
+/** Restore a server-stored backup. PocketBase restarts asynchronously. */
+export async function restorePbBackup(name: string): Promise<RestoreBackupResult> {
+	const res = await internalFetch('/api/internal/backups/restore', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
+	if (!res.ok) {
+		const text = await res.text().catch(() => '');
+		throw new Error(`Restore failed (${res.status}): ${text}`);
+	}
+	return (await res.json()) as RestoreBackupResult;
+}
+
 /** Prune backups that fall outside the retention calendar (server store only). */
 export async function pruneBackupsByRetention(): Promise<{ pruned: string[]; kept: number }> {
 	const items = await listBackups();

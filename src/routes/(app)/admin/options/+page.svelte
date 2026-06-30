@@ -61,6 +61,11 @@
 	);
 	let backupLoading = $state(false);
 	let backupRunning = $state(false);
+	let backupUploading = $state(false);
+	let restoreTarget = $state<string | null>(null);
+	let restoreConfirmText = $state('');
+	let restoreRestoring = $state(false);
+	let uploadFileInput = $state<HTMLInputElement | null>(null);
 
 	let editingOptions = $state<any>({});
 	let crewAssignmentHour12 = $state(7);
@@ -368,6 +373,79 @@
 				URL.revokeObjectURL(a.href);
 			})
 			.catch(() => toast.error('Could not download backup'));
+	}
+
+	function openRestoreDialog(name: string) {
+		restoreTarget = name;
+		restoreConfirmText = '';
+	}
+
+	function closeRestoreDialog() {
+		restoreTarget = null;
+		restoreConfirmText = '';
+	}
+
+	async function confirmRestore() {
+		if (!restoreTarget || !pb?.authStore?.token) return;
+		if (restoreConfirmText.trim() !== restoreTarget) {
+			toast.error('Type the exact backup filename to confirm');
+			return;
+		}
+		restoreRestoring = true;
+		try {
+			const res = await fetch('/api/admin/backups/restore', {
+				method: 'POST',
+				headers: {
+					Authorization: pb.authStore.token,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					name: restoreTarget,
+					confirmName: restoreConfirmText.trim()
+				})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(data.error || 'Restore failed');
+			closeRestoreDialog();
+			toast.success(
+				'Restore started. PocketBase is restarting — wait about 90 seconds, then sign out and sign back in.'
+			);
+		} catch (err: any) {
+			toast.error(err?.message || 'Restore failed');
+		} finally {
+			restoreRestoring = false;
+		}
+	}
+
+	async function uploadBackupZip() {
+		const file = uploadFileInput?.files?.[0];
+		if (!file || !pb?.authStore?.token) {
+			toast.error('Choose a .zip backup file first');
+			return;
+		}
+		if (!file.name.toLowerCase().endsWith('.zip')) {
+			toast.error('Backup must be a .zip file');
+			return;
+		}
+		backupUploading = true;
+		try {
+			const form = new FormData();
+			form.append('file', file);
+			const res = await fetch('/api/admin/backups/upload', {
+				method: 'POST',
+				headers: { Authorization: pb.authStore.token },
+				body: form
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(data.error || 'Upload failed');
+			toast.success(`Uploaded ${data.name}. You can restore it from the list below.`);
+			if (uploadFileInput) uploadFileInput.value = '';
+			await loadBackupList();
+		} catch (err: any) {
+			toast.error(err?.message || 'Upload failed');
+		} finally {
+			backupUploading = false;
+		}
 	}
 
 	$effect(() => {
@@ -917,6 +995,40 @@
 				{/if}
 			</div>
 
+			<div class="form-section backup-restore-section">
+				<h3>Restore from backup</h3>
+				<p class="options-page__help backup-restore-warning">
+					<strong>Destructive.</strong> Restore replaces all server data (database + uploaded files)
+					with the chosen backup. PocketBase restarts and the app will be unavailable for about 1–2
+					minutes. Browser offline data on this device is <em>not</em> restored — sign out and sign
+					back in after restore to re-sync.
+				</p>
+				<div class="backup-upload">
+					<label for="backup-upload-input" class="label">Upload a backup .zip</label>
+					<p class="options-page__help">
+						Use a file from email or your computer. It appears in the server list; then tap
+						<strong>Restore</strong>.
+					</p>
+					<div class="backup-upload__row">
+						<input
+							id="backup-upload-input"
+							type="file"
+							accept=".zip,application/zip"
+							bind:this={uploadFileInput}
+							class="backup-upload__input"
+						/>
+						<button
+							type="button"
+							class="options-page__btn options-page__btn--add"
+							onclick={uploadBackupZip}
+							disabled={backupUploading}
+						>
+							{backupUploading ? 'Uploading…' : 'Upload to server'}
+						</button>
+					</div>
+				</div>
+			</div>
+
 			<div class="form-section">
 				<h3>Server backups</h3>
 				{#if backupRetention}
@@ -940,13 +1052,22 @@
 										{formatBytes(item.size)} · {formatBackupDate(item.created)}
 									</span>
 								</div>
-								<button
-									type="button"
-									class="options-page__btn options-page__btn--add backup-list__dl"
-									onclick={() => downloadBackup(item.name)}
-								>
-									Download
-								</button>
+								<div class="backup-list__actions">
+									<button
+										type="button"
+										class="options-page__btn options-page__btn--add backup-list__dl"
+										onclick={() => downloadBackup(item.name)}
+									>
+										Download
+									</button>
+									<button
+										type="button"
+										class="options-page__btn backup-list__restore"
+										onclick={() => openRestoreDialog(item.name)}
+									>
+										Restore
+									</button>
+								</div>
 							</div>
 						{/each}
 					</div>
@@ -954,6 +1075,51 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if restoreTarget}
+		<div
+			class="backup-restore-overlay"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="restore-dialog-title"
+		>
+			<div class="backup-restore-dialog">
+				<h3 id="restore-dialog-title">Confirm restore</h3>
+				<p>
+					This will replace <strong>all</strong> server data with:
+				</p>
+				<p class="backup-restore-dialog__filename">{restoreTarget}</p>
+				<p class="options-page__help">
+					PocketBase will restart. Type the filename below to confirm.
+				</p>
+				<input
+					class="input backup-restore-dialog__input"
+					type="text"
+					placeholder={restoreTarget}
+					bind:value={restoreConfirmText}
+					autocomplete="off"
+				/>
+				<div class="backup-restore-dialog__actions">
+					<button
+						type="button"
+						class="options-page__btn options-page__btn--add"
+						onclick={closeRestoreDialog}
+						disabled={restoreRestoring}
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						class="options-page__btn backup-list__restore"
+						onclick={confirmRestore}
+						disabled={restoreRestoring || restoreConfirmText.trim() !== restoreTarget}
+					>
+						{restoreRestoring ? 'Starting restore…' : 'Restore now'}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	<!-- )=- Sticky footer bar for the main Save action.
 	     Matches the visual treatment and sticky behavior of .new-job-modal__footer (and the updated client modal).
@@ -1404,9 +1570,80 @@
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 	}
-	.backup-list__dl {
+	.backup-list__actions {
+		display: flex;
 		flex-shrink: 0;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.backup-list__dl {
 		padding: var(--space-2) var(--space-4);
+	}
+	.backup-list__restore {
+		background: var(--color-danger-emphasis);
+		color: white;
+		border: none;
+		padding: var(--space-2) var(--space-4);
+		border-radius: var(--radius-md);
+		font-weight: var(--font-weight-semibold);
+		cursor: pointer;
+	}
+	.backup-list__restore:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.backup-restore-warning {
+		background: var(--color-danger-soft);
+		padding: var(--space-3);
+		border-radius: var(--radius-md);
+		border-left: 4px solid var(--color-danger-emphasis);
+	}
+	.backup-upload__row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+		align-items: center;
+	}
+	.backup-upload__input {
+		flex: 1;
+		min-width: 200px;
+	}
+	.backup-restore-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		padding: var(--space-4);
+	}
+	.backup-restore-dialog {
+		background: var(--color-surface);
+		border-radius: var(--radius-lg);
+		padding: var(--space-6);
+		max-width: 480px;
+		width: 100%;
+		box-shadow: var(--shadow-lg);
+	}
+	.backup-restore-dialog__filename {
+		font-family: monospace;
+		font-size: var(--font-size-sm);
+		word-break: break-all;
+		background: var(--color-surface-alt);
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-sm);
+	}
+	.backup-restore-dialog__input {
+		width: 100%;
+		margin: var(--space-3) 0;
+	}
+	.backup-restore-dialog__actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: var(--space-3);
+		margin-top: var(--space-4);
 	}
 
 	/* )=- Sticky bottom action bar modeled directly on the job/client modal footers.
