@@ -79,8 +79,6 @@
 		resizeStartEdge: boolean;
 		pointerStartY: number;
 		initialScrollTop: number;
-		initialHarnessTop: number;
-		initialHarnessHeight: number;
 		originalStart: Date;
 		originalEnd: Date;
 		previewStart: Date;
@@ -109,20 +107,41 @@
 			: (el.closest('.fc-timegrid-event-harness') as HTMLElement | null);
 	}
 
-	// Only strip pixel preview styles from custom mobile resize. Never clear FC's bottom/top
-	// positioning — that collapses cards and makes other events vanish from the layout.
+	// Custom mobile resize adds harness height; FC itself uses pixel top + bottom — never strip those.
 	function clearMobileResizePreviewStyles(el: HTMLElement) {
 		const harness = getEventHarnessEl(el);
-		if (!harness) return;
-		harness.style.removeProperty('height');
-		const top = harness.style.top;
-		if (top && top.endsWith('px')) {
-			harness.style.removeProperty('top');
-		}
+		harness?.style.removeProperty('height');
 	}
 
-	function syncCalendarEventDates(eventId: string, start: Date, end: Date) {
-		dayApi?.getEventById(eventId)?.setDates(start, end);
+	function getSlotRangeMs(): { slotMinMs: number; slotMaxMs: number } {
+		const parseFcTime = (value: unknown): number => {
+			if (typeof value === 'string') {
+				const [h, m, s] = value.split(':').map(Number);
+				return ((h || 0) * 3600 + (m || 0) * 60 + (s || 0)) * 1000;
+			}
+			return 6 * 3600 * 1000;
+		};
+		return {
+			slotMinMs: parseFcTime(dayApi?.getOption('slotMinTime')),
+			slotMaxMs: parseFcTime(dayApi?.getOption('slotMaxTime'))
+		};
+	}
+
+	function harnessStyleForDates(start: Date, end: Date, harnessEl: HTMLElement): { top: string; bottom: string } {
+		const col = harnessEl.closest('.fc-timegrid-col');
+		const colHeight = col?.getBoundingClientRect().height ?? 1;
+		const { slotMinMs, slotMaxMs } = getSlotRangeMs();
+		const dayStart = new Date(start);
+		dayStart.setHours(0, 0, 0, 0);
+		const startMs = start.getTime() - dayStart.getTime();
+		const endMs = end.getTime() - dayStart.getTime();
+		const rangeMs = Math.max(slotMaxMs - slotMinMs, 1);
+		const topPx = ((startMs - slotMinMs) / rangeMs) * colHeight;
+		const endPx = ((endMs - slotMinMs) / rangeMs) * colHeight;
+		return {
+			top: `${topPx}px`,
+			bottom: `${-endPx}px`
+		};
 	}
 
 	function getMobileSlotMetrics(harnessEl?: HTMLElement | null): { slotHeight: number; slotMs: number } {
@@ -176,32 +195,12 @@
 	function applyMobileResizePreview(
 		gesture: NonNullable<typeof activeMobileResize>,
 		start: Date,
-		end: Date,
-		slotMs: number
+		end: Date
 	) {
-		const { slotHeight } = getMobileSlotMetrics(gesture.harnessEl);
-		const startSlotDelta = Math.round((start.getTime() - gesture.originalStart.getTime()) / slotMs);
-		const endSlotDelta = Math.round((end.getTime() - gesture.originalEnd.getTime()) / slotMs);
-
-		// FC positions harness with top+bottom; switch to top+height for preview and clear bottom.
-		gesture.harnessEl.style.removeProperty('bottom');
-
-		if (gesture.resizeStartEdge) {
-			const newTop = gesture.initialHarnessTop + startSlotDelta * slotHeight;
-			const newHeight = Math.max(
-				slotHeight,
-				gesture.initialHarnessHeight - startSlotDelta * slotHeight
-			);
-			gesture.harnessEl.style.top = `${newTop}px`;
-			gesture.harnessEl.style.height = `${newHeight}px`;
-			return;
-		}
-
-		gesture.harnessEl.style.top = `${gesture.initialHarnessTop}px`;
-		gesture.harnessEl.style.height = `${Math.max(
-			slotHeight,
-			gesture.initialHarnessHeight + endSlotDelta * slotHeight
-		)}px`;
+		const style = harnessStyleForDates(start, end, gesture.harnessEl);
+		gesture.harnessEl.style.removeProperty('height');
+		gesture.harnessEl.style.top = style.top;
+		gesture.harnessEl.style.bottom = style.bottom;
 	}
 
 	function getMobileScrollCompensation(gesture: NonNullable<typeof activeMobileResize>): number {
@@ -227,7 +226,7 @@
 		);
 		activeMobileResize.previewStart = snapped.start;
 		activeMobileResize.previewEnd = snapped.end;
-		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end, slotMs);
+		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end);
 	}
 
 	function stopMobileEdgeAutoScroll() {
@@ -322,8 +321,7 @@
 		gesture.eventEl.classList.remove('fc-event-resizing');
 
 		if (!changed) {
-			clearMobileResizePreviewStyles(gesture.harnessEl);
-			syncCalendarEventDates(gesture.eventId, gesture.originalStart, gesture.originalEnd);
+			applyMobileResizePreview(gesture, gesture.originalStart, gesture.originalEnd);
 			requestAnimationFrame(() => endCalendarInteraction());
 			return;
 		}
@@ -331,12 +329,12 @@
 		try {
 			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
-			clearMobileResizePreviewStyles(gesture.harnessEl);
-			syncCalendarEventDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			applyMobileResizePreview(gesture, gesture.previewStart, gesture.previewEnd);
+			dayApi?.refetchEvents();
 			requestAnimationFrame(() => endCalendarInteraction());
 		} catch {
-			clearMobileResizePreviewStyles(gesture.harnessEl);
-			syncCalendarEventDates(gesture.eventId, gesture.originalStart, gesture.originalEnd);
+			applyMobileResizePreview(gesture, gesture.originalStart, gesture.originalEnd);
+			dayApi?.refetchEvents();
 			toast.error('Could not resize appointment');
 			requestAnimationFrame(() => endCalendarInteraction());
 		}
@@ -406,8 +404,6 @@
 					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
 					pointerStartY: touch.clientY,
 					initialScrollTop: scrollEl?.scrollTop ?? 0,
-					initialHarnessTop: harnessEl.offsetTop,
-					initialHarnessHeight: harnessEl.offsetHeight,
 					originalStart,
 					originalEnd,
 					previewStart: originalStart,
