@@ -139,7 +139,8 @@ export async function savePasskey(record: PasskeyRecord): Promise<void> {
 		userId: record.userId,
 		credentialId: normalizeCredentialId(record.credentialId),
 		publicKey: record.publicKey,
-		counter: record.counter,
+		// New passkeys report signCount 0 — must be sent explicitly (PB rejects required+0).
+		counter: Math.max(0, Math.floor(Number(record.counter ?? 0))),
 		transports: record.transports || [],
 		deviceName: record.deviceName || ''
 	});
