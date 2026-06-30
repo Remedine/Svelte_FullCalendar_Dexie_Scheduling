@@ -48,18 +48,14 @@
 		return { x: 0, y: 0 };
 	}
 
-	// Mobile touch zones: drag only from handle, resize only from edges, scroll locked during gestures.
+	// Mobile touch zones: drag only from handle, resize only from edges.
+	// Normal scroll uses FullCalendar's internal .fc-scroller (height: 100% layout).
 	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 56;
 	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 300;
 
-	let mobileScrollLockDepth = 0;
 	let mobileEdgeScrollPointerY: number | null = null;
 	let mobileEdgeScrollRaf: number | null = null;
 	let mobileEdgeScrollLastTs: number | null = null;
-	let activeMobileDrag = false;
-	let mobileDragTouchTarget: Element | null = null;
-	let mobileDragLastClientX = 0;
-	let mobileDragLastClientY = 0;
 
 	let activeMobileResize: {
 		eventId: string;
@@ -76,35 +72,15 @@
 		previewEnd: Date;
 	} | null = null;
 
-	function getMobileDayScrollEl(): HTMLElement | null {
+	function getMobileScrollEl(): HTMLElement | null {
+		const fcScroller = dayEl?.querySelector('.fc-scroller') as HTMLElement | null;
+		if (fcScroller && fcScroller.scrollHeight > fcScroller.clientHeight) {
+			return fcScroller;
+		}
 		return document.querySelector('.split-calendar__day-wrapper');
 	}
 
-	function lockMobileCalendarScroll() {
-		if (!isMobile) return;
-		mobileScrollLockDepth += 1;
-		if (mobileScrollLockDepth === 1) {
-			document
-				.querySelector('.split-calendar__day-wrapper')
-				?.classList.add('split-calendar__day-wrapper--gesture-lock');
-		}
-	}
-
-	function unlockMobileCalendarScroll() {
-		if (!isMobile) return;
-		mobileScrollLockDepth = Math.max(0, mobileScrollLockDepth - 1);
-		if (mobileScrollLockDepth === 0) {
-			document
-				.querySelector('.split-calendar__day-wrapper')
-				?.classList.remove('split-calendar__day-wrapper--gesture-lock');
-		}
-	}
-
 	function resetMobileGestureState() {
-		mobileScrollLockDepth = 0;
-		document
-			.querySelector('.split-calendar__day-wrapper')
-			?.classList.remove('split-calendar__day-wrapper--gesture-lock');
 		if (activeMobileResize) {
 			activeMobileResize.eventEl.classList.remove('fc-event-resizing');
 			activeMobileResize.harnessEl.style.removeProperty('height');
@@ -112,7 +88,6 @@
 			activeMobileResize = null;
 		}
 		clearMobileResizeListeners();
-		stopMobileDragEdgeScroll();
 	}
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
@@ -194,7 +169,7 @@
 	}
 
 	function getMobileScrollCompensation(gesture: NonNullable<typeof activeMobileResize>): number {
-		const scrollEl = getMobileDayScrollEl();
+		const scrollEl = getMobileScrollEl();
 		if (!scrollEl) return 0;
 		return scrollEl.scrollTop - gesture.initialScrollTop;
 	}
@@ -219,42 +194,6 @@
 		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end, slotMs);
 	}
 
-	function isMobileEdgeScrollGestureActive(): boolean {
-		return !!(activeMobileResize || activeMobileDrag);
-	}
-
-	function simulateMobileDragTouchMove(el: Element, clientX: number, clientY: number) {
-		// FullCalendar only hears touchmove on the original drag target; re-fire after edge scroll
-		// so hit-testing and the drag mirror track into off-screen hours.
-		try {
-			const touch = new Touch({
-				identifier: 1,
-				target: el,
-				clientX,
-				clientY,
-				pageX: clientX,
-				pageY: clientY,
-				screenX: clientX,
-				screenY: clientY,
-				radiusX: 1,
-				radiusY: 1,
-				rotationAngle: 0,
-				force: 1
-			});
-			el.dispatchEvent(
-				new TouchEvent('touchmove', {
-					bubbles: true,
-					cancelable: true,
-					touches: [touch],
-					targetTouches: [touch],
-					changedTouches: [touch]
-				})
-			);
-		} catch {
-			// Touch() unavailable — edge scroll still runs; user can nudge finger to refresh FC hit-test.
-		}
-	}
-
 	function stopMobileEdgeAutoScroll() {
 		if (mobileEdgeScrollRaf != null) {
 			cancelAnimationFrame(mobileEdgeScrollRaf);
@@ -265,14 +204,13 @@
 	}
 
 	function runMobileEdgeAutoScrollFrame(ts: number) {
-		if (!isMobileEdgeScrollGestureActive()) {
+		if (!activeMobileResize) {
 			stopMobileEdgeAutoScroll();
 			return;
 		}
 
-		const scrollEl = getMobileDayScrollEl();
+		const scrollEl = getMobileScrollEl();
 		const pointerY = mobileEdgeScrollPointerY;
-		let didScroll = false;
 
 		if (scrollEl && pointerY != null) {
 			const rect = scrollEl.getBoundingClientRect();
@@ -290,25 +228,15 @@
 			}
 
 			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
-				const prevScrollTop = scrollEl.scrollTop;
 				const dt = Math.min(0.05, (ts - mobileEdgeScrollLastTs) / 1000);
 				const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
 				scrollEl.scrollTop = Math.min(
 					maxScroll,
 					Math.max(0, scrollEl.scrollTop + velocity * dt)
 				);
-				didScroll = scrollEl.scrollTop !== prevScrollTop;
 			}
 
-			if (activeMobileResize) {
-				updateMobileResizeFromClientY(pointerY);
-			} else if (activeMobileDrag && didScroll && mobileDragTouchTarget) {
-				simulateMobileDragTouchMove(
-					mobileDragTouchTarget,
-					mobileDragLastClientX,
-					mobileDragLastClientY
-				);
-			}
+			updateMobileResizeFromClientY(pointerY);
 		}
 
 		mobileEdgeScrollLastTs = ts;
@@ -339,49 +267,10 @@
 		e.preventDefault();
 	}
 
-	function handleMobileDragTouchMove(e: TouchEvent) {
-		if (!activeMobileDrag) return;
-		const touch = e.touches[0];
-		if (!touch) return;
-
-		mobileDragLastClientX = touch.clientX;
-		mobileDragLastClientY = touch.clientY;
-		ensureMobileEdgeAutoScrollRunning(touch.clientY);
-	}
-
-	function startMobileDragEdgeScroll(info: { jsEvent: Event; el: HTMLElement }) {
-		activeMobileDrag = true;
-		const target = info.jsEvent.target;
-		mobileDragTouchTarget =
-			target instanceof Element ? target : info.el.querySelector('.fc-event__drag-handle') || info.el;
-		const { x, y } = getEventClientCoords(info.jsEvent);
-		mobileDragLastClientX = x;
-		mobileDragLastClientY = y;
-		document.addEventListener('touchmove', handleMobileDragTouchMove, { passive: true });
-		document.addEventListener('touchcancel', handleMobileDragTouchCancel, { passive: true });
-		ensureMobileEdgeAutoScrollRunning(y);
-	}
-
-	function handleMobileDragTouchCancel() {
-		if (!activeMobileDrag) return;
-		stopMobileDragEdgeScroll();
-		unlockMobileCalendarScroll();
-	}
-
-	function stopMobileDragEdgeScroll() {
-		if (!activeMobileDrag) return;
-		activeMobileDrag = false;
-		mobileDragTouchTarget = null;
-		document.removeEventListener('touchmove', handleMobileDragTouchMove);
-		document.removeEventListener('touchcancel', handleMobileDragTouchCancel);
-		stopMobileEdgeAutoScroll();
-	}
-
 	async function handleMobileResizeEnd() {
 		const gesture = activeMobileResize;
 		activeMobileResize = null;
 		clearMobileResizeListeners();
-		unlockMobileCalendarScroll();
 
 		if (!gesture) return;
 
@@ -459,7 +348,7 @@
 				// Own the gesture — FC touch resize needs a separate select step and fights scrolling.
 				e.stopPropagation();
 
-				const scrollEl = getMobileDayScrollEl();
+				const scrollEl = getMobileScrollEl();
 
 				activeMobileResize = {
 					eventId,
@@ -477,7 +366,6 @@
 				};
 
 				eventEl.classList.add('fc-event-resizing');
-				lockMobileCalendarScroll();
 				ensureMobileEdgeAutoScrollRunning(touch.clientY);
 				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
 				document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
@@ -1015,8 +903,7 @@
 				initialView: isMobile ? 'timeGridDay' : currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				// Mobile uses auto height so all slots render tall; .split-calendar__day-wrapper scrolls.
-				height: 'auto',
+				height: isMobile ? '100%' : 'auto',
 				allDaySlot: true,
 				slotMinTime: calendarSlotBounds.slotMinTime,
 				slotMaxTime: calendarSlotBounds.slotMaxTime,
@@ -1025,8 +912,7 @@
 				editable: true,
 				// On mobile, allow resizing from both top and bottom edges — doubles the touch targets.
 				eventResizableFromStart: isMobile,
-				// Mobile scroll lives on .split-calendar__day-wrapper — custom edge auto-scroll handles move + resize.
-				dragScroll: !isMobile,
+				dragScroll: true,
 				eventDragMinDistance: 10,
 				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
 				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
@@ -1180,17 +1066,9 @@
 
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
-					lockMobileCalendarScroll();
-					if (isMobile) {
-						startMobileDragEdgeScroll(info);
-					}
 				},
 
 				eventDragStop: (info) => {
-					if (isMobile) {
-						stopMobileDragEdgeScroll();
-					}
-					unlockMobileCalendarScroll();
 					originalEventRect = null;
 
 					if (!draggedJobId) return;
@@ -1244,15 +1122,6 @@
 					}
 					clearJobHighlight();
 					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
-				},
-
-				eventResizeStart: () => {
-					// Mobile resize is handled by setupMobileEventTouchZones (custom gesture).
-					if (!isMobile) lockMobileCalendarScroll();
-				},
-
-				eventResizeStop: () => {
-					if (!isMobile) unlockMobileCalendarScroll();
 				},
 
 				eventDrop: async (info) => {
@@ -1639,21 +1508,13 @@
 			min-height: 0;
 			overflow-y: auto; /* internal scroll for the day's time slots */
 			-webkit-overflow-scrolling: touch;
-			overscroll-behavior: contain;
-			touch-action: pan-y;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
 		}
 
-		.split-calendar__day-wrapper--gesture-lock {
-			/* Only active during move/resize — blocks accidental finger-scroll, not scrollTop. */
-			touch-action: none;
-		}
-
-		/* Let FullCalendar auto height expand; wrapper scrolls the full slot list. */
+		/* Make the FC container inside fill the remaining height */
 		.split-calendar__day {
-			height: auto;
-			overflow: visible;
+			height: 100%;
 		}
 	}
 
@@ -2037,7 +1898,7 @@
 
 		/* Touch-friendly event resizing on mobile.
 		   Drag the top or bottom edge (pill handles) to change length; move uses the + handle only.
-		   Hold near the top/bottom of the viewport while moving/resizing to auto-scroll into earlier/later hours.
+		   Resize edge-scroll targets .fc-scroller; move edge-scroll uses FullCalendar dragScroll.
 		   Crew avatars move to top-left so the bottom edge stays clear for resizing.
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
@@ -2055,7 +1916,6 @@
 		:global(.fc-event-resizer) {
 			height: 44px;
 			z-index: 22;
-			touch-action: none;
 			background-color: rgba(255, 255, 255, 0.2);
 			border-radius: 4px;
 		}
@@ -2096,9 +1956,6 @@
 			pointer-events: none;
 		}
 
-		:global(.fc-event.fc-event-resizing) {
-			touch-action: none;
-		}
 	}
 
 	/* Ghost / drag visual feedback.
