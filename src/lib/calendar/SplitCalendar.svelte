@@ -103,23 +103,26 @@
 		);
 	}
 
-	function clearStaleEventHarnessStyles(eventEl: HTMLElement) {
-		const harness = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
-		harness?.style.removeProperty('height');
-		harness?.style.removeProperty('top');
-		harness?.style.removeProperty('bottom');
+	function getEventHarnessEl(el: HTMLElement): HTMLElement | null {
+		return el.classList.contains('fc-timegrid-event-harness')
+			? el
+			: (el.closest('.fc-timegrid-event-harness') as HTMLElement | null);
 	}
 
-	// Custom mobile resize mutates harness inline styles in the live DOM. Incremental refetch /
-	// setDates can leave the stale harness node collapsed. Remove + refetch forces a fresh mount.
-	function finalizeMobileResizeVisual(eventId: string, eventEl: HTMLElement) {
-		dayApi?.getEventById(eventId)?.remove();
-		dayApi?.refetchEvents();
-		requestAnimationFrame(() => {
-			clearStaleEventHarnessStyles(eventEl);
-			dayApi?.updateSize();
-			endCalendarInteraction();
-		});
+	// Only strip pixel preview styles from custom mobile resize. Never clear FC's bottom/top
+	// positioning — that collapses cards and makes other events vanish from the layout.
+	function clearMobileResizePreviewStyles(el: HTMLElement) {
+		const harness = getEventHarnessEl(el);
+		if (!harness) return;
+		harness.style.removeProperty('height');
+		const top = harness.style.top;
+		if (top && top.endsWith('px')) {
+			harness.style.removeProperty('top');
+		}
+	}
+
+	function syncCalendarEventDates(eventId: string, start: Date, end: Date) {
+		dayApi?.getEventById(eventId)?.setDates(start, end);
 	}
 
 	function getMobileSlotMetrics(harnessEl?: HTMLElement | null): { slotHeight: number; slotMs: number } {
@@ -319,27 +322,23 @@
 		gesture.eventEl.classList.remove('fc-event-resizing');
 
 		if (!changed) {
-			clearStaleEventHarnessStyles(gesture.eventEl);
-			dayApi?.refetchEvents();
-			requestAnimationFrame(() => {
-				dayApi?.updateSize();
-				endCalendarInteraction();
-			});
+			clearMobileResizePreviewStyles(gesture.harnessEl);
+			syncCalendarEventDates(gesture.eventId, gesture.originalStart, gesture.originalEnd);
+			requestAnimationFrame(() => endCalendarInteraction());
 			return;
 		}
 
 		try {
 			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
-			finalizeMobileResizeVisual(gesture.eventId, gesture.eventEl);
+			clearMobileResizePreviewStyles(gesture.harnessEl);
+			syncCalendarEventDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
+			requestAnimationFrame(() => endCalendarInteraction());
 		} catch {
-			clearStaleEventHarnessStyles(gesture.eventEl);
-			dayApi?.refetchEvents();
+			clearMobileResizePreviewStyles(gesture.harnessEl);
+			syncCalendarEventDates(gesture.eventId, gesture.originalStart, gesture.originalEnd);
 			toast.error('Could not resize appointment');
-			requestAnimationFrame(() => {
-				dayApi?.updateSize();
-				endCalendarInteraction();
-			});
+			requestAnimationFrame(() => endCalendarInteraction());
 		}
 	}
 
@@ -365,7 +364,7 @@
 		}
 		eventEl.dataset.mobileTouchZones = '1';
 
-		clearStaleEventHarnessStyles(eventEl);
+		clearMobileResizePreviewStyles(eventEl);
 		bindMobileDragHandle(eventEl);
 
 		const eventId = info.event.id;
@@ -1012,7 +1011,7 @@
 					const isTimeGrid =
 						info.view.type === 'timeGridDay' || info.view.type === 'timeGridWeek';
 
-					clearStaleEventHarnessStyles(info.el);
+					clearMobileResizePreviewStyles(info.el);
 
 					if (!info.el.querySelector('.fc-event__drag-handle')) {
 						const handle = document.createElement('div');
@@ -1192,9 +1191,8 @@
 					beginCalendarInteraction();
 				},
 
-				eventResizeStop: (info) => {
+				eventResizeStop: () => {
 					endCalendarInteraction();
-					clearStaleEventHarnessStyles(info.el);
 				},
 
 				eventDrop: async (info) => {
