@@ -29,6 +29,21 @@
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	let isExternalDrop = false;
 	let originalEventRect: DOMRect | null = null;
+	// Suppress layout recalculation while FC is mid drag/resize — updateSize() during a gesture
+	// corrupts time-grid harness top/height and collapses the card to a thin line (content floats).
+	let calendarInteractionDepth = 0;
+
+	function beginCalendarInteraction() {
+		calendarInteractionDepth++;
+	}
+
+	function endCalendarInteraction() {
+		calendarInteractionDepth = Math.max(0, calendarInteractionDepth - 1);
+	}
+
+	function isCalendarInteracting(): boolean {
+		return calendarInteractionDepth > 0;
+	}
 
 	// Safe client coordinate extraction for both mouse (desktop drag) and touch (mobile long-press drag).
 	// FullCalendar passes the raw native event as info.jsEvent. On touchend / touch drag stop this is a TouchEvent.
@@ -48,46 +63,15 @@
 		return { x: 0, y: 0 };
 	}
 
-	// Mobile touch zones: drag only from handle, resize only from edges.
-	// Normal scroll uses FullCalendar's internal .fc-scroller (height: 100% layout).
-	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 56;
-	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 300;
-
-	let mobileEdgeScrollPointerY: number | null = null;
-	let mobileEdgeScrollRaf: number | null = null;
-	let mobileEdgeScrollLastTs: number | null = null;
-
-	let activeMobileResize: {
-		eventId: string;
-		eventEl: HTMLElement;
-		harnessEl: HTMLElement;
-		resizeStartEdge: boolean;
-		pointerStartY: number;
-		initialScrollTop: number;
-		initialHarnessTop: number;
-		initialHarnessHeight: number;
-		originalStart: Date;
-		originalEnd: Date;
-		previewStart: Date;
-		previewEnd: Date;
-	} | null = null;
-
-	function getMobileScrollEl(): HTMLElement | null {
-		const fcScroller = dayEl?.querySelector('.fc-scroller') as HTMLElement | null;
-		if (fcScroller && fcScroller.scrollHeight > fcScroller.clientHeight) {
-			return fcScroller;
-		}
-		return document.querySelector('.split-calendar__day-wrapper');
-	}
-
-	function resetMobileGestureState() {
-		if (activeMobileResize) {
-			activeMobileResize.eventEl.classList.remove('fc-event-resizing');
-			activeMobileResize.harnessEl.style.removeProperty('height');
-			activeMobileResize.harnessEl.style.removeProperty('top');
-			activeMobileResize = null;
-		}
-		clearMobileResizeListeners();
+	// Mobile: drag only from + handle; resize uses FullCalendar native gesture on edge pills.
+	function selectMobileCalendarEvent(calendar: Calendar, instanceId: string) {
+		const cal = calendar as Calendar & {
+			dispatch?: (action: { type: string; eventInstanceId: string }) => void;
+			currentDataManager?: { actionRunner?: { drain: () => void } };
+		};
+		cal.dispatch?.({ type: 'SELECT_EVENT', eventInstanceId: instanceId });
+		// Flush so FC sees the selection before its resizer pointerdown runs (same touch).
+		cal.currentDataManager?.actionRunner?.drain();
 	}
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
@@ -98,281 +82,51 @@
 		);
 	}
 
-	function getMobileSlotMetrics(): { slotHeight: number; slotMs: number } {
-		const slotEl =
-			document.querySelector('.fc-timegrid-slot-lane') ||
-			document.querySelector('.fc-timegrid-slot');
-		const slotHeight = slotEl?.getBoundingClientRect().height || 42;
-		const duration = dayApi?.getOption('slotDuration') as
-			| { milliseconds?: number }
-			| string
-			| null
-			| undefined;
-		let slotMs = 30 * 60 * 1000;
-		if (duration && typeof duration === 'object' && typeof duration.milliseconds === 'number') {
-			slotMs = duration.milliseconds;
-		}
-		return { slotHeight, slotMs };
+	function clearStaleEventHarnessStyles(eventEl: HTMLElement) {
+		const harness = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+		harness?.style.removeProperty('height');
+		harness?.style.removeProperty('top');
 	}
 
-	function snapMobileResizePreview(
-		originalStart: Date,
-		originalEnd: Date,
-		resizeStartEdge: boolean,
-		slotDelta: number,
-		slotMs: number
-	): { start: Date; end: Date } {
-		if (resizeStartEdge) {
-			const nextStart = new Date(originalStart.getTime() + slotDelta * slotMs);
-			if (nextStart.getTime() >= originalEnd.getTime() - slotMs) {
-				return {
-					start: new Date(originalEnd.getTime() - slotMs),
-					end: originalEnd
-				};
-			}
-			return { start: nextStart, end: originalEnd };
-		}
-
-		const nextEnd = new Date(originalEnd.getTime() + slotDelta * slotMs);
-		if (nextEnd.getTime() <= originalStart.getTime() + slotMs) {
-			return {
-				start: originalStart,
-				end: new Date(originalStart.getTime() + slotMs)
-			};
-		}
-		return { start: originalStart, end: nextEnd };
-	}
-
-	function applyMobileResizePreview(
-		gesture: NonNullable<typeof activeMobileResize>,
-		start: Date,
-		end: Date,
-		slotMs: number
-	) {
-		const { slotHeight } = getMobileSlotMetrics();
-		const startSlotDelta = Math.round((start.getTime() - gesture.originalStart.getTime()) / slotMs);
-		const endSlotDelta = Math.round((end.getTime() - gesture.originalEnd.getTime()) / slotMs);
-
-		if (gesture.resizeStartEdge) {
-			gesture.harnessEl.style.top = `${gesture.initialHarnessTop + startSlotDelta * slotHeight}px`;
-			gesture.harnessEl.style.height = `${Math.max(
-				slotHeight,
-				gesture.initialHarnessHeight - startSlotDelta * slotHeight
-			)}px`;
-			return;
-		}
-
-		gesture.harnessEl.style.height = `${Math.max(
-			slotHeight,
-			gesture.initialHarnessHeight + endSlotDelta * slotHeight
-		)}px`;
-	}
-
-	function getMobileScrollCompensation(gesture: NonNullable<typeof activeMobileResize>): number {
-		const scrollEl = getMobileScrollEl();
-		if (!scrollEl) return 0;
-		return scrollEl.scrollTop - gesture.initialScrollTop;
-	}
-
-	function updateMobileResizeFromClientY(clientY: number) {
-		if (!activeMobileResize) return;
-
-		const { slotHeight, slotMs } = getMobileSlotMetrics();
-		const scrollCompensation = getMobileScrollCompensation(activeMobileResize);
-		const slotDelta = Math.round(
-			(clientY - activeMobileResize.pointerStartY + scrollCompensation) / slotHeight
-		);
-		const snapped = snapMobileResizePreview(
-			activeMobileResize.originalStart,
-			activeMobileResize.originalEnd,
-			activeMobileResize.resizeStartEdge,
-			slotDelta,
-			slotMs
-		);
-		activeMobileResize.previewStart = snapped.start;
-		activeMobileResize.previewEnd = snapped.end;
-		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end, slotMs);
-	}
-
-	function stopMobileEdgeAutoScroll() {
-		if (mobileEdgeScrollRaf != null) {
-			cancelAnimationFrame(mobileEdgeScrollRaf);
-			mobileEdgeScrollRaf = null;
-		}
-		mobileEdgeScrollPointerY = null;
-		mobileEdgeScrollLastTs = null;
-	}
-
-	function runMobileEdgeAutoScrollFrame(ts: number) {
-		if (!activeMobileResize) {
-			stopMobileEdgeAutoScroll();
-			return;
-		}
-
-		const scrollEl = getMobileScrollEl();
-		const pointerY = mobileEdgeScrollPointerY;
-
-		if (scrollEl && pointerY != null) {
-			const rect = scrollEl.getBoundingClientRect();
-			let velocity = 0;
-			const fromTop = pointerY - rect.top;
-			const fromBottom = rect.bottom - pointerY;
-
-			if (fromTop >= 0 && fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
-				const proximity = (MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromTop) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = -(proximity * proximity) * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
-			} else if (fromBottom >= 0 && fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
-				const proximity =
-					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromBottom) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = proximity * proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
-			}
-
-			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
-				const dt = Math.min(0.05, (ts - mobileEdgeScrollLastTs) / 1000);
-				const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
-				scrollEl.scrollTop = Math.min(
-					maxScroll,
-					Math.max(0, scrollEl.scrollTop + velocity * dt)
-				);
-			}
-
-			updateMobileResizeFromClientY(pointerY);
-		}
-
-		mobileEdgeScrollLastTs = ts;
-		mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
-	}
-
-	function ensureMobileEdgeAutoScrollRunning(clientY: number) {
-		mobileEdgeScrollPointerY = clientY;
-		if (mobileEdgeScrollRaf == null) {
-			mobileEdgeScrollLastTs = performance.now();
-			mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
-		}
-	}
-
-	function clearMobileResizeListeners() {
-		document.removeEventListener('touchmove', handleMobileResizeMove);
-		document.removeEventListener('touchend', handleMobileResizeEnd);
-		document.removeEventListener('touchcancel', handleMobileResizeEnd);
-		stopMobileEdgeAutoScroll();
-	}
-
-	function handleMobileResizeMove(e: TouchEvent) {
-		if (!activeMobileResize) return;
-		const touch = e.touches[0];
-		if (!touch) return;
-
-		ensureMobileEdgeAutoScrollRunning(touch.clientY);
-		e.preventDefault();
-	}
-
-	async function handleMobileResizeEnd() {
-		const gesture = activeMobileResize;
-		activeMobileResize = null;
-		clearMobileResizeListeners();
-
-		if (!gesture) return;
-
-		const changed =
-			gesture.previewStart.getTime() !== gesture.originalStart.getTime() ||
-			gesture.previewEnd.getTime() !== gesture.originalEnd.getTime();
-
-		gesture.eventEl.classList.remove('fc-event-resizing');
-		const harness = gesture.harnessEl;
-		if (!changed) {
-			harness.style.removeProperty('height');
-			harness.style.removeProperty('top');
-			dayApi?.refetchEvents();
-			return;
-		}
-
-		try {
-			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
-			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
-			harness.style.removeProperty('height');
-			harness.style.removeProperty('top');
-		} catch {
-			harness.style.removeProperty('height');
-			harness.style.removeProperty('top');
-			dayApi?.refetchEvents();
-			toast.error('Could not resize appointment');
-		}
+	function bindMobileDragHandle(eventEl: HTMLElement) {
+		eventEl.classList.remove('fc-event-draggable');
+		const dragHandle = eventEl.querySelector('.fc-event__drag-handle');
+		dragHandle?.classList.add('fc-event-draggable');
 	}
 
 	function setupMobileEventTouchZones(info: {
 		el: HTMLElement;
-		event: {
-			id: string;
-			start: Date | null;
-			end: Date | null;
-			extendedProps?: { status?: string };
-		};
+		event: { id: string };
+		view: { calendar: Calendar };
 	}) {
 		const eventEl = info.el;
-		if (eventEl.dataset.mobileTouchZones === '1') return;
+		if (eventEl.dataset.mobileTouchZones === '1') {
+			bindMobileDragHandle(eventEl);
+			return;
+		}
 		eventEl.dataset.mobileTouchZones = '1';
 
-		// FullCalendar marks the whole card draggable; on mobile that fights resize and scroll.
-		eventEl.classList.remove('fc-event-draggable');
-		const dragHandle = eventEl.querySelector('.fc-event__drag-handle');
-		dragHandle?.classList.add('fc-event-draggable');
+		clearStaleEventHarnessStyles(eventEl);
+		bindMobileDragHandle(eventEl);
 
-		const eventId = info.event.id;
-		if (!info.event.start) return;
-		const originalStart = new Date(info.event.start);
-		const originalEnd = info.event.end
-			? new Date(info.event.end)
-			: new Date(originalStart.getTime() + getMobileSlotMetrics().slotMs);
+		const instanceId = info.event.id;
+		const calendar = info.view.calendar;
 
-		eventEl.addEventListener(
-			'touchstart',
-			(e) => {
-				const target = e.target;
-				if (!(target instanceof Element)) return;
-				const resizer = target.closest('.fc-event-resizer');
-				if (!resizer) return;
+		// FC touch/pointer resize requires a selected event before the resizer drag starts.
+		const primeResizeSelection = (target: EventTarget | null) => {
+			if (target instanceof Element && target.closest('.fc-event-resizer')) {
+				selectMobileCalendarEvent(calendar, instanceId);
+			}
+		};
 
-				const status = info.event.extendedProps?.status;
-				if (status === 'completed' || status === 'cancelled') {
-					toast.error('Cannot resize cancelled or completed jobs');
-					return;
-				}
-
-				const touch = e.changedTouches[0] || e.touches[0];
-				if (!touch) return;
-
-				const harnessEl = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
-				if (!harnessEl) return;
-
-				// Own the gesture — FC touch resize needs a separate select step and fights scrolling.
-				e.stopPropagation();
-
-				const scrollEl = getMobileScrollEl();
-
-				activeMobileResize = {
-					eventId,
-					eventEl,
-					harnessEl,
-					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
-					pointerStartY: touch.clientY,
-					initialScrollTop: scrollEl?.scrollTop ?? 0,
-					initialHarnessTop: parseFloat(harnessEl.style.top) || 0,
-					initialHarnessHeight: harnessEl.getBoundingClientRect().height,
-					originalStart,
-					originalEnd,
-					previewStart: originalStart,
-					previewEnd: originalEnd
-				};
-
-				eventEl.classList.add('fc-event-resizing');
-				ensureMobileEdgeAutoScrollRunning(touch.clientY);
-				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
-				document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
-				document.addEventListener('touchcancel', handleMobileResizeEnd, { passive: true });
-			},
-			{ capture: true, passive: true }
-		);
+		eventEl.addEventListener('touchstart', (e) => primeResizeSelection(e.target), {
+			capture: true,
+			passive: true
+		});
+		eventEl.addEventListener('pointerdown', (e) => primeResizeSelection(e.target), {
+			capture: true,
+			passive: true
+		});
 	}
 
 	let dayEl = $state<HTMLDivElement | null>(null);
@@ -412,6 +166,10 @@
 			if (isMobile && currentView !== 'timeGridDay' && dayApi) {
 				currentView = 'timeGridDay';
 				dayApi.changeView('timeGridDay');
+			}
+			if (dayApi) {
+				dayApi.setOption('height', isMobile ? '100%' : 'auto');
+				dayApi.setOption('eventResizableFromStart', isMobile);
 			}
 		};
 		mql.addEventListener('change', listener);
@@ -534,6 +292,9 @@
 
 			const w = rect.width;
 			const h = rect.height;
+
+			// Never recalc layout mid drag/resize — corrupts harness positioning (card collapse / wrong drop slot).
+			if (isCalendarInteracting()) return;
 
 			// Debounce + significant change only. Prevents constant updates from micro layout shifts
 			// during initial render or idle (e.g. image loads, subpixel rounding, FC internal adjustments).
@@ -694,9 +455,11 @@
 	// All features preserved: internal D&D, external MonthPicker drops, revert on error, filters, avatars, etc.
 	// Reference: approved calendar perf plan.
 	function applyOptimisticDatePatch(jobId: string, start: Date, end: Date | null) {
-		// Find by the id passed to the FC event (the job.id from the current snapshot).
-		// Also match on pbId for robustness when a logical job exists under different Dexie keys.
-		const idx = jobs.findIndex((j: any) => j.id === jobId || j.pbId === jobId);
+		// Prefer exact Dexie id (what FullCalendar uses as event.id); fall back to pbId only if needed.
+		let idx = jobs.findIndex((j: any) => j.id === jobId);
+		if (idx === -1) {
+			idx = jobs.findIndex((j: any) => j.pbId === jobId);
+		}
 		if (idx === -1) return false;
 
 		const original = jobs[idx];
@@ -913,6 +676,7 @@
 				// On mobile, allow resizing from both top and bottom edges — doubles the touch targets.
 				eventResizableFromStart: isMobile,
 				dragScroll: true,
+				snapDuration: '00:30:00',
 				eventDragMinDistance: 10,
 				// Mobile hold-to-drag (long press) support. Lower delay than desktop default (often 1000ms)
 				// so "hold to drag" feels responsive on phones/tablets without fighting taps for modal open.
@@ -949,12 +713,10 @@
 
 					// Only create the drag handle once per event element (idempotent).
 					// Previously this + avatars were recreated on every refetch, contributing to "refreshing" feel and memory churn.
-					// Mobile time-grid: visible bottom grip so users know where to drag after long-press.
 					const isTimeGrid =
 						info.view.type === 'timeGridDay' || info.view.type === 'timeGridWeek';
-					if (isMobile && isTimeGrid) {
-						setupMobileEventTouchZones(info);
-					}
+
+					clearStaleEventHarnessStyles(info.el);
 
 					if (!info.el.querySelector('.fc-event__drag-handle')) {
 						const handle = document.createElement('div');
@@ -972,6 +734,10 @@
 						`;
 
 						info.el.appendChild(handle);
+					}
+
+					if (isMobile && isTimeGrid) {
+						setupMobileEventTouchZones(info);
 					}
 
 					// )=- Force the area color on the event element in didMount.
@@ -1064,11 +830,13 @@
 						return;
 					}
 
+					beginCalendarInteraction();
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
 				},
 
 				eventDragStop: (info) => {
+					endCalendarInteraction();
 					originalEventRect = null;
 
 					if (!draggedJobId) return;
@@ -1122,6 +890,17 @@
 					}
 					clearJobHighlight();
 					openJobModal(info.event.extendedProps, () => refreshAfterUpdate());
+				},
+
+				eventResizeStart: (info) => {
+					beginCalendarInteraction();
+					// Clear leftover pixel harness styles from older custom resize previews.
+					clearStaleEventHarnessStyles(info.el);
+				},
+
+				eventResizeStop: (info) => {
+					endCalendarInteraction();
+					clearStaleEventHarnessStyles(info.el);
 				},
 
 				eventDrop: async (info) => {
@@ -1188,7 +967,8 @@
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
-				api?.setOption('height', 'auto'); // only once, during initial creation. Repeated calls from observers were a major source of idle "refreshing" and layout churn.
+				// Keep mobile at 100% so the time grid fills the viewport; desktop stays content-sized.
+				api?.setOption('height', isMobile ? '100%' : 'auto');
 				api?.gotoDate(parseLocalDate(selectedDate));
 			});
 		});
@@ -1196,7 +976,6 @@
 		return () => {
 			// Do NOT reset calendarInitialized here.
 			// (See comment at declaration for why.)
-			resetMobileGestureState();
 			if (api) {
 				api.destroy();
 				api = null;
@@ -1911,6 +1690,12 @@
 		:global(.fc-timegrid-event .fc-event-title) {
 			padding-bottom: 10px;
 			padding-top: 28px;
+		}
+
+		/* Keep event content clipped to the harness so a bad mid-gesture layout recalc cannot leave floating avatars/title. */
+		:global(.fc-timegrid-event-harness .fc-timegrid-event) {
+			height: 100%;
+			overflow: hidden;
 		}
 
 		:global(.fc-event-resizer) {
