@@ -10,7 +10,9 @@ import {
 	setLastLoginEmail,
 	persistAppSession,
 	clearAppSession,
-	restorePbAuthFromAppSession
+	restorePbAuthFromAppSession,
+	buildUserFromAppSession,
+	hasRestorableSession
 } from './sessionPersist';
 
 describe('sessionPersist', () => {
@@ -67,6 +69,33 @@ describe('sessionPersist', () => {
 		expect(restored).toBe(true);
 		expect(pb.authStore.token).toBe('backup-token');
 		expect(pb.authStore.model?.email).toBe('crew@example.com');
+	});
+
+	it('buildUserFromAppSession rebuilds a user from stored PB model', async () => {
+		const user = buildUserFromAppSession({
+			id: 'current',
+			currentUserId: 'local-1',
+			email: 'crew@example.com',
+			pbToken: 't',
+			pbModelJson: JSON.stringify({
+				id: 'pb-1',
+				email: 'crew@example.com',
+				name: 'Test Crew',
+				role: 'crew',
+				active: true
+			})
+		});
+
+		expect(user?.id).toBe('local-1');
+		expect(user?.pbId).toBe('pb-1');
+		expect(user?.email).toBe('crew@example.com');
+		expect(user?.name).toBe('Test Crew');
+	});
+
+	it('hasRestorableSession detects durable markers', async () => {
+		expect(await hasRestorableSession()).toBe(false);
+		await persistAppSession({ userId: 'local-1', email: 'crew@example.com' });
+		expect(await hasRestorableSession()).toBe(true);
 	});
 
 	it('clearAppSession removes auth markers but keeps last email', async () => {

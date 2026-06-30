@@ -61,92 +61,156 @@ async function applyQuickUnlockIfNeeded(userId: string | null | undefined): Prom
 	}
 }
 
-/** Restore session from Dexie + PocketBase (called once on client startup). */
-export async function restoreSession(): Promise<void> {
-	let user: any = null;
+async function resolveSessionUser(
+	db: typeof import('$lib/db').db,
+	appSession: import('$lib/db').AppSession | undefined
+): Promise<any | null> {
+	const { readPersistedSessionUserId } = await import('$lib/db');
+	const { buildUserFromAppSession } = await import('$lib/auth/sessionPersist');
+
+	const savedId =
+		localStorage.getItem('currentUserId') ||
+		appSession?.currentUserId ||
+		(await readPersistedSessionUserId());
+
+	let user = savedId ? await db.users.get(savedId) : null;
+
+	if (!user && appSession?.email) {
+		user = await db.users.where('email').equalsIgnoreCase(appSession.email).first();
+	}
+
+	if (!user) {
+		try {
+			user = await resolveUserFromPbSession(db);
+		} catch (pbErr) {
+			console.warn('[auth] PB fallback during restore failed', pbErr);
+		}
+	}
+
+	if (!user && appSession) {
+		const rebuilt = buildUserFromAppSession(appSession);
+		if (rebuilt?.id) {
+			await db.users.put(rebuilt);
+			user = rebuilt;
+		}
+	}
+
+	return user;
+}
+
+async function completeSessionRestore(user: any, appSessionEmail?: string): Promise<boolean> {
+	const { persistAppSession, syncAppSessionPbBackup } = await import('$lib/auth/sessionPersist');
+	const { refreshPbAuthIfNeeded } = await import('$lib/db/pb');
+
+	auth.currentUser = user;
+	auth.isAuthenticated = true;
+
+	if (user.id) {
+		await persistAppSession({
+			userId: String(user.id),
+			email: user.email || appSessionEmail
+		});
+	}
+
+	void refreshPbAuthIfNeeded().then(() => syncAppSessionPbBackup());
+	await applyQuickUnlockIfNeeded(user.id);
+
+	const { isQuickUnlockDevice } = await import('$lib/utils/device');
+	if (!isQuickUnlockDevice()) {
+		const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
+		markSessionActivity();
+		return !(await enforceDesktopSessionIfExpired());
+	}
+
+	return true;
+}
+
+async function attemptRestoreSession(): Promise<boolean> {
+	const { db } = await import('$lib/db');
+	const { registerAuthRefreshOnVisibility } = await import('$lib/db/pb');
+	const {
+		clearAppSession,
+		ensureDbOpen,
+		hasRestorableSession,
+		readAppSession,
+		restorePbAuthFromAppSession,
+		setLastLoginEmail
+	} = await import('$lib/auth/sessionPersist');
+
+	registerAuthRefreshOnVisibility();
+	await ensureDbOpen();
+	await restorePbAuthFromAppSession();
+
+	const appSession = await readAppSession();
+	const user = await resolveSessionUser(db, appSession);
+
+	if (user && user.active !== false) {
+		return completeSessionRestore(user, appSession?.email);
+	}
+
+	auth.currentUser = null;
+	auth.isAuthenticated = false;
+	auth.locked = false;
+
+	const restorable = await hasRestorableSession();
+	if (restorable) {
+		if (appSession?.email) setLastLoginEmail(appSession.email);
+		return false;
+	}
 
 	try {
-		const { db, readPersistedSessionUserId } = await import('$lib/db');
-		const { refreshPbAuthIfNeeded, registerAuthRefreshOnVisibility } = await import('$lib/db/pb');
-		const {
-			clearAppSession,
-			persistAppSession,
-			readAppSession,
-			restorePbAuthFromAppSession,
-			setLastLoginEmail,
-			syncAppSessionPbBackup
-		} = await import('$lib/auth/sessionPersist');
+		const { pb } = await import('$lib/db/pb');
+		if (pb.authStore.isValid || pb.authStore.token) {
+			pb.authStore.clear();
+		}
+		await clearAppSession();
+		if (appSession?.email) {
+			setLastLoginEmail(appSession.email);
+		}
+	} catch {
+		await clearAppSession();
+	}
 
-		registerAuthRefreshOnVisibility();
-		await restorePbAuthFromAppSession();
+	return false;
+}
 
-		const appSession = await readAppSession();
-		const savedId =
-			localStorage.getItem('currentUserId') ||
-			appSession?.currentUserId ||
-			(await readPersistedSessionUserId());
+/** Restore session from Dexie + PocketBase (startup and PWA foreground retries). */
+export async function restoreSession(opts: { retry?: boolean } = {}): Promise<boolean> {
+	if (!opts.retry) {
+		auth.loading = true;
+	}
 
-		if (savedId) {
-			user = await db.users.get(savedId);
+	const delays = opts.retry ? [0, 120, 350] : [0];
+	let restored = false;
+
+	for (const delay of delays) {
+		if (delay > 0) {
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
+		try {
+			if (await attemptRestoreSession()) {
+				restored = true;
+				break;
+			}
+		} catch (e) {
+			console.warn('[auth] restore attempt failed', e);
 		}
 
-		if (!user && appSession?.email) {
-			user = await db.users.where('email').equalsIgnoreCase(appSession.email).first();
-		}
+		const { hasRestorableSession } = await import('$lib/auth/sessionPersist');
+		if (!(await hasRestorableSession())) break;
+	}
 
-		if (!user) {
-			try {
-				user = await resolveUserFromPbSession(db);
-			} catch (pbErr) {
-				console.warn('[auth] PB fallback during restore failed', pbErr);
-			}
-		}
-
-		if (user && user.active !== false) {
-			auth.currentUser = user;
-			auth.isAuthenticated = true;
-
-			if (user.id) {
-				await persistAppSession({
-					userId: String(user.id),
-					email: user.email || appSession?.email
-				});
-			}
-
-			void refreshPbAuthIfNeeded().then(() => syncAppSessionPbBackup());
-			await applyQuickUnlockIfNeeded(user.id);
-			const { isQuickUnlockDevice } = await import('$lib/utils/device');
-			if (!isQuickUnlockDevice()) {
-				const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
-				markSessionActivity();
-				if (await enforceDesktopSessionIfExpired()) return;
-			}
-		} else {
-			auth.currentUser = null;
-			auth.isAuthenticated = false;
-			auth.locked = false;
-
-			try {
-				const { pb } = await import('$lib/db/pb');
-				if (pb.authStore.isValid || pb.authStore.token) {
-					pb.authStore.clear();
-				}
-				await clearAppSession();
-				if (appSession?.email) {
-					setLastLoginEmail(appSession.email);
-				}
-			} catch {
-				await clearAppSession();
-			}
-		}
-	} catch (e) {
-		console.warn('[auth] restore failed', e);
+	if (!restored && !opts.retry) {
 		auth.currentUser = null;
 		auth.isAuthenticated = false;
 		auth.locked = false;
-	} finally {
+	}
+
+	if (!opts.retry) {
 		auth.loading = false;
 	}
+
+	return restored;
 }
 
 export function unlockApp(): void {
@@ -275,6 +339,15 @@ export function setCurrentUser(user: any | null) {
 }
 
 async function handleAppVisible(): Promise<void> {
+	if (!auth.isAuthenticated) {
+		const { hasRestorableSession } = await import('$lib/auth/sessionPersist');
+		if (await hasRestorableSession()) {
+			await restoreSession({ retry: true });
+		}
+	}
+
+	if (!auth.isAuthenticated) return;
+
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');
 	if (isQuickUnlockDevice()) {
 		const { shouldLockAfterReturn, clearAppHidden, getIdleLockMs } = await import(
@@ -301,6 +374,12 @@ if (browser) {
 		if (document.visibilityState === 'hidden') {
 			void import('$lib/auth/deviceUnlock').then(({ markAppHidden }) => markAppHidden());
 		} else if (document.visibilityState === 'visible') {
+			void handleAppVisible();
+		}
+	});
+
+	window.addEventListener('pageshow', (event) => {
+		if (event.persisted) {
 			void handleAppVisible();
 		}
 	});

@@ -16,6 +16,7 @@
 	import { toast } from '$lib/stores/toast.svelte';
 	import { page } from '$app/state';
 	import { getLastLoginEmail } from '$lib/auth/sessionPersist';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	let email = $state(getLastLoginEmail());
 	let password = $state('');
@@ -44,6 +45,26 @@
 			? 'Your last sign-in email is filled in below. Use passkey or enter your password.'
 			: ''
 	);
+
+	// Session may restore after a PWA foreground retry — return to the app (quick unlock if needed).
+	$effect(() => {
+		if (auth.loading) return;
+		if (auth.isAuthenticated && auth.currentUser) {
+			goto('/calendar', { replaceState: true });
+		}
+	});
+
+	let loginRestoreAttempted = $state(false);
+	$effect(() => {
+		if (auth.loading || auth.isAuthenticated || loginRestoreAttempted) return;
+		loginRestoreAttempted = true;
+		void import('$lib/auth/sessionPersist').then(async ({ hasRestorableSession }) => {
+			if (await hasRestorableSession()) {
+				const { restoreSession } = await import('$lib/stores/auth.svelte');
+				await restoreSession({ retry: true });
+			}
+		});
+	});
 
 	async function lookupFreshUser(fallback?: User | null): Promise<User | null> {
 		const currentEmail = (email || '').trim().toLowerCase();

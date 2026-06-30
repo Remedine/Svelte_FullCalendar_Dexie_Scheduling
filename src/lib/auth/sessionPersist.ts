@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import type { AppSession } from '$lib/db';
+import type { AppSession, User } from '$lib/db';
 
 const LAST_LOGIN_EMAIL_KEY = 'ccw_last_login_email';
 
@@ -16,9 +16,65 @@ export function setLastLoginEmail(email: string | null | undefined): void {
 	}
 }
 
+export async function ensureDbOpen(): Promise<void> {
+	const { db } = await import('$lib/db');
+	if (!db.isOpen()) {
+		await db.open();
+	}
+}
+
 export async function readAppSession(): Promise<AppSession | undefined> {
+	await ensureDbOpen();
 	const { db } = await import('$lib/db');
 	return (await db.appSession.get('current')) || undefined;
+}
+
+export function parsePbModelFromAppSession(row: AppSession): Record<string, unknown> | null {
+	if (!row.pbModelJson) return null;
+	try {
+		return JSON.parse(row.pbModelJson) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
+/** Rebuild a Dexie user from durable appSession backup when the users row is temporarily missing. */
+export function buildUserFromAppSession(row: AppSession): User | null {
+	const model = parsePbModelFromAppSession(row);
+	const email = (row.email || (model?.email as string) || '').trim().toLowerCase();
+	const id = row.currentUserId || (model?.id as string);
+	if (!id && !email) return null;
+
+	const name =
+		(model?.name as string) ||
+		[model?.firstName, model?.lastName].filter(Boolean).join(' ').trim() ||
+		email.split('@')[0] ||
+		'Crew';
+
+	return {
+		id,
+		pbId: (model?.id as string) || id,
+		email: email || undefined,
+		name,
+		firstName: (model?.firstName as string) || undefined,
+		lastName: (model?.lastName as string) || undefined,
+		role: (model?.role as User['role']) || 'crew',
+		active: model?.active !== false,
+		verified: !!model?.verified,
+		forcePhotoUpdate: !!model?.forcePhotoUpdate,
+		photo: (model?.photo as string) || undefined,
+		pinHash: '',
+		forcePinUpdate: false,
+		createdAt: new Date(),
+		updatedAt: new Date()
+	};
+}
+
+export async function hasRestorableSession(): Promise<boolean> {
+	if (!browser) return false;
+	if (localStorage.getItem('currentUserId')) return true;
+	const row = await readAppSession().catch(() => undefined);
+	return !!(row?.currentUserId || row?.pbToken);
 }
 
 export async function persistAppSession(opts: {
@@ -32,6 +88,7 @@ export async function persistAppSession(opts: {
 	setLastLoginEmail(email);
 	localStorage.setItem('currentUserId', userId);
 
+	await ensureDbOpen();
 	const { db } = await import('$lib/db');
 	const { pb } = await import('$lib/db/pb');
 
