@@ -1964,19 +1964,28 @@
 
 		/* Touch-friendly event resizing on mobile.
 		   Drag the top or bottom edge (pill handles) to change length; move uses the + handle only.
-		   Resize edge-scroll targets .fc-scroller; move edge-scroll uses FullCalendar dragScroll.
-		   Crew avatars move to top-left so the bottom edge stays clear for resizing.
+		   Avatars sit bottom-right (inset above resizers); time stays top-left clear of drag handle.
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
-			top: 3px;
-			bottom: auto;
-			left: 3px;
-			right: auto;
+			top: auto;
+			bottom: 10px;
+			left: auto;
+			right: 3px;
+		}
+
+		:global(.fc-timegrid-event .fc-event__crew-avatar) {
+			width: 18px;
+			height: 18px;
+			font-size: 8px;
+		}
+
+		:global(.fc-timegrid-event .fc-event-time) {
+			padding-right: 32px;
 		}
 
 		:global(.fc-timegrid-event .fc-event-title) {
-			padding-bottom: 10px;
-			padding-top: 28px;
+			padding-bottom: 22px;
+			padding-top: 2px;
 		}
 
 		:global(.fc-event-resizer) {
