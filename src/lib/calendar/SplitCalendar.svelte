@@ -719,22 +719,36 @@
 		return filters.statuses.includes('cancelled') || jumpShowCancelled;
 	}
 
-	// Job window must cover both today AND the focused/selected day (±2 months each way).
+	// Job window must cover today, the selected day, AND the month-picker's visible month (±2 months each way).
 	// A fixed ±2 months from "now" drops appointments moved to September while viewing June.
 	let loadedJobsRangeStart: Date | null = null;
 	let loadedJobsRangeEnd: Date | null = null;
+	let visiblePickerYear = $state(new Date().getFullYear());
+	let visiblePickerMonth = $state(new Date().getMonth());
+	let visibleMonthReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function getVisibleMonthAnchorDate(): Date {
+		const anchor = new Date(visiblePickerYear, visiblePickerMonth, 15);
+		anchor.setHours(12, 0, 0, 0);
+		return anchor;
+	}
 
 	function getCalendarJobsRange(focusDateStr: string = selectedDate): { start: Date; end: Date } {
 		const today = new Date();
 		today.setHours(12, 0, 0, 0);
 		const focus = parseLocalDate(focusDateStr);
 		const focusMs = isNaN(focus.getTime()) ? today.getTime() : focus.getTime();
+		const visibleAnchor = getVisibleMonthAnchorDate();
 
-		const start = new Date(Math.min(today.getTime(), focusMs));
+		const start = new Date(
+			Math.min(today.getTime(), focusMs, visibleAnchor.getTime())
+		);
 		start.setMonth(start.getMonth() - 2);
 		start.setHours(0, 0, 0, 0);
 
-		const end = new Date(Math.max(today.getTime(), focusMs));
+		const end = new Date(
+			Math.max(today.getTime(), focusMs, visibleAnchor.getTime())
+		);
 		end.setMonth(end.getMonth() + 2);
 		end.setHours(23, 59, 59, 999);
 
@@ -1395,6 +1409,18 @@
 		stepMonthPicker = fn;
 	}
 
+	function handleVisibleMonthChange(year: number, month: number) {
+		visiblePickerYear = year;
+		visiblePickerMonth = month;
+
+		if (visibleMonthReloadTimer) clearTimeout(visibleMonthReloadTimer);
+		visibleMonthReloadTimer = setTimeout(async () => {
+			visibleMonthReloadTimer = null;
+			if (!calendarJobsRangeNeedsReload()) return;
+			await reloadJobsForCalendarRange();
+		}, 150);
+	}
+
 	async function handleDateSelect(dateStr: string) {
 		clearJobHighlight();
 		clearJumpCancelledMode();
@@ -1440,6 +1466,7 @@
 				jobs={filteredJobs}
 				bind:selectedDate
 				onDateSelect={handleDateSelect}
+				onVisibleMonthChange={handleVisibleMonthChange}
 				appointmentDragActive={appointmentDragActive}
 				onRegisterNavigator={registerMonthNavigator}
 			/>

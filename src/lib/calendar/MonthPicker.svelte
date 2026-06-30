@@ -11,12 +11,14 @@
 		selectedDate = $bindable(getLocalDateString()),
 		onDateSelect,
 		onRegisterNavigator,
+		onVisibleMonthChange,
 		appointmentDragActive = false
 	}: {
 		jobs?: any[];
 		selectedDate?: string;
 		onDateSelect?: (dateStr: string) => void;
 		onRegisterNavigator?: (stepMonth: (delta: number) => void) => void;
+		onVisibleMonthChange?: (year: number, month: number) => void;
 		appointmentDragActive?: boolean;
 	} = $props();
 
@@ -144,6 +146,11 @@
 
 	$effect(() => {
 		onRegisterNavigator?.(changeMonth);
+	});
+
+	// Notify parent when the user browses months (nav buttons, edge-dwell, grey-day select) so job dots can prefetch.
+	$effect(() => {
+		onVisibleMonthChange?.(currentYear, currentMonth);
 	});
 
 	// Keep the visible month in sync when the parent sets selectedDate (e.g. jump from job details).
