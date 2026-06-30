@@ -737,7 +737,8 @@
 			<div class="profile__security-item profile__security-item--stacked">
 				<span class="profile__security-label">Quick unlock (this device)</span>
 				<p class="profile__security-hint">
-					PIN or fingerprint when reopening the app. Does not replace your account password.
+					Unlock this device after you've signed in — PIN or fingerprint when returning to the app.
+					Does not replace your account password.
 				</p>
 				{#if quickUnlockOn}
 					<p class="profile__security-status">Enabled on this device</p>

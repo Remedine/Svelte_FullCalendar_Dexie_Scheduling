@@ -124,6 +124,7 @@ export async function restoreSession(): Promise<void> {
 
 export function unlockApp(): void {
 	auth.locked = false;
+	void import('$lib/auth/deviceUnlock').then(({ clearAppHidden }) => clearAppHidden());
 }
 
 export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
@@ -146,6 +147,8 @@ export async function logout() {
 
 	try {
 		const { db, processSyncQueue, persistSessionUserId } = await import('$lib/db');
+		const { snapshotDeviceAuth, restoreDeviceAuth } = await import('$lib/auth/deviceUnlock');
+		const deviceAuthSnapshot = await snapshotDeviceAuth();
 		if (navigator.onLine) {
 			try {
 				await processSyncQueue();
@@ -161,6 +164,7 @@ export async function logout() {
 		}
 		await db.delete();
 		await db.open();
+		await restoreDeviceAuth(deviceAuthSnapshot);
 		await persistSessionUserId(null);
 	} catch (err) {
 		console.warn('[auth] Failed to clear local Dexie data on logout', err);
@@ -173,6 +177,9 @@ export function setCurrentUser(user: any | null) {
 	auth.locked = false;
 
 	if (user?.id) {
+		void import('$lib/auth/deviceUnlock').then(({ ensureDeviceAuthMatchesUser }) =>
+			ensureDeviceAuthMatchesUser(String(user.id))
+		);
 		const id = user.id.toString();
 		localStorage.setItem('currentUserId', id);
 		void import('$lib/db').then(({ persistSessionUserId }) => persistSessionUserId(id));
@@ -185,10 +192,19 @@ export function setCurrentUser(user: any | null) {
 if (browser) {
 	void restoreSession();
 
-	// Re-lock when the PWA returns from background (if quick unlock is enabled).
+	// Re-lock after extended background idle (not every tab switch).
 	document.addEventListener('visibilitychange', () => {
-		if (document.visibilityState === 'visible') {
-			void lockAppIfQuickUnlockEnabled();
+		if (document.visibilityState === 'hidden') {
+			void import('$lib/auth/deviceUnlock').then(({ markAppHidden }) => markAppHidden());
+		} else if (document.visibilityState === 'visible') {
+			void import('$lib/auth/deviceUnlock').then(
+				async ({ shouldLockAfterReturn, clearAppHidden }) => {
+					if (shouldLockAfterReturn()) {
+						await lockAppIfQuickUnlockEnabled();
+					}
+					clearAppHidden();
+				}
+			);
 		}
 	});
 } else {

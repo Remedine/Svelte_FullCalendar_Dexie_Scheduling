@@ -1,8 +1,21 @@
 # Capital City Windows Scheduler — Master Plan
 
-**Deadline: July 1, 2026 (required)**  
-**Today: June 18, 2026 — 13 days remaining**  
+**Last updated:** June 30, 2026  
 **Status:** Single execution plan. Supersedes `TODO.md` and prior session plans.
+
+### Current status
+
+| Area | Status | Notes |
+|------|--------|-------|
+| **Batch A** — Sync integrity | ✅ **Complete** | Mutex, no-drop-on-failure, relation resolution, paginated pull, realtime conflict — verified in code + tests |
+| **Batch B** — Data correctness | ✅ **Complete** | cancelNotes, tax normalization, `jobDataToPbPayload`, logout sync flush — verified |
+| **Batch C** — Scale (~900) | 🟡 **Partial** | Clients page uses bulk invoice map; **jobs page still O(n) `getInvoiceForJob` loop** (C1); `allocateInvoiceNumber` still local-only (C5) |
+| **Batch D** — Security | ❌ **Not started** | No startup guard on `INTERNAL_SECRET`; `send-welcome` / `mark-verified` lack admin auth; invoice send-email is auth-only not admin; PB rules still over-permissive |
+| **Batch E** — P2 polish | 🟡 **Partial** | E1 calendar jump uses `toDateString`; E4 overdue still datetime compare; E5 root `/` still stub; E2/E3 open |
+| **Priority 1 — Import** | ❌ **Not started** | No `src/lib/import/`, no admin wizard, no API route |
+| **Tests** | ✅ **Green** | 130 passing, 7 skipped (`pnpm test` Jun 30) |
+
+**Read:** Deliverables 1 (production-stable) and 2 (invoicing) are in good shape. Deliverable 3 (~900 legacy import) has not started and needs a dedicated sprint after C + D. Security (Batch D) is the highest-risk gap for production.
 
 > **Authority:** This document is the only execution plan. Technical specs remain in [`JOBS_AND_INVOICES_SPEC.md`](JOBS_AND_INVOICES_SPEC.md) and [`TESTING_PLAN.md`](TESTING_PLAN.md) as reference — do not delete them; they record *what* to build, not *when* or *in what order*.
 
@@ -18,11 +31,11 @@ A June 2026 code review found the app is **functionally complete** but the **syn
 - `cancelJob` overwrites `notes` instead of `cancelNotes`
 - Tax rate percent/decimal mismatch corrupts invoice totals on legacy data
 
-**Recommendation:** Fix sync integrity (Batch A) before any bulk import. This is not optional for a safe July 1 launch.
+**Recommendation:** Fix sync integrity (Batch A) before any bulk import. Batch A is complete; import can proceed once Batch D is addressed.
 
 ---
 
-## July 1 deliverables
+## Target deliverables
 
 | # | Deliverable | Done when |
 |---|-------------|-----------|
@@ -40,7 +53,7 @@ Phases 0–7 of [`JOBS_AND_INVOICES_SPEC.md`](JOBS_AND_INVOICES_SPEC.md) are com
 
 ---
 
-## Priority 0 — Code review fixes (Jun 18–22)
+## Priority 0 — Code review fixes
 
 ### Batch A — Sync integrity (highest leverage, 2–3 days) — **COMPLETE (Jun 18)**
 
@@ -71,46 +84,48 @@ Implemented: B1 cancelNotes fix, B2 tax normalization (`$lib/utils/tax.ts`), B3 
 | B5 | Invoice update JSON wrong field names | `index.ts` ~1830 | Map `jobId`/`clientId` → `job`/`client` |
 | B6 | Logout wipes unsynced queue | `auth.svelte.ts` 24–27 | Flush queue before delete or warn if non-empty |
 
-### Batch C — Scale for ~900 records (1 day)
+### Batch C — Scale for ~900 records (1 day) — **PARTIAL (Jun 30)**
 
-| ID | Issue | File(s) | Fix |
+C2/C3 largely addressed on clients page (`invoices.toArray()` + `Map`). C1 and C5 remain open.
+
+| ID | Issue | File(s) | Fix | Status |
 |----|-------|---------|-----|
-| C1 | Jobs page O(n) sequential invoice lookups | `jobs/+page.svelte` 81–92 | One `invoices.toArray()` → `Map<jobId, Invoice>` |
-| C2 | Clients page N+1 on expand | `clients/+page.svelte` | Reuse invoice map per expand |
-| C3 | Clients mount loads all jobs | `clients/+page.svelte` | Index jobs by `clientId` in one pass |
-| C4 | Dual Dexie job rows (local UUID + PB id) | `pb.ts`, `index.ts` | Canonical: `id = localUuid`, `pbId = serverId` |
-| C5 | `allocateInvoiceNumber` local-only | `index.ts` 884–911 | Server-side allocation or block offline generate |
+| C1 | Jobs page O(n) sequential invoice lookups | `jobs/+page.svelte` 81–92 | One `invoices.toArray()` → `Map<jobId, Invoice>` | ❌ Open |
+| C2 | Clients page N+1 on expand | `clients/+page.svelte` | Reuse invoice map per expand | ✅ Done |
+| C3 | Clients mount loads all jobs | `clients/+page.svelte` | Index jobs by `clientId` in one pass | ✅ Done |
+| C4 | Dual Dexie job rows (local UUID + PB id) | `pb.ts`, `index.ts` | Canonical: `id = localUuid`, `pbId = serverId` | 🟡 `dedupJobs` helpers in place |
+| C5 | `allocateInvoiceNumber` local-only | `index.ts` 884–911 | Server-side allocation or block offline generate | ❌ Open |
 
-### Batch D — Security hardening (1–2 days)
+### Batch D — Security hardening (1–2 days) — **NOT STARTED**
 
-| ID | Issue | File(s) | Fix |
+| ID | Issue | File(s) | Fix | Status |
 |----|-------|---------|-----|
-| D1 | Empty `INTERNAL_SECRET` bypass | `pocketbase-main.go` 190–194 | Fail startup if unset or < 32 chars |
-| D2 | `send-welcome` no auth | `api/auth/send-welcome/+server.ts` | `assertAdmin(token)` |
-| D3 | `mark-verified` no auth | `api/auth/mark-verified/+server.ts` | Admin auth + real internal PB route |
-| D4 | Invoice send: no admin check | `api/invoices/send-email/+server.ts` | `assertAdmin()` |
-| D5 | Users `listRule` over-permissive | `pb_migrations/1781120207_updated_users.js` | Admin-only list or `id = @request.auth.id` |
-| D6 | Invoice PB rules wrong | `pb_migrations/1781125204_*.js` | New migration: `@request.auth.role = "admin"` |
-| D7 | Cron `X-Internal-Secret` ignored on collections | `api/cron/process-crew-notifications/` | Internal PB routes with app-level privileges |
-| D8 | `crewNotificationLog` field missing | PB migration needed | Add field; fix dedup |
-| D9 | Internal routes return auth links in JSON | `pocketbase-main.go` | Return `{ success: true }` only; email links via Brevo |
+| D1 | Empty `INTERNAL_SECRET` bypass | `pocketbase-main.go` 190–194 | Fail startup if unset or < 32 chars | ❌ Open |
+| D2 | `send-welcome` no auth | `api/auth/send-welcome/+server.ts` | `assertAdmin(token)` | ❌ Open |
+| D3 | `mark-verified` no auth | `api/auth/mark-verified/+server.ts` | Admin auth + real internal PB route | ❌ Open |
+| D4 | Invoice send: no admin check | `api/invoices/send-email/+server.ts` | `assertAdmin()` | ❌ Open (auth-only today) |
+| D5 | Users `listRule` over-permissive | `pb_migrations/1781120207_updated_users.js` | Admin-only list or `id = @request.auth.id` | ❌ Open (`id != ""`) |
+| D6 | Invoice PB rules wrong | `pb_migrations/1781125204_*.js` | New migration: `@request.auth.role = "admin"` | ❌ Open (`id = @request.auth.id` on invoices) |
+| D7 | Cron `X-Internal-Secret` ignored on collections | `api/cron/process-crew-notifications/` | Internal PB routes with app-level privileges | 🟡 Cron checks secret; PB collection access unclear |
+| D8 | `crewNotificationLog` field missing | PB migration needed | Add field; fix dedup | ❌ Unknown |
+| D9 | Internal routes return auth links in JSON | `pocketbase-main.go` | Return `{ success: true }` only; email links via Brevo | 🟡 Partial (Brevo used; links still in some responses) |
 
-### Batch E — P2 fixes (if time before import)
+### Batch E — P2 fixes (if time before import) — **PARTIAL**
 
-| ID | Issue | Fix |
+| ID | Issue | Fix | Status |
 |----|-------|-----|
-| E1 | Calendar jump UTC date | Use `toDateString()` in `JobDetailsModal` |
-| E2 | Docx ignores legacy `hours` key | `quantity ?? hours ?? 1` in docx builder |
-| E3 | Modal actions lack try/catch | Toast errors on status/cancel/save failures |
-| E4 | `isInvoiceOverdue` datetime compare | Compare calendar dates only |
-| E5 | Root `/` stub | Redirect to `/calendar` or `/login` |
-| E6 | Railway cron schedule | Configure in Railway dashboard |
+| E1 | Calendar jump UTC date | Use `toDateString()` in `JobDetailsModal` | ✅ Done |
+| E2 | Docx ignores legacy `hours` key | `quantity ?? hours ?? 1` in docx builder | ❌ Open |
+| E3 | Modal actions lack try/catch | Toast errors on status/cancel/save failures | ❌ Open |
+| E4 | `isInvoiceOverdue` datetime compare | Compare calendar dates only | ❌ Open |
+| E5 | Root `/` stub | Redirect to `/calendar` or `/login` | ❌ Open |
+| E6 | Railway cron schedule | Configure in Railway dashboard | ❓ Unverified |
 
 ---
 
-## Priority 1 — Legacy import (Jun 23–29, after Batch A)
+## Priority 1 — Legacy import (after Batch A + D) — **NOT STARTED**
 
-**Blocked until Batch A complete.** Importing into a broken sync layer will strand data.
+Batch A unblocked import, but no import code exists yet. Do not bulk-import until Batch D is addressed.
 
 **Data sources:**
 1. Client CSV (current clients)
@@ -127,54 +142,58 @@ Implemented: B1 cancelNotes fix, B2 tax normalization (`$lib/utils/tax.ts`), B3 
 
 **Rules:** Dry-run first; idempotent re-runs; preserve legacy `invoiceNumber`; manual review queue for unmatched clients.
 
-**Sample files needed by Jun 20:** one client CSV, one Asana export, one OCR CSV, 2–3 scans.
+**Sample files needed before dry-run:** one client CSV, one Asana export, one OCR CSV, 2–3 scans.
 
 ---
 
-## Priority 2 — Ship (Jun 30 – Jul 1)
+## Priority 2 — Production readiness — **IN PROGRESS**
 
-- Full import verification in `/jobs` + `JobDetailsModal` (spot-check 50 records)
-- Invoice E2E smoke on Railway
-- Bug-fix buffer for import fallout
-- Final deploy; monitor only on Jul 1
+**Next up (in order):**
+1. **C1** — bulk invoice map on `/jobs` (blocks usability at scale even without import)
+2. **D1–D4** — lock down API routes (highest production risk)
+3. Invoice E2E smoke on Railway
+4. Deploy when C + D1–D4 are done
+
+**Can follow after initial deploy:**
+- Full ~900 import sprint (needs wizard + parsers + sample files)
+- D5–D9 PB migrations
+- E2–E6 polish
 
 ---
 
-## Descoped (post–July 1)
+## Backlog (descoped for now)
 
 Automated backups (spec §14), web push, mobile job list under calendar, client archive UI, admin photo at user create, QuickBooks/CSV export, Dexie encryption, full E2E in CI, `SyncStatus` mount, `/calendar/split` dedup.
 
 ---
 
-## Day-by-day schedule
+## Work order (recommended sequence)
 
-| Date | Focus |
-|------|-------|
-| **Jun 18** | A1–A2: queue integrity + mutex |
-| **Jun 19** | A3–A7: relation resolution, paginated pull, realtime conflict |
-| **Jun 20** | B1–B6: cancelJob, tax rate, PB field mapping |
-| **Jun 21** | C1–C5: bulk invoice map, ID canonicalization |
-| **Jun 22** | D1–D9: security + PB migrations + cron |
-| **Jun 23** | Import parsers (client, Asana, OCR); receive sample files |
-| **Jun 24** | Import wizard + 50-row dry-run test |
-| **Jun 25–26** | Full ~900 record import in batches |
-| **Jun 27–29** | Verify in UI; fix fallout; E1–E6 if time |
-| **Jun 30** | Final smoke; deploy |
-| **Jul 1** | **Ship** |
+| Step | Focus | Status |
+|------|-------|--------|
+| 1 | A1–A7: sync integrity | ✅ Done |
+| 2 | B1–B6: data correctness | ✅ Done |
+| 3 | C1–C5: scale for ~900 records | 🟡 Partial — clients done, jobs C1 open |
+| 4 | D1–D9: security + PB migrations + cron | ❌ Not started |
+| 5 | Import parsers + sample files | ❌ Not started |
+| 6 | Import wizard + dry-run | ❌ Not started |
+| 7 | Full ~900 record import in batches | ❌ Not started |
+| 8 | Verify in UI; E1–E6 polish | 🟡 Partial |
+| 9 | Production smoke + deploy | 🔄 Blocked on C1 + D1–D4 |
 
 ---
 
-## July 1 acceptance checklist
+## Acceptance checklist
 
-- [ ] Batch A complete — queue never drops failed items; sync mutex in place
-- [ ] B1 + B2 fixed — cancel notes and tax rate verified
+- [x] Batch A complete — queue never drops failed items; sync mutex in place
+- [x] B1 + B2 fixed — cancel notes and tax rate verified
 - [ ] C1 complete — jobs page loads in < 2s with ~900 jobs
 - [ ] D1–D6 complete — API routes locked down; PB rules fixed
 - [ ] ~900 imported records searchable; files downloadable in modal
-- [ ] Full invoice lifecycle works on Railway
+- [ ] Full invoice lifecycle works on Railway (needs smoke test)
 - [ ] Crew assignment emails fire (cron configured)
 - [ ] Zero open P0/P1 bugs
-- [ ] `pnpm test` green
+- [x] `pnpm test` green (130 pass, 7 skip — Jun 30)
 
 ---
 
@@ -184,7 +203,7 @@ Automated backups (spec §14), web push, mobile job list under calendar, client 
 |----------|--------|
 | `TODO.md` | **Superseded** — replaced with pointer to this file |
 | Session `plan.json` files | Empty; no action |
-| Prior "July 1 Finish Plan" (Cursor) | **Superseded** by this file |
+| Prior session finish plans (Cursor) | **Superseded** by this file |
 | `JOBS_AND_INVOICES_SPEC.md` | **Kept** — technical spec (data model, UI requirements) |
 | `TESTING_PLAN.md` | **Kept** — testing strategy; run tests per Batch A–D |
 | `invoice-double-window-pattern.md` | **Kept** — docx layout reference |

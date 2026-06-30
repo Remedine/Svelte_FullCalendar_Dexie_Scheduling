@@ -15,6 +15,12 @@ export interface DeviceAuthSettings {
 const MIN_PIN_LENGTH = 4;
 const MAX_PIN_LENGTH = 8;
 
+/** Re-lock only after the app was in the background at least this long (2 hours). */
+export const IDLE_LOCK_MS = 2 * 60 * 60 * 1000;
+
+const HIDDEN_AT_KEY = 'ccw_app_hidden_at';
+const QUICK_UNLOCK_DECLINED_KEY = 'ccw_quick_unlock_declined';
+
 function bufferToBase64url(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
 	let binary = '';
@@ -62,6 +68,66 @@ export async function getDeviceAuthSettings(): Promise<DeviceAuthSettings | null
 export async function isQuickUnlockEnabled(): Promise<boolean> {
 	const settings = await readSettings();
 	return !!settings?.enabled;
+}
+
+export function markAppHidden(): void {
+	if (!browser) return;
+	sessionStorage.setItem(HIDDEN_AT_KEY, String(Date.now()));
+}
+
+export function clearAppHidden(): void {
+	if (!browser) return;
+	sessionStorage.removeItem(HIDDEN_AT_KEY);
+}
+
+/** True when the app was backgrounded long enough to require quick unlock again. */
+export function shouldLockAfterReturn(idleMs: number = IDLE_LOCK_MS): boolean {
+	if (!browser) return false;
+	const raw = sessionStorage.getItem(HIDDEN_AT_KEY);
+	if (!raw) return false;
+	const hiddenAt = Number(raw);
+	if (!Number.isFinite(hiddenAt)) return false;
+	return Date.now() - hiddenAt >= idleMs;
+}
+
+export function declineQuickUnlockSetup(userId: string): void {
+	if (!browser) return;
+	localStorage.setItem(QUICK_UNLOCK_DECLINED_KEY, userId);
+}
+
+export function clearQuickUnlockDecline(): void {
+	if (!browser) return;
+	localStorage.removeItem(QUICK_UNLOCK_DECLINED_KEY);
+}
+
+export async function shouldOfferQuickUnlockSetup(userId: string): Promise<boolean> {
+	if (!userId) return false;
+	if (await isQuickUnlockEnabled()) return false;
+	if (browser && localStorage.getItem(QUICK_UNLOCK_DECLINED_KEY) === userId) return false;
+	return true;
+}
+
+/** Clear quick unlock when a different user signs in on this device. */
+export async function ensureDeviceAuthMatchesUser(userId: string): Promise<void> {
+	try {
+		const settings = await readSettings();
+		if (settings?.userId && settings.userId !== userId) {
+			await disableQuickUnlock();
+			clearQuickUnlockDecline();
+		}
+	} catch {
+		// Dexie may be closed during logout or test teardown
+	}
+}
+
+export async function snapshotDeviceAuth(): Promise<DeviceAuthSettings | undefined> {
+	return (await readSettings()) ?? undefined;
+}
+
+export async function restoreDeviceAuth(snapshot: DeviceAuthSettings | undefined): Promise<void> {
+	if (!snapshot?.enabled) return;
+	const { db } = await import('$lib/db');
+	await db.deviceAuth.put(snapshot);
 }
 
 export async function shouldRequireUnlock(userId?: string | null): Promise<boolean> {
@@ -151,11 +217,13 @@ export async function enableQuickUnlock(opts: {
 		email: opts.email
 	};
 	await db.deviceAuth.put(settings);
+	clearQuickUnlockDecline();
 }
 
 export async function disableQuickUnlock(): Promise<void> {
 	const { db } = await import('$lib/db');
 	await db.deviceAuth.delete('current').catch(() => {});
+	clearQuickUnlockDecline();
 }
 
 export async function verifyPinUnlock(pin: string): Promise<boolean> {

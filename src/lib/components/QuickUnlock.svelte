@@ -8,8 +8,10 @@
 
 	let pin = $state('');
 	let error = $state('');
-	let loading = $state(false);
+	let bioLoading = $state(false);
+	let pinLoading = $state(false);
 	let settings = $state<Awaited<ReturnType<typeof getDeviceAuthSettings>>>(null);
+	let bioAutoAttempted = $state(false);
 
 	$effect(() => {
 		void getDeviceAuthSettings().then((s) => {
@@ -17,20 +19,30 @@
 		});
 	});
 
-	async function tryBiometric() {
-		loading = true;
-		error = '';
+	// )=- Try biometric immediately when the overlay opens (PIN remains fallback).
+	$effect(() => {
+		if (!settings?.biometricEnabled || bioAutoAttempted) return;
+		bioAutoAttempted = true;
+		void tryBiometric(true);
+	});
+
+	async function tryBiometric(silent = false) {
+		bioLoading = true;
+		if (!silent) error = '';
 		try {
 			const ok = await unlockWithBiometric();
 			if (ok) {
+				pin = '';
 				unlockApp();
-			} else {
-				error = 'Biometric unlock failed. Try your PIN or sign out.';
+			} else if (!silent) {
+				error = 'Biometric unlock failed. Try your PIN or sign in again.';
 			}
 		} catch (e: any) {
-			error = e?.message || 'Biometric unlock unavailable';
+			if (!silent) {
+				error = e?.message || 'Biometric unlock unavailable';
+			}
 		} finally {
-			loading = false;
+			bioLoading = false;
 		}
 	}
 
@@ -39,7 +51,7 @@
 			error = 'Enter your PIN';
 			return;
 		}
-		loading = true;
+		pinLoading = true;
 		error = '';
 		try {
 			const ok = await verifyPinUnlock(pin);
@@ -48,9 +60,17 @@
 				unlockApp();
 			} else {
 				error = 'Incorrect PIN';
+				pin = '';
 			}
 		} finally {
-			loading = false;
+			pinLoading = false;
+		}
+	}
+
+	function onPinInput() {
+		error = '';
+		if (pin.length >= 4 && settings?.pinEnabled) {
+			void tryPin();
 		}
 	}
 
@@ -60,22 +80,36 @@
 		await logout();
 		goto('/login', { replaceState: true });
 	}
+
+	const loading = $derived(bioLoading || pinLoading);
 </script>
 
 <div class="quick-unlock">
 	<div class="quick-unlock__card">
 		<h2 class="quick-unlock__title">Unlock app</h2>
-		<p class="quick-unlock__subtitle">Verify it's you to continue</p>
+		<p class="quick-unlock__subtitle">
+			{#if settings?.biometricEnabled && settings?.pinEnabled}
+				Use fingerprint, Face ID, or your quick PIN
+			{:else if settings?.biometricEnabled}
+				Confirm with fingerprint or Face ID
+			{:else}
+				Enter your quick PIN to continue
+			{/if}
+		</p>
 
 		{#if settings?.biometricEnabled}
 			<button
 				type="button"
 				class="quick-unlock__bio-btn"
-				onclick={tryBiometric}
+				onclick={() => tryBiometric(false)}
 				disabled={loading}
 			>
-				{loading ? 'Checking…' : 'Use fingerprint / Face ID'}
+				{bioLoading ? 'Checking…' : 'Use fingerprint / Face ID'}
 			</button>
+		{/if}
+
+		{#if settings?.biometricEnabled && settings?.pinEnabled}
+			<p class="quick-unlock__or">or</p>
 		{/if}
 
 		{#if settings?.pinEnabled}
@@ -95,17 +129,19 @@
 					pattern="[0-9]*"
 					maxlength="8"
 					autocomplete="off"
+					placeholder="••••"
 					bind:value={pin}
+					oninput={onPinInput}
 					disabled={loading}
 				/>
-				<button type="submit" class="quick-unlock__pin-btn" disabled={loading}>
-					Unlock
+				<button type="submit" class="quick-unlock__pin-btn" disabled={loading || !pin.trim()}>
+					{pinLoading ? 'Checking…' : 'Unlock with PIN'}
 				</button>
 			</form>
 		{/if}
 
 		{#if error}
-			<p class="quick-unlock__error">{error}</p>
+			<p class="quick-unlock__error" role="alert">{error}</p>
 		{/if}
 
 		<button type="button" class="quick-unlock__fallback" onclick={useFullLogin} disabled={loading}>
@@ -146,12 +182,12 @@
 		margin: 0 0 var(--space-6);
 		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
+		line-height: 1.5;
 	}
 
 	.quick-unlock__bio-btn {
 		width: 100%;
 		padding: var(--space-4);
-		margin-bottom: var(--space-4);
 		border: none;
 		border-radius: var(--radius-md);
 		background: var(--color-primary);
@@ -164,9 +200,19 @@
 		background: var(--color-primary-hover);
 	}
 
+	.quick-unlock__bio-btn:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
+	.quick-unlock__or {
+		margin: var(--space-4) 0;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+	}
+
 	.quick-unlock__pin-form {
 		text-align: left;
-		margin-bottom: var(--space-4);
 	}
 
 	.quick-unlock__label {
@@ -198,18 +244,29 @@
 		cursor: pointer;
 	}
 
+	.quick-unlock__pin-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
 	.quick-unlock__error {
 		color: var(--color-danger);
 		font-size: var(--font-size-sm);
-		margin: 0 0 var(--space-3);
+		margin: var(--space-3) 0 0;
 	}
 
 	.quick-unlock__fallback {
+		margin-top: var(--space-5);
 		border: none;
 		background: none;
 		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
 		text-decoration: underline;
 		cursor: pointer;
+	}
+
+	.quick-unlock__fallback:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 </style>

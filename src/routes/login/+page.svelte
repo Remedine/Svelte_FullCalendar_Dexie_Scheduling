@@ -8,7 +8,7 @@
 	import ForcePhotoUpdate from '$lib/components/ForcePhotoUpdate.svelte';
 	import QuickUnlockSetup from '$lib/components/QuickUnlockSetup.svelte';
 	import { canUsePasskeys } from '$lib/auth/passkeys';
-	import { isQuickUnlockEnabled } from '$lib/auth/deviceUnlock';
+	import { shouldOfferQuickUnlockSetup } from '$lib/auth/deviceUnlock';
 
 	let email = $state('');
 	let password = $state('');
@@ -76,7 +76,7 @@
 			showForcePhoto = true;
 			return;
 		}
-		if (!(await isQuickUnlockEnabled())) {
+		if (await shouldOfferQuickUnlockSetup(String(localUser.id))) {
 			quickUnlockUser = localUser;
 			showQuickUnlockSetup = true;
 			return;
@@ -149,7 +149,7 @@
 		}
 	}
 
-	// Re-check Dexie after WelcomeModal completes (the Welcome step only sets verified, not forcePhotoUpdate).
+	// Re-check Dexie after WelcomeModal completes, then run the same post-auth gates.
 	async function checkPhotoRequirementAndContinue() {
 		const currentEmail = (email || '').trim().toLowerCase();
 		if (!currentEmail) {
@@ -167,9 +167,8 @@
 					(await db.users.where('name').equalsIgnoreCase(guess).first());
 			}
 
-			if (fresh && userNeedsPhoto(fresh)) {
-				forcePhotoUser = fresh;
-				showForcePhoto = true;
+			if (fresh) {
+				await continueAfterAuth(fresh);
 			} else {
 				goto('/calendar', { replaceState: true });
 			}
@@ -299,13 +298,17 @@
 						onclick={handlePasskeyLogin}
 						disabled={isLoading}
 					>
-						Sign in with fingerprint / passkey
+						Sign in with passkey
 					</button>
 				{/if}
 			</form>
 
 			<p class="login-card__help">
-				Sign in with email and password{#if passkeysAvailable}, or use a passkey registered in Profile (not the same as quick-unlock PIN){/if}.
+				Sign in with email and password.
+				{#if passkeysAvailable}
+					Passkeys are for signing in — device unlock (PIN / fingerprint) is optional and set up after
+					login or in Profile.
+				{/if}
 			</p>
 			{/if}
 		</div>
@@ -325,10 +328,15 @@
 	{#if showForcePhoto && forcePhotoUser}
 		<ForcePhotoUpdate
 			user={forcePhotoUser}
-			onClose={() => {
+			onClose={async () => {
+				const user = forcePhotoUser;
 				showForcePhoto = false;
 				forcePhotoUser = null;
-				goto('/calendar', { replaceState: true });
+				if (user) {
+					await continueAfterAuth(user);
+				} else {
+					goto('/calendar', { replaceState: true });
+				}
 			}}
 		/>
 	{/if}

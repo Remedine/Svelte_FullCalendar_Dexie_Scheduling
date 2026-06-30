@@ -1,5 +1,6 @@
 <script lang="ts">
 	import {
+		declineQuickUnlockSetup,
 		enableQuickUnlock,
 		isPlatformAuthenticatorAvailable,
 		validatePinFormat
@@ -70,9 +71,11 @@
 
 <div class="quick-unlock-setup">
 	<div class="quick-unlock-setup__card">
-		<h2 class="quick-unlock-setup__title">Faster unlock</h2>
+		<h2 class="quick-unlock-setup__title">Unlock this device</h2>
 		<p class="quick-unlock-setup__intro">
-			Optional: use your device fingerprint, Face ID, or a quick PIN when reopening the app.
+			Optional layer for <strong>this phone or tablet</strong> — fingerprint, Face ID, or a quick PIN
+			when you return to the app. Does not change your account password. You can set this up later in
+			Profile.
 		</p>
 
 		{#if biometricAvailable}
@@ -115,8 +118,16 @@
 		<button type="button" class="quick-unlock-setup__primary" onclick={save} disabled={loading}>
 			{loading ? 'Saving…' : 'Enable quick unlock'}
 		</button>
-		<button type="button" class="quick-unlock-setup__skip" onclick={onSkip} disabled={loading}>
-			Not now
+		<button
+			type="button"
+			class="quick-unlock-setup__skip"
+			onclick={() => {
+				declineQuickUnlockSetup(userId);
+				onSkip();
+			}}
+			disabled={loading}
+		>
+			Skip for now
 		</button>
 	</div>
 </div>
