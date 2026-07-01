@@ -70,6 +70,9 @@
 	let restoreConfirmText = $state('');
 	let restoreRestoring = $state(false);
 	let uploadFileInput = $state<HTMLInputElement | null>(null);
+	/** Prevents the backups-tab $effect from re-fetching after ensureFreshAdminSession touches auth. */
+	let backupListPrimedForTab = false;
+	let backupListLoadInFlight: Promise<void> | null = null;
 
 	let editingOptions = $state<any>({});
 	let crewAssignmentHour12 = $state(7);
@@ -314,30 +317,43 @@
 		const { syncPbAuthRecord } = await import('$lib/db/pb');
 		const rec = await syncPbAuthRecord();
 		if (rec?.role === 'admin' && auth.currentUser) {
-			auth.currentUser = { ...auth.currentUser, role: 'admin', active: rec.active ?? true };
+			const active = rec.active ?? true;
+			// Avoid replacing auth.currentUser when nothing changed — that re-triggers reactive effects.
+			if (auth.currentUser.role !== 'admin' || auth.currentUser.active !== active) {
+				auth.currentUser = { ...auth.currentUser, role: 'admin', active };
+			}
 		}
 	}
 
-	async function loadBackupList() {
+	async function loadBackupList(options: { showLoading?: boolean } = {}) {
+		const { showLoading = backupItems.length === 0 } = options;
 		if (!pb?.authStore?.token) return;
-		await ensureFreshAdminSession();
-		backupLoading = true;
-		try {
-			const res = await fetch('/api/admin/backups', {
-				headers: { Authorization: pb.authStore.token }
-			});
-			if (!res.ok) throw new Error('Failed to load backups');
-			const data = await res.json();
-			backupItems = data.items ?? [];
-			backupRetention = data.retention ?? null;
-		} catch (err) {
-			console.error(err);
-			if (!isRestoreCountdownActive()) {
-				toast.error('Could not load backup list');
+		if (backupListLoadInFlight) return backupListLoadInFlight;
+
+		backupListLoadInFlight = (async () => {
+			await ensureFreshAdminSession();
+			if (showLoading) backupLoading = true;
+			try {
+				const res = await fetch('/api/admin/backups', {
+					headers: { Authorization: pb.authStore.token }
+				});
+				if (!res.ok) throw new Error('Failed to load backups');
+				const data = await res.json();
+				backupItems = data.items ?? [];
+				backupRetention = data.retention ?? null;
+			} catch (err) {
+				console.error(err);
+				if (!isRestoreCountdownActive()) {
+					toast.error('Could not load backup list');
+				}
+			} finally {
+				if (showLoading) backupLoading = false;
 			}
-		} finally {
-			backupLoading = false;
-		}
+		})().finally(() => {
+			backupListLoadInFlight = null;
+		});
+
+		return backupListLoadInFlight;
 	}
 
 	async function runBackupNow() {
@@ -474,9 +490,14 @@
 	}
 
 	$effect(() => {
-		if (activeTab === 'backups' && auth.currentUser?.role === 'admin') {
-			loadBackupList();
+		if (activeTab !== 'backups') {
+			backupListPrimedForTab = false;
+			return;
 		}
+		if (auth.loading || auth.currentUser?.role !== 'admin') return;
+		if (backupListPrimedForTab) return;
+		backupListPrimedForTab = true;
+		void loadBackupList();
 	});
 
 	// )=- Removed legacy onMount (duplicate of the $effect below, and onMount not imported — would throw ReferenceError on page load, potentially causing navigation/auth guard side-effects like redirect to login).
