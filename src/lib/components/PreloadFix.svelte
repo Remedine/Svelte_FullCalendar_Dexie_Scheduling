@@ -6,17 +6,20 @@
 		if (!browser) return;
 
 		const fixPreloadLinks = () => {
-			document
-				.querySelectorAll(
-					'link[rel="modulepreload"], link[rel="preload"][as="script"], link[rel="preload"][as="style"]'
-				)
-				.forEach((link) => {
-					// Same-origin assets load without crossorigin; preloads must match or the browser
-					// warns "request credentials mode does not match" and discards the preload.
-					if (link.hasAttribute('crossorigin')) {
-						link.removeAttribute('crossorigin');
-					}
-				});
+			document.querySelectorAll('link[rel="preload"], link[rel="modulepreload"]').forEach((link) => {
+				const as = link.getAttribute('as') || '';
+				const href = link.getAttribute('href') || '';
+				const isFont = as === 'font';
+				const isStyle = as === 'style' || /\.css(?:\?|$)/i.test(href);
+				const isScript = as === 'script' || link.getAttribute('rel') === 'modulepreload';
+
+				if (isFont) return;
+
+				if ((isStyle || isScript) && link.hasAttribute('crossorigin')) {
+					// Same-origin CSS/JS preloads must not use crossorigin or credentials mode mismatches.
+					link.removeAttribute('crossorigin');
+				}
+			});
 			document.querySelectorAll('link[rel="preload"][as="font"]').forEach((link) => {
 				if (!link.getAttribute('crossorigin')) {
 					link.setAttribute('crossorigin', 'anonymous');

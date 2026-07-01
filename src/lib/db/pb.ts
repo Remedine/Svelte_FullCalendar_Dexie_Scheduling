@@ -104,6 +104,18 @@ function schedulePostLoginSync(localUser: User): void {
 	});
 }
 
+/** Force auth-refresh to sync role/active from PocketBase (e.g. after fresh staging boot). */
+export async function syncPbAuthRecord(): Promise<PbUserRecord | null> {
+	if (!pb.authStore.token || !navigator.onLine) return null;
+	try {
+		const data = await pb.collection('users').authRefresh();
+		return (data?.record as PbUserRecord) ?? null;
+	} catch (err) {
+		console.warn('[auth] syncPbAuthRecord failed', err);
+		return null;
+	}
+}
+
 /** Refresh an expired JWT using the stored token (PocketBase auth-refresh). */
 export async function refreshPbAuthIfNeeded(): Promise<boolean> {
 	if (!pb.authStore.token) return false;
@@ -168,6 +180,16 @@ async function completeLoginFromPbRecord(
 	}
 
 	pb.authStore.save(token, pbUser as Parameters<typeof pb.authStore.save>[1]);
+
+	// Always refresh so role/active match the server (critical after fresh staging spin-up / boot promotion).
+	try {
+		const refreshed = await pb.collection('users').authRefresh();
+		if (refreshed?.record) {
+			pbUser = refreshed.record as PbUserRecord;
+		}
+	} catch (refreshErr) {
+		console.warn('[auth] post-login authRefresh failed', refreshErr);
+	}
 
 	let existing = await findLocalUserForPbRecord({ ...pbUser, email: normalizedEmail });
 	if (!existing) {

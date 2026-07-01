@@ -310,8 +310,17 @@
 		}
 	}
 
+	async function ensureFreshAdminSession() {
+		const { syncPbAuthRecord } = await import('$lib/db/pb');
+		const rec = await syncPbAuthRecord();
+		if (rec?.role === 'admin' && auth.currentUser) {
+			auth.currentUser = { ...auth.currentUser, role: 'admin', active: rec.active ?? true };
+		}
+	}
+
 	async function loadBackupList() {
 		if (!pb?.authStore?.token) return;
+		await ensureFreshAdminSession();
 		backupLoading = true;
 		try {
 			const res = await fetch('/api/admin/backups', {
@@ -333,6 +342,7 @@
 
 	async function runBackupNow() {
 		if (!pb?.authStore?.token) return;
+		await ensureFreshAdminSession();
 		backupRunning = true;
 		try {
 			await uploadSyncQueueSnapshotIfDue(true);
@@ -393,6 +403,7 @@
 
 	async function confirmRestore() {
 		if (!restoreTarget || !pb?.authStore?.token) return;
+		await ensureFreshAdminSession();
 		if (restoreConfirmText.trim() !== restoreTarget) {
 			toast.error('Type the exact backup filename to confirm');
 			return;
@@ -440,6 +451,7 @@
 			toast.error('Backup must be a .zip file');
 			return;
 		}
+		await ensureFreshAdminSession();
 		backupUploading = true;
 		try {
 			const form = new FormData();

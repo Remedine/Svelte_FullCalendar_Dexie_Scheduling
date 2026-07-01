@@ -34,5 +34,13 @@ restartPolicyMaxRetries = 10
 # PocketBase service must use numReplicas = 1 (see Remedine/pocketbase railway.toml)
 # so SSE + subscribe hit the same instance; Railway has no sticky sessions.
 
-# Variables are intentionally NOT set here (use dashboard or Railway CLI
-# for per-environment values like staging vs prod PB instances).
+# Required per-environment variables (Svelte service):
+#   PUBLIC_POCKETBASE_URL / PUBLIC_PB_URL  → that environment's PocketBase public URL
+#   INTERNAL_SECRET                        → must match PocketBase service
+#   BODY_SIZE_LIMIT=64M                    → backup .zip uploads (adapter-node default is 512KB)
+#
+# Required per-environment variables (PocketBase service):
+#   PB_PUBLIC_URL, INTERNAL_SECRET, POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD
+#
+# When duplicating an environment for staging, re-point PUBLIC_* and PB_PUBLIC_URL at the
+# new PocketBase domain after create (duplicate copies production URLs).

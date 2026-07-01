@@ -17,6 +17,10 @@ async function resolveUserFromPbSession(db: typeof import('$lib/db').db): Promis
 	if (!pb.authStore.token) return null;
 
 	await refreshPbAuthIfNeeded();
+	if (navigator.onLine) {
+		const { syncPbAuthRecord } = await import('$lib/db/pb');
+		await syncPbAuthRecord();
+	}
 
 	const m = pb.authStore.model;
 	if (!m?.id && !m?.email) return null;

@@ -139,7 +139,10 @@ export function buildUserFromPbRecord(
 		name: full || email.split('@')[0] || 'User',
 		pinHash: isCurrentAuth ? rec.pinHash || existingLocal?.pinHash || '' : '',
 		email,
-		role: (rec.role as User['role']) || existingLocal?.role || 'crew',
+		// PB is source of truth for role on auth; never inherit stale Dexie role (e.g. prod admin on fresh staging).
+		role: isCurrentAuth
+			? ((rec.role as User['role']) || 'crew')
+			: ((rec.role as User['role']) || existingLocal?.role || 'crew'),
 		photo:
 			existingLocal?.photo && existingLocal.photo.startsWith('data:')
 				? existingLocal.photo

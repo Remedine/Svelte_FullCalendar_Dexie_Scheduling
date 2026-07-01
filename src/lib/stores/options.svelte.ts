@@ -127,6 +127,7 @@ export const optionsStore = $state({
 						salesTaxJurisdiction: 'City and Borough of Juneau sales tax',
 						invoiceNumberPrefix: 'CCW',
 						nextInvoiceNumber: 1,
+						invoiceNumberYear: new Date().getFullYear(),
 						crewAssignmentDaysBefore: 1,
 						crewAssignmentHour: 7,
 						calendarDayStartHour: 6,
