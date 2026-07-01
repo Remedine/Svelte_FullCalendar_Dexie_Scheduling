@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { toast, type ToastItem } from './toast.svelte';
+import { toast, type ToastItem, RESTORE_COUNTDOWN_KEY } from './toast.svelte';
 
 // )=- Mock browser env so the guard `if (!browser) return;` in show() doesn't short-circuit in Vitest/happy-dom.
 // This is a common pattern when testing SvelteKit stores that have environment guards.
@@ -16,6 +16,7 @@ vi.mock('$app/environment', () => ({
 
 describe('toast store (runes $state)', () => {
 	beforeEach(() => {
+		sessionStorage.clear();
 		toast.clearAll();
 	});
 
@@ -47,7 +48,7 @@ describe('toast store (runes $state)', () => {
 		const id1 = toast.show('one', 'info', 0);
 		const id2 = toast.show('two', 'info', 0);
 
-		toast.dismiss(id1);
+		toast.dismiss(id1!);
 
 		expect(toast.toasts.length).toBe(1);
 		expect(toast.toasts[0].message).toBe('two');
@@ -70,7 +71,7 @@ describe('toast store (runes $state)', () => {
 
 	it('update changes message in place', () => {
 		const id = toast.show('Tick', 'info', 0);
-		toast.update(id, 'Tock');
+		toast.update(id!, 'Tock');
 		expect(toast.toasts[0].message).toBe('Tock');
 	});
 
@@ -78,6 +79,7 @@ describe('toast store (runes $state)', () => {
 		vi.useFakeTimers();
 		toast.showCountdown('Please wait', 3, { doneMessage: 'Ready' });
 		expect(toast.toasts[0].message).toBe('Please wait (3s remaining)');
+		expect(toast.toasts[0].countdown).toBeTruthy();
 
 		vi.advanceTimersByTime(1000);
 		expect(toast.toasts[0].message).toBe('Please wait (2s remaining)');
@@ -89,5 +91,19 @@ describe('toast store (runes $state)', () => {
 		expect(toast.toasts.length).toBe(0);
 
 		vi.useRealTimers();
+	});
+
+	it('showCountdown persists and restores after simulated reload', () => {
+		toast.showCountdown('Please wait', 90, {
+			doneMessage: 'Ready',
+			persistKey: RESTORE_COUNTDOWN_KEY
+		});
+		expect(sessionStorage.getItem(RESTORE_COUNTDOWN_KEY)).toBeTruthy();
+
+		// Simulate full page reload: in-memory toasts gone, sessionStorage kept.
+		toast.toasts = [];
+		toast.restorePersistedCountdown();
+		expect(toast.toasts.length).toBe(1);
+		expect(toast.toasts[0].message).toContain('90s remaining');
 	});
 });

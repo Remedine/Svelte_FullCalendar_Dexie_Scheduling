@@ -6,7 +6,11 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { toast } from '$lib/stores/toast.svelte';
+	import {
+		toast,
+		isRestoreCountdownActive,
+		RESTORE_COUNTDOWN_KEY
+	} from '$lib/stores/toast.svelte';
 	import {
 		hour12To24,
 		hour24To12,
@@ -319,7 +323,9 @@
 			backupRetention = data.retention ?? null;
 		} catch (err) {
 			console.error(err);
-			toast.error('Could not load backup list');
+			if (!isRestoreCountdownActive()) {
+				toast.error('Could not load backup list');
+			}
 		} finally {
 			backupLoading = false;
 		}
@@ -413,7 +419,8 @@
 				{
 					type: 'info',
 					doneMessage:
-						'Restore should be complete. Sign out and sign back in now.'
+						'Restore should be complete. Sign out and sign back in now.',
+					persistKey: RESTORE_COUNTDOWN_KEY
 				}
 			);
 		} catch (err: any) {

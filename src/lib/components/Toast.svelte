@@ -1,6 +1,11 @@
 <!-- src/lib/components/Toast.svelte -->
 <script>
+	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast.svelte.ts';
+
+	onMount(() => {
+		toast.restorePersistedCountdown();
+	});
 
 	function handleAction(t) {
 		t.onAction?.();
@@ -10,7 +15,7 @@
 
 <div class="toast-container">
 	{#each toast.toasts as t (t.id)}
-		<div class="toast toast--{t.type}">
+		<div class="toast toast--{t.type}" class:toast--countdown={Boolean(t.countdown)}>
 			<div class="toast__message">
 				{#if t.actionLabel}
 					<button type="button" class="toast__action" onclick={() => handleAction(t)}>
@@ -20,13 +25,15 @@
 					{t.message}
 				{/if}
 			</div>
-			<button
-				class="toast__close"
-				onclick={() => toast.dismiss(t.id)}
-				aria-label="Close notification"
-			>
-				✕
-			</button>
+			{#if !t.countdown}
+				<button
+					class="toast__close"
+					onclick={() => toast.dismiss(t.id)}
+					aria-label="Close notification"
+				>
+					✕
+				</button>
+			{/if}
 		</div>
 	{/each}
 </div>
@@ -60,6 +67,11 @@
 		pointer-events: auto;
 		background: var(--color-primary);
 		color: white;
+	}
+
+	.toast--countdown {
+		min-width: 320px;
+		max-width: min(640px, 96vw);
 	}
 
 	.toast--success {
