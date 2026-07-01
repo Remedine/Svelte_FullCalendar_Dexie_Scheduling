@@ -1,14 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
-import { sendJobAssignmentEmail } from '$lib/server/brevo';
 import { computeCrewNotificationSendAt, isCrewNotificationDue } from '$lib/notifications/crewSchedule';
-
-type OptionsRecord = {
-	crewAssignmentDaysBefore?: number;
-	crewAssignmentHour?: number;
-	crewNotificationLog?: string[];
-};
+import { fetchOptionsRecord, patchOptionsRecord } from '$lib/server/backups';
+import { sendJobAssignmentEmail } from '$lib/server/brevo';
 
 type JobRecord = {
 	id: string;
@@ -20,46 +15,57 @@ type JobRecord = {
 	status?: string;
 };
 
-async function fetchOptions(): Promise<OptionsRecord | null> {
-	const res = await fetch(`${PUBLIC_PB_URL}/api/collections/options/records?perPage=1`, {
-		headers: { 'X-Internal-Secret': INTERNAL_SECRET }
+type UserRosterItem = {
+	name?: string;
+	firstName?: string;
+	lastName?: string;
+	email?: string;
+	active?: boolean;
+};
+
+async function internalFetch(path: string, init?: RequestInit): Promise<Response> {
+	return fetch(`${PUBLIC_PB_URL}${path}`, {
+		...init,
+		headers: {
+			'X-Internal-Secret': INTERNAL_SECRET,
+			...(init?.headers || {})
+		}
 	});
-	if (!res.ok) return null;
-	const data = await res.json();
-	return data.items?.[0] ?? null;
 }
 
 async function fetchUpcomingJobs(): Promise<JobRecord[]> {
-	const filter = encodeURIComponent(`status != "cancelled"`);
-	const res = await fetch(
-		`${PUBLIC_PB_URL}/api/collections/jobs/records?perPage=500&filter=${filter}&sort=start`,
-		{ headers: { 'X-Internal-Secret': INTERNAL_SECRET } }
-	);
+	const res = await internalFetch('/api/internal/jobs/upcoming');
 	if (!res.ok) return [];
 	const data = await res.json();
-	return data.items ?? [];
+	return (data.items || []) as JobRecord[];
 }
 
 async function fetchClient(clientId: string) {
-	const filter = encodeURIComponent(`id="${clientId}"`);
-	const res = await fetch(
-		`${PUBLIC_PB_URL}/api/collections/clients/records?perPage=1&filter=${filter}`,
-		{ headers: { 'X-Internal-Secret': INTERNAL_SECRET } }
+	const res = await internalFetch(
+		`/api/internal/clients/record?id=${encodeURIComponent(clientId)}`
 	);
 	if (!res.ok) return null;
-	const data = await res.json();
-	return data.items?.[0] ?? null;
+	return (await res.json()) as {
+		name?: string;
+		phone?: string;
+		serviceAddressStreet?: string;
+		serviceAddressCity?: string;
+		serviceAddressState?: string;
+		serviceAddressZip?: string;
+	};
 }
 
-async function fetchUserEmailByName(name: string): Promise<string | null> {
-	const filter = encodeURIComponent(`name="${name}" && active=true`);
-	const res = await fetch(
-		`${PUBLIC_PB_URL}/api/collections/users/records?perPage=1&filter=${filter}`,
-		{ headers: { 'X-Internal-Secret': INTERNAL_SECRET } }
-	);
-	if (!res.ok) return null;
-	const data = await res.json();
-	return data.items?.[0]?.email ?? null;
+async function fetchUserEmailByName(
+	name: string,
+	roster: UserRosterItem[]
+): Promise<string | null> {
+	const trimmed = name.trim();
+	const user = roster.find((u) => {
+		if (!u.active) return false;
+		const full = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
+		return full === trimmed;
+	});
+	return user?.email ?? null;
 }
 
 /** Railway cron: send due crew assignment emails to assigned crew members. */
@@ -69,14 +75,21 @@ export async function POST({ request }: { request: Request }) {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	const options = await fetchOptions();
+	const options = await fetchOptionsRecord();
 	if (!options) {
 		return json({ error: 'Options not found' }, { status: 500 });
 	}
 
 	const daysBefore = Number(options.crewAssignmentDaysBefore ?? 1);
 	const hour = Number(options.crewAssignmentHour ?? 7);
-	const log = new Set<string>(options.crewNotificationLog ?? []);
+	const log = new Set<string>(
+		Array.isArray(options.crewNotificationLog) ? options.crewNotificationLog : []
+	);
+
+	const rosterRes = await internalFetch('/api/internal/users-roster');
+	const rosterData = rosterRes.ok ? await rosterRes.json() : { items: [] };
+	const roster = (rosterData.items || []) as UserRosterItem[];
+
 	const jobs = await fetchUpcomingJobs();
 	const now = new Date();
 	let sent = 0;
@@ -101,7 +114,7 @@ export async function POST({ request }: { request: Request }) {
 			const logKey = `email::${job.id}::${crewName}`;
 			if (log.has(logKey)) continue;
 
-			const email = await fetchUserEmailByName(crewName);
+			const email = await fetchUserEmailByName(crewName, roster);
 			if (!email) continue;
 
 			try {
@@ -122,22 +135,8 @@ export async function POST({ request }: { request: Request }) {
 		}
 	}
 
-	if (sent > 0 && options) {
-		const optRes = await fetch(`${PUBLIC_PB_URL}/api/collections/options/records?perPage=1`, {
-			headers: { 'X-Internal-Secret': INTERNAL_SECRET }
-		});
-		const optData = await optRes.json();
-		const optId = optData.items?.[0]?.id;
-		if (optId) {
-			await fetch(`${PUBLIC_PB_URL}/api/collections/options/records/${optId}`, {
-				method: 'PATCH',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-Internal-Secret': INTERNAL_SECRET
-				},
-				body: JSON.stringify({ crewNotificationLog: [...log] })
-			});
-		}
+	if (sent > 0) {
+		await patchOptionsRecord({ crewNotificationLog: [...log] });
 	}
 
 	return json({ success: true, sent });

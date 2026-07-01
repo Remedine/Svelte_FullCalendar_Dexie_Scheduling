@@ -32,6 +32,9 @@ export type OptionsBackupFields = {
 	lastBackupError?: string;
 	syncQueueSnapshot?: unknown;
 	syncQueueSnapshotAt?: string;
+	crewAssignmentDaysBefore?: number;
+	crewAssignmentHour?: number;
+	crewNotificationLog?: string[];
 };
 
 async function internalFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -45,10 +48,9 @@ async function internalFetch(path: string, init?: RequestInit): Promise<Response
 }
 
 export async function fetchOptionsRecord(): Promise<OptionsBackupFields | null> {
-	const res = await internalFetch('/api/collections/options/records?perPage=1');
+	const res = await internalFetch('/api/internal/options');
 	if (!res.ok) return null;
-	const data = await res.json();
-	return data.items?.[0] ?? null;
+	return (await res.json()) as OptionsBackupFields;
 }
 
 export async function patchOptionsRecord(fields: Record<string, unknown>): Promise<boolean> {
