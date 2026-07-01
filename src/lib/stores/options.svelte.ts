@@ -165,6 +165,9 @@ export const optionsStore = $state({
 				invoiceDueDays: record.invoiceDueDays ?? 30,
 				crewAssignmentDaysBefore: Number(record.crewAssignmentDaysBefore ?? 1),
 				crewAssignmentHour: Number(record.crewAssignmentHour ?? 7),
+				crewNotificationLog: Array.isArray(record.crewNotificationLog)
+					? record.crewNotificationLog
+					: [],
 				calendarDayStartHour: Number(record.calendarDayStartHour ?? 6),
 				calendarDayEndHour: Number(record.calendarDayEndHour ?? 22),
 				quickUnlockIdleMinutes: Number(record.quickUnlockIdleMinutes ?? 120),
@@ -284,6 +287,9 @@ export const optionsStore = $state({
 				invoiceDueDays: Number(cleanData.invoiceDueDays) || 30,
 				crewAssignmentDaysBefore: Number(cleanData.crewAssignmentDaysBefore ?? 1),
 				crewAssignmentHour: Number(cleanData.crewAssignmentHour ?? 7),
+				crewNotificationLog: Array.isArray(cleanData.crewNotificationLog)
+					? cleanData.crewNotificationLog
+					: [],
 				calendarDayStartHour: Number(cleanData.calendarDayStartHour ?? 6),
 				calendarDayEndHour: Number(cleanData.calendarDayEndHour ?? 22),
 				quickUnlockIdleMinutes: Number(cleanData.quickUnlockIdleMinutes ?? 120),

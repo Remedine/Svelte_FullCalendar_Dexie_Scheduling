@@ -1,32 +1,40 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-	computeCrewNotificationSendAt,
-	isCrewNotificationDue,
-	clientPrefersEmailBilling
+	crewNotificationLogKey,
+	isCrewNotificationCronWindow,
+	shouldSendCrewNotification
 } from './crewSchedule';
 
-describe('computeCrewNotificationSendAt', () => {
-	it('subtracts days and sets hour in local time', () => {
-		const jobStart = new Date(2026, 5, 20, 14, 30); // Jun 20 2026 2:30pm
-		const sendAt = computeCrewNotificationSendAt(jobStart, 2, 7);
-		expect(sendAt.getFullYear()).toBe(2026);
-		expect(sendAt.getMonth()).toBe(5);
-		expect(sendAt.getDate()).toBe(18);
-		expect(sendAt.getHours()).toBe(7);
-		expect(sendAt.getMinutes()).toBe(0);
+describe('isCrewNotificationCronWindow', () => {
+	it('matches configured Alaska hour only', () => {
+		// 2026-07-02 15:00 UTC = 07:00 AKDT
+		expect(isCrewNotificationCronWindow(7, new Date('2026-07-02T15:00:00Z'))).toBe(true);
+		expect(isCrewNotificationCronWindow(8, new Date('2026-07-02T15:00:00Z'))).toBe(false);
 	});
 });
 
-describe('isCrewNotificationDue', () => {
-	it('returns true when now is past scheduled time', () => {
-		const scheduled = new Date(2020, 0, 1, 8, 0);
-		expect(isCrewNotificationDue(scheduled, new Date(2026, 0, 1))).toBe(true);
+describe('shouldSendCrewNotification', () => {
+	const jobStart = '2026-07-10T18:00:00.000Z';
+
+	it('sends on the notification day at the configured hour', () => {
+		// 1 day before July 10 job → July 9 at 7 AM Alaska ≈ 2026-07-09 15:00 UTC (AKDT)
+		const now = new Date('2026-07-09T15:00:00Z');
+		expect(shouldSendCrewNotification(jobStart, 1, 7, now)).toBe(true);
+	});
+
+	it('does not send before the notification day', () => {
+		const now = new Date('2026-07-08T15:00:00Z');
+		expect(shouldSendCrewNotification(jobStart, 1, 7, now)).toBe(false);
+	});
+
+	it('does not send on notification day outside configured hour', () => {
+		const now = new Date('2026-07-09T16:00:00Z');
+		expect(shouldSendCrewNotification(jobStart, 1, 7, now)).toBe(false);
 	});
 });
 
-describe('clientPrefersEmailBilling', () => {
-	it('is true only for email preference', () => {
-		expect(clientPrefersEmailBilling('email')).toBe(true);
-		expect(clientPrefersEmailBilling('check')).toBe(false);
+describe('crewNotificationLogKey', () => {
+	it('builds stable dedup key', () => {
+		expect(crewNotificationLogKey('job1', 'Alice')).toBe('email::job1::Alice');
 	});
 });

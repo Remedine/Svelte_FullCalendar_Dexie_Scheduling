@@ -1,7 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
-import { computeCrewNotificationSendAt, isCrewNotificationDue } from '$lib/notifications/crewSchedule';
+import {
+	crewNotificationLogKey,
+	isCrewNotificationCronWindow,
+	shouldSendCrewNotification
+} from '$lib/notifications/crewSchedule';
 import { fetchOptionsRecord, patchOptionsRecord } from '$lib/server/backups';
 import { sendJobAssignmentEmail } from '$lib/server/brevo';
 
@@ -68,7 +72,7 @@ async function fetchUserEmailByName(
 	return user?.email ?? null;
 }
 
-/** Railway cron: send due crew assignment emails to assigned crew members. */
+/** Railway cron: send crew assignment emails once per job/crew at configured Alaska hour. */
 export async function POST({ request }: { request: Request }) {
 	const secret = request.headers.get('X-Internal-Secret') || request.headers.get('x-internal-secret');
 	if (!INTERNAL_SECRET || secret !== INTERNAL_SECRET) {
@@ -82,22 +86,27 @@ export async function POST({ request }: { request: Request }) {
 
 	const daysBefore = Number(options.crewAssignmentDaysBefore ?? 1);
 	const hour = Number(options.crewAssignmentHour ?? 7);
+	const now = new Date();
+
+	if (!isCrewNotificationCronWindow(hour, now)) {
+		return json({ skipped: true, reason: 'Not crew notification hour (Alaska)' });
+	}
+
 	const log = new Set<string>(
 		Array.isArray(options.crewNotificationLog) ? options.crewNotificationLog : []
 	);
+	const initialSize = log.size;
 
 	const rosterRes = await internalFetch('/api/internal/users-roster');
 	const rosterData = rosterRes.ok ? await rosterRes.json() : { items: [] };
 	const roster = (rosterData.items || []) as UserRosterItem[];
 
 	const jobs = await fetchUpcomingJobs();
-	const now = new Date();
 	let sent = 0;
 
 	for (const job of jobs) {
 		if (!job.assignedCrew?.length) continue;
-		const sendAt = computeCrewNotificationSendAt(job.start, daysBefore, hour);
-		if (!isCrewNotificationDue(sendAt, now)) continue;
+		if (!shouldSendCrewNotification(job.start, daysBefore, hour, now)) continue;
 
 		const client = await fetchClient(job.client);
 
@@ -111,7 +120,7 @@ export async function POST({ request }: { request: Request }) {
 			: undefined;
 
 		for (const crewName of job.assignedCrew) {
-			const logKey = `email::${job.id}::${crewName}`;
+			const logKey = crewNotificationLogKey(job.id, crewName);
 			if (log.has(logKey)) continue;
 
 			const email = await fetchUserEmailByName(crewName, roster);
@@ -135,8 +144,11 @@ export async function POST({ request }: { request: Request }) {
 		}
 	}
 
-	if (sent > 0) {
-		await patchOptionsRecord({ crewNotificationLog: [...log] });
+	if (log.size > initialSize) {
+		const ok = await patchOptionsRecord({ crewNotificationLog: [...log] });
+		if (!ok) {
+			console.error('[cron] failed to persist crewNotificationLog after sending');
+		}
 	}
 
 	return json({ success: true, sent });

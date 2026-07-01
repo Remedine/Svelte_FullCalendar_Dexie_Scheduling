@@ -5,7 +5,9 @@ import { optionsStore } from '$lib/stores/options.svelte';
 import {
 	type CrewNotificationPending,
 	computeCrewNotificationSendAt,
-	isCrewNotificationDue
+	crewLogHas,
+	isCrewNotificationCronWindow,
+	shouldSendCrewNotification
 } from '$lib/notifications/crewSchedule';
 
 const crewNotificationsDb = (
@@ -106,15 +108,23 @@ export async function refreshCrewNotificationQueueForJob(jobId: string): Promise
 	}
 }
 
-/** Process due queued crew assignment emails (call on app load + interval; cron handles server-side). */
+/** Process due queued crew assignment emails during configured Alaska hour only. */
 export async function processScheduledCrewNotifications(): Promise<number> {
 	if (!pb.authStore.isValid || !crewNotificationsDb) return 0;
+
+	await optionsStore.load?.();
+	const opts = optionsStore.data || {};
+	const daysBefore = Number(opts.crewAssignmentDaysBefore ?? 1);
+	const hour = Number(opts.crewAssignmentHour ?? 7);
+	const serverLog = Array.isArray(opts.crewNotificationLog) ? opts.crewNotificationLog : [];
+
+	if (!isCrewNotificationCronWindow(hour)) return 0;
 
 	const pending = await crewNotificationsDb.toArray();
 	let sent = 0;
 
 	for (const item of pending) {
-		if (!isCrewNotificationDue(item.scheduledFor) || item.emailSent) continue;
+		if (item.emailSent) continue;
 
 		const job = await db.jobs.get(item.jobId);
 		if (!job || job.status === 'cancelled') {
@@ -125,10 +135,26 @@ export async function processScheduledCrewNotifications(): Promise<number> {
 			await crewNotificationsDb.delete(item.id);
 			continue;
 		}
+		if (!shouldSendCrewNotification(job.start, daysBefore, hour)) continue;
+		if (crewLogHas(serverLog, item.jobId, item.crewName)) {
+			await crewNotificationsDb.delete(item.id);
+			continue;
+		}
 
 		const client = job.clientId ? await db.clients.get(job.clientId) : null;
 		const ok = await sendEmailForAssignment(job, item.crewName, client);
 		if (ok) {
+			const token = pb.authStore.token;
+			if (token) {
+				await fetch('/api/admin/crew-notifications/mark-sent', {
+					method: 'POST',
+					headers: {
+						Authorization: token,
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({ jobId: item.jobId, crewName: item.crewName })
+				});
+			}
 			await crewNotificationsDb.delete(item.id);
 			sent++;
 		}

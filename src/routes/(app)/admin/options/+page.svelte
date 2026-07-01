@@ -683,8 +683,8 @@
 				<h3>Crew Assignment Notifications</h3>
 				<p class="options-page__help">
 					When crew are assigned to a job, an email is queued for each crew member (using their
-					account email) and sent at the scheduled time — not immediately. This is independent of
-					client billing preferences.
+					account email) and sent once on the notification day at the scheduled Alaska time — not
+					immediately. Server cron and the open app both respect the same hour and dedup log.
 				</p>
 				<div class="form-grid">
 					<label for="opt-crew-days" class="label">Send days before job</label>
@@ -696,7 +696,7 @@
 						class="input"
 						bind:value={editingOptions.crewAssignmentDaysBefore}
 					/>
-					<label for="opt-crew-hour" class="label">Send at time (AM/PM, local)</label>
+					<label for="opt-crew-hour" class="label">Send at time (AM/PM, Alaska)</label>
 					<div class="options-page__time-row">
 						<input
 							id="opt-crew-hour"
