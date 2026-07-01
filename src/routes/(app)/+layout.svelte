@@ -373,6 +373,8 @@
 		background: var(--color-surface);
 		border-bottom: 1px solid var(--color-border);
 		box-shadow: var(--shadow-sm);
+		position: relative;
+		z-index: var(--z-sticky);
 	}
 
 	/* Brand removed on all sizes per request to reduce clunkiness. Top bar is now just menu + user controls on desktop. */
@@ -386,10 +388,6 @@
 	/* Center the nav menu on desktop (menu is absolutely positioned in the center,
 	   while user controls stay on the right via margin). Mobile top-nav is already hidden. */
 	@media (min-width: 769px) {
-		.top-nav {
-			position: relative;
-		}
-
 		.top-nav__menu {
 			position: absolute;
 			left: 50%;
@@ -455,6 +453,7 @@
 	.top-nav__user-avatar-wrapper {
 		position: relative;
 		cursor: pointer;
+		z-index: 1;
 	}
 
 	.top-nav__user-avatar {
@@ -501,7 +500,18 @@
 		margin-top: var(--space-1);
 	}
 
-	.top-nav__user-avatar-wrapper:hover .top-nav__user-menu {
+	/* Invisible bridge so the menu stays open while moving the cursor from avatar to items */
+	.top-nav__user-menu::before {
+		content: '';
+		position: absolute;
+		bottom: 100%;
+		left: 0;
+		right: 0;
+		height: var(--space-1);
+	}
+
+	.top-nav__user-avatar-wrapper:hover .top-nav__user-menu,
+	.top-nav__user-avatar-wrapper:focus-within .top-nav__user-menu {
 		display: block;
 	}
 
@@ -697,7 +707,17 @@
 			display: flex;
 			flex-direction: column;
 			transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-			z-index: 400;
+			z-index: calc(var(--z-fixed) + 1);
+		}
+
+		/* Bridge the gap between the upward menu and the avatar trigger */
+		.bottom-nav__user-menu::after {
+			content: '';
+			position: absolute;
+			top: 100%;
+			left: 0;
+			right: 0;
+			height: 16px;
 		}
 
 		.bottom-nav__user-menu.open,
