@@ -15,6 +15,7 @@ export type BackupListItem = {
 export type OptionsBackupFields = {
 	id?: string;
 	businessName?: string;
+	authEpoch?: number;
 	backupScheduledEnabled?: boolean;
 	backupDestEmail?: boolean;
 	backupAlertEmails?: string;
@@ -155,6 +156,64 @@ export async function restorePbBackup(name: string): Promise<RestoreBackupResult
 		throw new Error(`Restore failed (${res.status}): ${text}`);
 	}
 	return (await res.json()) as RestoreBackupResult;
+}
+
+/** Poll PocketBase until it responds after a restore restart. */
+export async function waitForPbHealth(
+	opts: { maxWaitMs?: number; intervalMs?: number } = {}
+): Promise<boolean> {
+	const maxWaitMs = opts.maxWaitMs ?? 180_000;
+	const intervalMs = opts.intervalMs ?? 5_000;
+	const deadline = Date.now() + maxWaitMs;
+
+	while (Date.now() < deadline) {
+		try {
+			const res = await fetch(`${PUBLIC_PB_URL}/api/health`, {
+				signal: AbortSignal.timeout(8_000)
+			});
+			if (res.ok) return true;
+		} catch {
+			/* PB still restarting */
+		}
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+
+	return false;
+}
+
+/** Increment global auth epoch so all app clients force-logout and re-sync. */
+export async function bumpAuthEpoch(): Promise<number> {
+	const options = await fetchOptionsRecord();
+	const next = Math.max(0, Number(options?.authEpoch ?? 0)) + 1;
+	const ok = await patchOptionsRecord({ authEpoch: next });
+	if (!ok) {
+		throw new Error('Failed to bump auth epoch after restore');
+	}
+	return next;
+}
+
+/**
+ * After restore: wait for PocketBase, bump authEpoch, and let clients self-logout.
+ * Safe to call multiple times (epoch only moves forward).
+ */
+export async function finalizeRestoreAfterPbRestart(): Promise<{
+	healthy: boolean;
+	authEpoch?: number;
+}> {
+	const healthy = await waitForPbHealth();
+	if (!healthy) {
+		console.error('[backup] PocketBase did not become healthy after restore');
+		return { healthy: false };
+	}
+
+	try {
+		const authEpoch = await bumpAuthEpoch();
+		console.log(`[backup] Post-restore auth epoch bumped to ${authEpoch}`);
+		return { healthy: true, authEpoch };
+	} catch (err) {
+		console.error('[backup] Post-restore auth epoch bump failed', err);
+		return { healthy: true };
+	}
 }
 
 /** Prune backups that fall outside the retention calendar (server store only). */

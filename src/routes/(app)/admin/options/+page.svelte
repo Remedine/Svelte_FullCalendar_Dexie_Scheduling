@@ -441,12 +441,12 @@
 			if (!res.ok) throw new Error(data.error || 'Restore failed');
 			closeRestoreDialog();
 			toast.showCountdown(
-				'Restore started. PocketBase is restarting — then sign out and sign back in',
+				'Restore started. PocketBase is restarting — all devices will sign out automatically',
 				90,
 				{
 					type: 'info',
 					doneMessage:
-						'Restore should be complete. Sign out and sign back in now.',
+						'Restore complete. You will be signed out shortly to refresh your data.',
 					persistKey: RESTORE_COUNTDOWN_KEY
 				}
 			);
@@ -1046,8 +1046,8 @@
 				<p class="options-page__help backup-restore-warning">
 					<strong>Destructive.</strong> Restore replaces all server data (database + uploaded files)
 					with the chosen backup. PocketBase restarts and the app will be unavailable for about 1–2
-					minutes. Browser offline data on this device is <em>not</em> restored — sign out and sign
-					back in after restore to re-sync.
+					minutes. All signed-in devices (including crew phones) are automatically signed out through
+					the app when restore finishes, then everyone signs back in on the login page to re-sync.
 				</p>
 				<div class="backup-upload">
 					<label for="backup-upload-input" class="label">Upload a backup .zip</label>

@@ -61,6 +61,32 @@
 		});
 	});
 
+	// Force logout all devices when server authEpoch advances after a backup restore.
+	$effect(() => {
+		if (auth.loading || !auth.isAuthenticated || !auth.currentUser) return;
+
+		let cancelled = false;
+		const check = () => {
+			if (cancelled) return;
+			void import('$lib/auth/authEpoch').then(({ checkAuthEpochAndForceLogoutIfNeeded }) =>
+				checkAuthEpochAndForceLogoutIfNeeded()
+			);
+		};
+
+		check();
+		const interval = setInterval(check, 60_000);
+		const onVisible = () => {
+			if (document.visibilityState === 'visible') check();
+		};
+		document.addEventListener('visibilitychange', onVisible);
+
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+			document.removeEventListener('visibilitychange', onVisible);
+		};
+	});
+
 	// Process scheduled crew assignment notifications while the app is open.
 	$effect(() => {
 		if (auth.loading || !auth.currentUser) return;

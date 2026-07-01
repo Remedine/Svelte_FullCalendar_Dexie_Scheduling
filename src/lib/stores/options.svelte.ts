@@ -163,6 +163,7 @@ export const optionsStore = $state({
 				calendarDayEndHour: Number(record.calendarDayEndHour ?? 22),
 				quickUnlockIdleMinutes: Number(record.quickUnlockIdleMinutes ?? 120),
 				desktopSecurityIdleMinutes: Number(record.desktopSecurityIdleMinutes ?? 30),
+				authEpoch: Number(record.authEpoch ?? 0),
 				backupScheduledEnabled: Boolean(record.backupScheduledEnabled),
 				backupDestEmail: Boolean(record.backupDestEmail),
 				backupAlertEmails: record.backupAlertEmails ?? '',

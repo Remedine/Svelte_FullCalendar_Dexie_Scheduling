@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { assertAdminFromAuthHeader } from '$lib/server/pbAdmin';
-import { restorePbBackup } from '$lib/server/backups';
+import { finalizeRestoreAfterPbRestart, restorePbBackup } from '$lib/server/backups';
 
 /** Restore a server-stored PocketBase backup (restarts PB). */
 export async function POST({ request }: { request: Request }) {
@@ -30,6 +30,9 @@ export async function POST({ request }: { request: Request }) {
 
 	try {
 		const result = await restorePbBackup(name);
+		// PocketBase restarts asynchronously; bump authEpoch when healthy so every
+		// device (crew phones included) signs out through the app and re-syncs.
+		void finalizeRestoreAfterPbRestart();
 		return json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Restore failed';

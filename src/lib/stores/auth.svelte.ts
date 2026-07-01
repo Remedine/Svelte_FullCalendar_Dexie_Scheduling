@@ -149,6 +149,12 @@ async function attemptRestoreSession(): Promise<boolean> {
 	const user = await resolveSessionUser(db, appSession);
 
 	if (user && user.active !== false) {
+		if (navigator.onLine) {
+			const { checkAuthEpochAndForceLogoutIfNeeded } = await import('$lib/auth/authEpoch');
+			if (await checkAuthEpochAndForceLogoutIfNeeded()) {
+				return false;
+			}
+		}
 		return completeSessionRestore(user, appSession?.email);
 	}
 

@@ -295,6 +295,8 @@ export interface AppOptions {
 	quickUnlockIdleMinutes?: number;
 	/** Minutes of inactivity before desktop browsers force sign-in again (default 30). */
 	desktopSecurityIdleMinutes?: number;
+	/** Bumped after backup restore to force all app clients to sign out and re-sync. */
+	authEpoch?: number;
 	/** Letterhead + invoice numbering (Admin → Options → Invoice). */
 	businessName?: string;
 	businessStreet?: string;

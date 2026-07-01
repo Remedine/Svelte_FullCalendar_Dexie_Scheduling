@@ -209,6 +209,8 @@ async function completeLoginFromPbRecord(
 	setCurrentUser(localUser);
 	console.log('✅ PB user synced to Dexie:', localUser.name, 'pbId:', localUser.pbId);
 
+	void import('$lib/auth/authEpoch').then(({ syncAuthEpochFromServer }) => syncAuthEpochFromServer());
+
 	// Do not block the login UI on full roster sync — especially slow on mobile networks.
 	schedulePostLoginSync(localUser);
 
