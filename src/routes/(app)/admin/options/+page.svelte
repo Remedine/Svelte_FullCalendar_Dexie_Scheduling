@@ -82,6 +82,8 @@
 	let editingOptions = $state<any>({});
 	let crewAssignmentHour12 = $state(7);
 	let crewAssignmentPeriod = $state<Hour12Period>('AM');
+	let backupScheduledHour12 = $state(11);
+	let backupScheduledPeriod = $state<Hour12Period>('PM');
 
 	function safeClone(obj: any) {
 		if (!obj) return {};
@@ -107,6 +109,15 @@
 	});
 
 	$effect(() => {
+		const hour24 = Number(editingOptions.backupScheduledHour);
+		if (!Number.isNaN(hour24) && hour24 >= 0 && hour24 <= 23) {
+			const { hour12, period } = hour24To12(hour24);
+			backupScheduledHour12 = hour12;
+			backupScheduledPeriod = period;
+		}
+	});
+
+	$effect(() => {
 		if (optionsStore.data) {
 			editingOptions = safeClone(optionsStore.data);
 		} else if (!editingOptions?.id) {
@@ -128,7 +139,10 @@
 				quickUnlockIdleMinutes: 120,
 				desktopSecurityIdleMinutes: 30,
 				backupScheduledEnabled: false,
+				backupScheduledHour: 23,
 				backupDestEmail: false,
+				backupDestGoogleDrive: false,
+				backupGoogleDriveFolderId: '',
 				backupAlertEmails: '',
 				areasOfTown: [],
 				defaultBillableItems: [],
@@ -160,6 +174,21 @@
 		const hour = hour12To24(hour12, crewAssignmentPeriod);
 		if (Number.isNaN(hour)) {
 			toast.error('Invalid crew notification time.');
+			return;
+		}
+
+		const backupHour12 = Number(backupScheduledHour12);
+		if (Number.isNaN(backupHour12) || backupHour12 < 1 || backupHour12 > 12) {
+			toast.error('Scheduled backup time must be between 1 and 12.');
+			return;
+		}
+		if (backupScheduledPeriod !== 'AM' && backupScheduledPeriod !== 'PM') {
+			toast.error('Select AM or PM for scheduled backup time.');
+			return;
+		}
+		const backupHour = hour12To24(backupHour12, backupScheduledPeriod);
+		if (Number.isNaN(backupHour)) {
+			toast.error('Invalid scheduled backup time.');
 			return;
 		}
 
@@ -196,6 +225,7 @@
 				quickUnlockIdleMinutes: idleMinutes,
 				desktopSecurityIdleMinutes: desktopIdleMinutes,
 				crewAssignmentHour: hour,
+				backupScheduledHour: backupHour,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'
 			};
@@ -1009,12 +1039,51 @@
 				<div class="backup-settings">
 					<label class="backup-settings__check">
 						<input type="checkbox" bind:checked={editingOptions.backupScheduledEnabled} />
-						Enable daily scheduled backup (Railway cron → <code>/api/cron/run-backup</code>)
+						Enable daily scheduled backup (hourly cron checks Alaska time)
 					</label>
+					<label for="opt-backup-hour" class="label">Scheduled backup time (Alaska)</label>
+					<div class="options-page__time-row">
+						<input
+							id="opt-backup-hour"
+							type="number"
+							min="1"
+							max="12"
+							class="input options-page__time-hour"
+							bind:value={backupScheduledHour12}
+						/>
+						<select
+							id="opt-backup-period"
+							class="input options-page__time-period"
+							bind:value={backupScheduledPeriod}
+						>
+							<option value="AM">AM</option>
+							<option value="PM">PM</option>
+						</select>
+					</div>
+					<p class="options-page__help">
+						Uses <strong>America/Anchorage</strong>. Default 11:00 PM. Save settings after changing.
+					</p>
 					<label class="backup-settings__check">
 						<input type="checkbox" bind:checked={editingOptions.backupDestEmail} />
 						Email backup artifacts when attachable (under 18 MB; larger sets: download from this page)
 					</label>
+					<label class="backup-settings__check">
+						<input type="checkbox" bind:checked={editingOptions.backupDestGoogleDrive} />
+						Upload backup artifacts to Google Drive
+					</label>
+					<label for="opt-backup-gdrive-folder" class="label">Google Drive folder ID</label>
+					<input
+						id="opt-backup-gdrive-folder"
+						type="text"
+						class="input"
+						placeholder="Leave blank to use GOOGLE_DRIVE_FOLDER_ID env var"
+						bind:value={editingOptions.backupGoogleDriveFolderId}
+					/>
+					<p class="options-page__help">
+						Create a shared folder, share it with the service account email from
+						<code>GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON</code> (Editor). Set the JSON key in Railway
+						server env vars.
+					</p>
 					<label for="opt-backup-alerts" class="label">Alert / delivery emails</label>
 					<textarea
 						id="opt-backup-alerts"

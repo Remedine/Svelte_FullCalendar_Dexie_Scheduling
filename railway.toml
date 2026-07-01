@@ -38,6 +38,8 @@ restartPolicyMaxRetries = 10
 #   PUBLIC_POCKETBASE_URL / PUBLIC_PB_URL  → that environment's PocketBase public URL
 #   INTERNAL_SECRET                        → must match PocketBase service
 #   BODY_SIZE_LIMIT=64M                    → backup .zip uploads (adapter-node default is 512KB)
+#   GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON      → optional; full service-account JSON for Drive backups
+#   GOOGLE_DRIVE_FOLDER_ID                 → optional default folder (overridable in Options → Backups)
 #
 # Required per-environment variables (PocketBase service):
 #   PB_PUBLIC_URL, INTERNAL_SECRET, POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD

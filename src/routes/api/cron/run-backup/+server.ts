@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
+import { shouldRunScheduledBackup } from '$lib/backups/schedule';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { fetchOptionsRecord, runBackup } from '$lib/server/backups';
 
-/** Railway cron: daily automated backup when enabled in Options → Backups. */
+/** Railway cron: hourly tick; runs backup at configured Alaska hour (Options → Backups). */
 export async function POST({ request }: { request: Request }) {
 	const secret =
 		request.headers.get('X-Internal-Secret') || request.headers.get('x-internal-secret');
@@ -11,11 +12,12 @@ export async function POST({ request }: { request: Request }) {
 	}
 
 	const options = await fetchOptionsRecord();
-	if (!options?.backupScheduledEnabled) {
-		return json({ skipped: true, reason: 'Scheduled backup disabled' });
+	const gate = shouldRunScheduledBackup(options ?? {});
+	if (!gate.run) {
+		return json({ skipped: true, reason: gate.reason ?? 'Not due' });
 	}
 
-	const result = await runBackup({ manual: false });
+	const result = await runBackup({ manual: false, scheduled: true });
 	if (!result.ok) {
 		return json({ error: result.error || 'Backup failed' }, { status: 500 });
 	}

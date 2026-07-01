@@ -4,6 +4,12 @@ import { isRetentionAnchorDay } from '$lib/backups/anchorDays';
 import { backupDateInAlaska, parseAlertEmails } from '$lib/backups/names';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 import { sendBackupFailureAlert, sendBackupSuccessEmail } from '$lib/server/brevo';
+import {
+	isGoogleDriveConfigured,
+	pruneGoogleDriveBackupsByRetention,
+	resolveGoogleDriveFolderId,
+	uploadBackupArtifactsToDrive
+} from '$lib/server/googleDrive';
 
 const BREVO_MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
 const INTERNAL_BACKUP_FILES = new Set(['_backup_file_manifest.json']);
@@ -23,7 +29,11 @@ export type OptionsBackupFields = {
 	businessName?: string;
 	authEpoch?: number;
 	backupScheduledEnabled?: boolean;
+	backupScheduledHour?: number;
+	lastScheduledBackupDate?: string;
 	backupDestEmail?: boolean;
+	backupDestGoogleDrive?: boolean;
+	backupGoogleDriveFolderId?: string;
 	backupAlertEmails?: string;
 	lastBackupAt?: string;
 	lastBackupSizeBytes?: number;
@@ -274,6 +284,8 @@ export type RunBackupResult = {
 	artifacts?: BackupArtifact[];
 	error?: string;
 	emailed?: boolean;
+	uploadedToDrive?: string[];
+	drivePruned?: string[];
 	pruned?: string[];
 };
 
@@ -296,14 +308,18 @@ function pickEmailAttachment(
 	return null;
 }
 
-/** Create a backup, update options metadata, optionally email, then prune old server copies. */
-export async function runBackup(opts: { manual?: boolean } = {}): Promise<RunBackupResult> {
+/** Create a backup, update options metadata, optionally email/Drive, then prune old copies. */
+export async function runBackup(
+	opts: { manual?: boolean; scheduled?: boolean } = {}
+): Promise<RunBackupResult> {
 	const options = await fetchOptionsRecord();
 	const businessName = options?.businessName || 'Capital City Windows';
 	const datePrefix = backupDateInAlaska();
 	const anchorDay = isRetentionAnchorDay(datePrefix);
 	const alertEmails = parseAlertEmails(options?.backupAlertEmails);
 	const destEmail = options?.backupDestEmail ?? false;
+	const destDrive = options?.backupDestGoogleDrive ?? false;
+	const driveFolderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
 	const syncQueueJson = syncQueueJsonFromOptions(options?.syncQueueSnapshot);
 
 	try {
@@ -324,13 +340,36 @@ export async function runBackup(opts: { manual?: boolean } = {}): Promise<RunBac
 		const totalSize = artifacts.reduce((sum, a) => sum + (a.size ?? 0), 0);
 		const now = new Date().toISOString();
 
-		await patchOptionsRecord({
+		const patchFields: Record<string, unknown> = {
 			lastBackupAt: now,
 			lastBackupSizeBytes: totalSize,
 			lastBackupFilename: records.name,
 			lastBackupStatus: 'success',
 			lastBackupError: ''
-		});
+		};
+		if (opts.scheduled) {
+			patchFields.lastScheduledBackupDate = datePrefix;
+		}
+		await patchOptionsRecord(patchFields);
+
+		let uploadedToDrive: string[] | undefined;
+		if (destDrive && driveFolderId && isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+			try {
+				const buffers = await Promise.all(
+					artifacts.map(async (a) => ({
+						name: a.name,
+						buffer: await downloadBackupBuffer(a.name)
+					}))
+				);
+				uploadedToDrive = await uploadBackupArtifactsToDrive(driveFolderId, buffers);
+			} catch (driveErr) {
+				console.error('[backup] Google Drive upload failed:', driveErr);
+			}
+		} else if (destDrive && !isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+			console.warn(
+				'[backup] Google Drive destination enabled but GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON or folder ID missing'
+			);
+		}
 
 		let emailed = false;
 		if (destEmail && alertEmails.length > 0) {
@@ -362,6 +401,16 @@ export async function runBackup(opts: { manual?: boolean } = {}): Promise<RunBac
 
 		const { pruned } = await pruneBackupsByRetention();
 
+		let drivePruned: string[] | undefined;
+		if (destDrive && driveFolderId && isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+			try {
+				const driveResult = await pruneGoogleDriveBackupsByRetention(driveFolderId);
+				drivePruned = driveResult.pruned;
+			} catch (drivePruneErr) {
+				console.error('[backup] Google Drive retention prune failed:', drivePruneErr);
+			}
+		}
+
 		return {
 			ok: true,
 			filename: records.name,
@@ -369,6 +418,8 @@ export async function runBackup(opts: { manual?: boolean } = {}): Promise<RunBac
 			created: records.created,
 			artifacts,
 			emailed,
+			uploadedToDrive,
+			drivePruned,
 			pruned
 		};
 	} catch (err) {
