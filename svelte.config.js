@@ -24,7 +24,11 @@ const config = {
 			// Run with: node build  (or node build/index.js)
 			// Precompress can be enabled if you want .br/.gz files generated.
 			precompress: false
-		})
+		}),
+		// Backup .zip uploads proxy through /api/admin/backups/upload (default 512KB is far too small).
+		server: {
+			bodySizeLimit: 64 * 1024 * 1024
+		}
 	},
 	preprocess: vitePreprocess()
 };

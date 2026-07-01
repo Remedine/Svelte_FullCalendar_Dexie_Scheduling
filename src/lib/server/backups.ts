@@ -109,6 +109,34 @@ export async function uploadPbBackup(file: File | Blob, filename: string): Promi
 	return (await res.json()) as BackupListItem;
 }
 
+/** Stream multipart body straight to PocketBase (avoids buffering large zips twice). */
+export async function uploadPbBackupStream(
+	body: ReadableStream<Uint8Array> | null,
+	contentType: string | null
+): Promise<BackupListItem> {
+	if (!body) {
+		throw new Error('Missing upload body');
+	}
+	const headers: Record<string, string> = {
+		'X-Internal-Secret': INTERNAL_SECRET
+	};
+	if (contentType) {
+		headers['Content-Type'] = contentType;
+	}
+	const res = await fetch(`${PUBLIC_PB_URL}/api/internal/backups/upload`, {
+		method: 'POST',
+		headers,
+		body,
+		// Required when streaming a request body in Node 18+ fetch.
+		duplex: 'half'
+	} as RequestInit);
+	if (!res.ok) {
+		const text = await res.text().catch(() => '');
+		throw new Error(`Backup upload failed (${res.status}): ${text}`);
+	}
+	return (await res.json()) as BackupListItem;
+}
+
 export type RestoreBackupResult = {
 	started: boolean;
 	name: string;
