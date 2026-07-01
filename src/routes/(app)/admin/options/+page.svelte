@@ -407,8 +407,14 @@
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(data.error || 'Restore failed');
 			closeRestoreDialog();
-			toast.success(
-				'Restore started. PocketBase is restarting — wait about 90 seconds, then sign out and sign back in.'
+			toast.showCountdown(
+				'Restore started. PocketBase is restarting — then sign out and sign back in',
+				90,
+				{
+					type: 'info',
+					doneMessage:
+						'Restore should be complete. Sign out and sign back in now.'
+				}
 			);
 		} catch (err: any) {
 			toast.error(err?.message || 'Restore failed');

@@ -67,4 +67,27 @@ describe('toast store (runes $state)', () => {
 		expect(toast.toasts[0].actionLabel).toBe('Click here');
 		expect(toast.toasts[0].onAction).toBe(onAction);
 	});
+
+	it('update changes message in place', () => {
+		const id = toast.show('Tick', 'info', 0);
+		toast.update(id, 'Tock');
+		expect(toast.toasts[0].message).toBe('Tock');
+	});
+
+	it('showCountdown ticks down, shows done message, then dismisses', () => {
+		vi.useFakeTimers();
+		toast.showCountdown('Please wait', 3, { doneMessage: 'Ready' });
+		expect(toast.toasts[0].message).toBe('Please wait (3s remaining)');
+
+		vi.advanceTimersByTime(1000);
+		expect(toast.toasts[0].message).toBe('Please wait (2s remaining)');
+
+		vi.advanceTimersByTime(2000);
+		expect(toast.toasts[0].message).toBe('Ready');
+
+		vi.advanceTimersByTime(5000);
+		expect(toast.toasts.length).toBe(0);
+
+		vi.useRealTimers();
+	});
 });
