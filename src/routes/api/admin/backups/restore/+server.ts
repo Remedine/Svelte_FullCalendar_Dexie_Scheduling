@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isRestorableBackupFilename } from '$lib/backups/names';
 import { assertAdminFromAuthHeader } from '$lib/server/pbAdmin';
 import { finalizeRestoreAfterPbRestart, restorePbBackup } from '$lib/server/backups';
 
@@ -24,6 +25,12 @@ export async function POST({ request }: { request: Request }) {
 	if (!confirmName || confirmName !== name) {
 		return json(
 			{ error: 'Type the exact backup filename to confirm restore' },
+			{ status: 400 }
+		);
+	}
+	if (!isRestorableBackupFilename(name)) {
+		return json(
+			{ error: 'Only _full.zip or legacy _Backup.zip archives can be restored' },
 			{ status: 400 }
 		);
 	}

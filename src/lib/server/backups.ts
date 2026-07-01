@@ -1,15 +1,21 @@
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
-import { buildBackupFilename, parseAlertEmails } from '$lib/backups/names';
+import { isRetentionAnchorDay } from '$lib/backups/anchorDays';
+import { backupDateInAlaska, parseAlertEmails } from '$lib/backups/names';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 import { sendBackupFailureAlert, sendBackupSuccessEmail } from '$lib/server/brevo';
 
 const BREVO_MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
+const INTERNAL_BACKUP_FILES = new Set(['_backup_file_manifest.json']);
 
 export type BackupListItem = {
 	name: string;
 	size: number;
 	created: string;
+};
+
+export type BackupArtifact = BackupListItem & {
+	kind?: string;
 };
 
 export type OptionsBackupFields = {
@@ -58,20 +64,36 @@ export async function listBackups(): Promise<BackupListItem[]> {
 	const res = await internalFetch('/api/internal/backups');
 	if (!res.ok) return [];
 	const data = await res.json();
-	return (data.items || []) as BackupListItem[];
+	return ((data.items || []) as BackupListItem[]).filter(
+		(item) => !INTERNAL_BACKUP_FILES.has(item.name)
+	);
 }
 
-export async function createPbBackup(name: string): Promise<BackupListItem> {
-	const res = await internalFetch('/api/internal/backups/create', {
+/** Spec §14.3 — records + incremental files + optional full zip + sync queue snapshot. */
+export async function createSplitPbBackup(req: {
+	datePrefix: string;
+	business: string;
+	includeFull: boolean;
+	forceFullFiles: boolean;
+	syncQueueJson: string;
+}): Promise<BackupArtifact[]> {
+	const res = await internalFetch('/api/internal/backups/create-split', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ name })
+		body: JSON.stringify({
+			datePrefix: req.datePrefix,
+			business: req.business,
+			includeFull: req.includeFull,
+			forceFullFiles: req.forceFullFiles,
+			syncQueueJson: req.syncQueueJson
+		})
 	});
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
-		throw new Error(`Backup create failed (${res.status}): ${text}`);
+		throw new Error(`Split backup create failed (${res.status}): ${text}`);
 	}
-	return (await res.json()) as BackupListItem;
+	const data = await res.json();
+	return (data.artifacts || []) as BackupArtifact[];
 }
 
 export async function downloadBackupBuffer(name: string): Promise<Buffer> {
@@ -247,68 +269,103 @@ export type RunBackupResult = {
 	filename?: string;
 	size?: number;
 	created?: string;
+	artifacts?: BackupArtifact[];
 	error?: string;
 	emailed?: boolean;
 	pruned?: string[];
 };
 
+function syncQueueJsonFromOptions(snapshot: unknown): string {
+	if (!Array.isArray(snapshot)) return '';
+	try {
+		return JSON.stringify(snapshot);
+	} catch {
+		return '';
+	}
+}
+
+function pickEmailAttachment(
+	artifacts: BackupArtifact[]
+): { name: string; size: number } | null {
+	const full = artifacts.find((a) => a.kind === 'full');
+	if (full && (full.size ?? 0) <= BREVO_MAX_ATTACHMENT_BYTES) return full;
+	const records = artifacts.find((a) => a.kind === 'records');
+	if (records && (records.size ?? 0) <= BREVO_MAX_ATTACHMENT_BYTES) return records;
+	return null;
+}
+
 /** Create a backup, update options metadata, optionally email, then prune old server copies. */
-export async function runBackup(opts: {
-	manual?: boolean;
-	filename?: string;
-} = {}): Promise<RunBackupResult> {
+export async function runBackup(opts: { manual?: boolean } = {}): Promise<RunBackupResult> {
 	const options = await fetchOptionsRecord();
 	const businessName = options?.businessName || 'Capital City Windows';
-	const filename = opts.filename || buildBackupFilename(businessName);
+	const datePrefix = backupDateInAlaska();
+	const anchorDay = isRetentionAnchorDay(datePrefix);
 	const alertEmails = parseAlertEmails(options?.backupAlertEmails);
 	const destEmail = options?.backupDestEmail ?? false;
+	const syncQueueJson = syncQueueJsonFromOptions(options?.syncQueueSnapshot);
 
 	try {
-		const created = await createPbBackup(filename);
+		const artifacts = await createSplitPbBackup({
+			datePrefix,
+			business: businessName,
+			includeFull: anchorDay,
+			forceFullFiles: anchorDay,
+			syncQueueJson
+		});
+		if (artifacts.length === 0) {
+			throw new Error('Split backup returned no artifacts');
+		}
+
+		const records =
+			artifacts.find((a) => a.kind === 'records') ??
+			artifacts[0];
+		const totalSize = artifacts.reduce((sum, a) => sum + (a.size ?? 0), 0);
 		const now = new Date().toISOString();
 
 		await patchOptionsRecord({
 			lastBackupAt: now,
-			lastBackupSizeBytes: created.size ?? 0,
-			lastBackupFilename: created.name,
+			lastBackupSizeBytes: totalSize,
+			lastBackupFilename: records.name,
 			lastBackupStatus: 'success',
 			lastBackupError: ''
 		});
 
 		let emailed = false;
-		if (destEmail && alertEmails.length > 0 && (created.size ?? 0) <= BREVO_MAX_ATTACHMENT_BYTES) {
+		if (destEmail && alertEmails.length > 0) {
+			const attachTarget = pickEmailAttachment(artifacts);
 			try {
-				const buf = await downloadBackupBuffer(created.name);
+				let zipBase64: string | null = null;
+				if (attachTarget) {
+					const buf = await downloadBackupBuffer(attachTarget.name);
+					zipBase64 = buf.toString('base64');
+				}
 				await sendBackupSuccessEmail(alertEmails, {
-					filename: created.name,
-					sizeBytes: created.size ?? buf.length,
+					artifacts: artifacts.map((a) => ({
+						name: a.name,
+						sizeBytes: a.size ?? 0,
+						kind: a.kind
+					})),
 					manual: opts.manual ?? false,
-					zipBase64: buf.toString('base64'),
-					hasSyncQueue: Boolean(options?.syncQueueSnapshot)
+					attachment: attachTarget
+						? { filename: attachTarget.name, zipBase64: zipBase64! }
+						: null,
+					hasSyncQueue: artifacts.some((a) => a.kind === 'sync_queue'),
+					tooLargeForEmail: !attachTarget
 				});
 				emailed = true;
 			} catch (emailErr) {
 				console.error('[backup] email delivery failed:', emailErr);
 			}
-		} else if (destEmail && alertEmails.length > 0) {
-			await sendBackupSuccessEmail(alertEmails, {
-				filename: created.name,
-				sizeBytes: created.size ?? 0,
-				manual: opts.manual ?? false,
-				zipBase64: null,
-				hasSyncQueue: Boolean(options?.syncQueueSnapshot),
-				tooLargeForEmail: true
-			});
-			emailed = true;
 		}
 
 		const { pruned } = await pruneBackupsByRetention();
 
 		return {
 			ok: true,
-			filename: created.name,
-			size: created.size,
-			created: created.created,
+			filename: records.name,
+			size: totalSize,
+			created: records.created,
+			artifacts,
 			emailed,
 			pruned
 		};

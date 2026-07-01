@@ -18,6 +18,11 @@
 	} from '$lib/utils/dates';
 	import { pb } from '$lib/db/pb';
 	import { uploadSyncQueueSnapshotIfDue } from '$lib/backups/syncQueueUpload';
+	import {
+		backupArtifactKindFromFilename,
+		isRestorableBackupFilename,
+		type BackupArtifactKind
+	} from '$lib/backups/names';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
 	// This avoids duplicate redirects and race conditions on navigation.
@@ -304,6 +309,21 @@
 		return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 	}
 
+	function backupKindLabel(kind: BackupArtifactKind): string {
+		switch (kind) {
+			case 'records':
+				return 'Records';
+			case 'files':
+				return 'Files';
+			case 'full':
+				return 'Full';
+			case 'sync_queue':
+				return 'Sync queue';
+			default:
+				return 'Legacy';
+		}
+	}
+
 	function formatBackupDate(iso: string | undefined): string {
 		if (!iso) return '—';
 		try {
@@ -374,7 +394,8 @@
 			if (!res.ok) {
 				throw new Error(data.error || 'Backup failed');
 			}
-			toast.success(`Backup created: ${data.filename || 'success'}`);
+			const count = Array.isArray(data.artifacts) ? data.artifacts.length : 1;
+			toast.success(`Backup created (${count} artifact${count === 1 ? '' : 's'}): ${data.filename || 'success'}`);
 			editingOptions.lastBackupAt = new Date().toISOString();
 			editingOptions.lastBackupStatus = 'success';
 			editingOptions.lastBackupFilename = data.filename;
@@ -976,9 +997,11 @@
 		{:else if activeTab === 'backups'}
 			<h2>Data Backups</h2>
 			<p class="options-page__help">
-				Full PocketBase backups (database + uploaded files). Alaska time is used for filenames and
-				retention. Save settings below, then use <strong>Backup now</strong> or enable the daily
-				cron.
+				Split daily archives: <strong>records</strong> (database), <strong>files</strong>
+				(incremental), optional <strong>sync queue</strong>, and a restorable <strong>full</strong>
+				zip on retention anchor days (1st, 8th, 15th, 22nd, 29th / month-end). Alaska time drives
+				filenames and retention. Save settings below, then use <strong>Backup now</strong> or enable
+				the daily cron.
 			</p>
 
 			<div class="form-section">
@@ -990,7 +1013,7 @@
 					</label>
 					<label class="backup-settings__check">
 						<input type="checkbox" bind:checked={editingOptions.backupDestEmail} />
-						Email backup zip when under 18 MB (larger backups: download from this page)
+						Email backup artifacts when attachable (under 18 MB; larger sets: download from this page)
 					</label>
 					<label for="opt-backup-alerts" class="label">Alert / delivery emails</label>
 					<textarea
@@ -1045,15 +1068,16 @@
 				<h3>Restore from backup</h3>
 				<p class="options-page__help backup-restore-warning">
 					<strong>Destructive.</strong> Restore replaces all server data (database + uploaded files)
-					with the chosen backup. PocketBase restarts and the app will be unavailable for about 1–2
-					minutes. All signed-in devices (including crew phones) are automatically signed out through
-					the app when restore finishes, then everyone signs back in on the login page to re-sync.
+					with the chosen backup. Only <strong>_full.zip</strong> and legacy <strong>_Backup.zip</strong>
+					archives can be restored — records/files/sync-queue artifacts are for download only.
+					PocketBase restarts and the app will be unavailable for about 1–2 minutes. All signed-in
+					devices are automatically signed out when restore finishes.
 				</p>
 				<div class="backup-upload">
-					<label for="backup-upload-input" class="label">Upload a backup .zip</label>
+					<label for="backup-upload-input" class="label">Upload a restorable .zip</label>
 					<p class="options-page__help">
-						Use a file from email or your computer. It appears in the server list; then tap
-						<strong>Restore</strong>.
+						Upload a <code>_full.zip</code> or legacy <code>_Backup.zip</code> from email or your
+						computer. It appears in the server list; then tap <strong>Restore</strong>.
 					</p>
 					<div class="backup-upload__row">
 						<input
@@ -1080,7 +1104,7 @@
 				{#if backupRetention}
 					<p class="options-page__help">
 						Retention preview: would keep <strong>{backupRetention.wouldKeep}</strong> of
-						<strong>{backupRetention.total}</strong> dated backups; prune
+						<strong>{backupRetention.total}</strong> backup dates; prune
 						<strong>{backupRetention.wouldPrune}</strong> on server (email copies unaffected).
 					</p>
 				{/if}
@@ -1091,9 +1115,14 @@
 				{:else}
 					<div class="backup-list">
 						{#each backupItems as item (item.name)}
+							{@const kind = backupArtifactKindFromFilename(item.name)}
+							{@const restorable = isRestorableBackupFilename(item.name)}
 							<div class="backup-list__row">
 								<div class="backup-list__meta">
-									<span class="backup-list__name">{item.name}</span>
+									<span class="backup-list__name">
+										<span class="backup-list__badge backup-list__badge--{kind}">{backupKindLabel(kind)}</span>
+										{item.name}
+									</span>
 									<span class="backup-list__detail">
 										{formatBytes(item.size)} · {formatBackupDate(item.created)}
 									</span>
@@ -1110,6 +1139,8 @@
 										type="button"
 										class="options-page__btn backup-list__restore"
 										onclick={() => openRestoreDialog(item.name)}
+										disabled={!restorable}
+										title={restorable ? 'Restore this backup' : 'Only full or legacy zips can be restored'}
 									>
 										Restore
 									</button>
@@ -1611,6 +1642,38 @@
 	.backup-list__name {
 		font-weight: var(--font-weight-medium);
 		word-break: break-all;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.backup-list__badge {
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		padding: 0.15rem 0.45rem;
+		border-radius: 4px;
+		background: var(--color-surface-muted, #e4e4e7);
+		color: var(--color-text-muted, #52525b);
+		flex-shrink: 0;
+	}
+	.backup-list__badge--full,
+	.backup-list__badge--legacy {
+		background: #dbeafe;
+		color: #1e3a8a;
+	}
+	.backup-list__badge--records {
+		background: #dcfce7;
+		color: #166534;
+	}
+	.backup-list__badge--files {
+		background: #fef9c3;
+		color: #854d0e;
+	}
+	.backup-list__badge--sync_queue {
+		background: #f3e8ff;
+		color: #6b21a8;
 	}
 	.backup-list__detail {
 		font-size: var(--font-size-sm);

@@ -20,10 +20,42 @@ export function sanitizeBusinessName(name: string): string {
 	return cleaned || 'Business';
 }
 
-/** Spec §14.2: YYYY-MM-DD_{Business Name}_Backup.zip */
+export type BackupArtifactKind = 'records' | 'files' | 'full' | 'legacy' | 'sync_queue';
+
+/** Spec §14.2 legacy MVP name — still accepted for restore/upload. */
 export function buildBackupFilename(businessName: string, date?: string): string {
 	const d = date ?? backupDateInAlaska();
 	return `${d}_${sanitizeBusinessName(businessName)}_Backup.zip`;
+}
+
+/** Spec §14.3 split archive artifact names. */
+export function buildSplitBackupFilename(
+	businessName: string,
+	kind: 'records' | 'files' | 'full',
+	date?: string
+): string {
+	const d = date ?? backupDateInAlaska();
+	return `${d}_${sanitizeBusinessName(businessName)}_${kind}.zip`;
+}
+
+export function buildSyncQueueFilename(businessName: string, date?: string): string {
+	const d = date ?? backupDateInAlaska();
+	return `${d}_${sanitizeBusinessName(businessName)}_sync_queue.json`;
+}
+
+export function backupArtifactKindFromFilename(filename: string): BackupArtifactKind {
+	const lower = filename.toLowerCase();
+	if (lower.endsWith('_sync_queue.json')) return 'sync_queue';
+	if (lower.endsWith('_records.zip')) return 'records';
+	if (lower.endsWith('_files.zip')) return 'files';
+	if (lower.endsWith('_full.zip')) return 'full';
+	return 'legacy';
+}
+
+/** Only full native zips and legacy MVP archives can use pb.RestoreBackup. */
+export function isRestorableBackupFilename(filename: string): boolean {
+	const kind = backupArtifactKindFromFilename(filename);
+	return kind === 'full' || kind === 'legacy';
 }
 
 /** Parse comma/semicolon/newline-separated alert emails. */

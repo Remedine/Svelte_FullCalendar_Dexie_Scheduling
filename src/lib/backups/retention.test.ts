@@ -26,8 +26,18 @@ describe('shouldKeepBackupDate', () => {
 });
 
 describe('dateFromBackupFilename', () => {
-	it('parses spec filename prefix', () => {
+	it('parses legacy MVP filename prefix', () => {
 		expect(dateFromBackupFilename('2026-06-30_Capital_City_Windows_Backup.zip')).toBe(
+			'2026-06-30'
+		);
+	});
+
+	it('parses split archive filename prefixes', () => {
+		expect(dateFromBackupFilename('2026-06-30_Capital_City_Windows_records.zip')).toBe(
+			'2026-06-30'
+		);
+		expect(dateFromBackupFilename('2026-06-30_Capital_City_Windows_full.zip')).toBe('2026-06-30');
+		expect(dateFromBackupFilename('2026-06-30_Capital_City_Windows_sync_queue.json')).toBe(
 			'2026-06-30'
 		);
 	});

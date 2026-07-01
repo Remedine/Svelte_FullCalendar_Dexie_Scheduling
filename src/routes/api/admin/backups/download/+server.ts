@@ -30,7 +30,10 @@ export async function GET({
 	}
 
 	const headers = new Headers();
-	headers.set('Content-Type', 'application/zip');
+	const contentType = name.toLowerCase().endsWith('.json')
+		? 'application/json'
+		: 'application/zip';
+	headers.set('Content-Type', contentType);
 	headers.set('Content-Disposition', `attachment; filename="${name}"`);
 	const len = res.headers.get('Content-Length');
 	if (len) headers.set('Content-Length', len);

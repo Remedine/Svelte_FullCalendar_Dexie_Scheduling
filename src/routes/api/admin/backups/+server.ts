@@ -29,14 +29,13 @@ export async function POST({ request }: { request: Request }) {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	let body: { filename?: string } = {};
 	try {
-		body = await request.json();
+		await request.json();
 	} catch {
 		// empty body is fine
 	}
 
-	const result = await runBackup({ manual: true, filename: body.filename });
+	const result = await runBackup({ manual: true });
 	if (!result.ok) {
 		return json({ error: result.error || 'Backup failed' }, { status: 500 });
 	}

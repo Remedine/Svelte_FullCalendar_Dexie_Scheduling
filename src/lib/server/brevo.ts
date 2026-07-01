@@ -267,42 +267,66 @@ export async function sendInvoiceToClientEmail(
 
 // === BACKUP ALERTS ===
 
+function backupKindLabel(kind?: string): string {
+	switch (kind) {
+		case 'records':
+			return 'Records (database)';
+		case 'files':
+			return 'Files (incremental)';
+		case 'full':
+			return 'Full (restorable)';
+		case 'sync_queue':
+			return 'Sync queue';
+		default:
+			return 'Archive';
+	}
+}
+
 export async function sendBackupSuccessEmail(
 	to: string[],
 	data: {
-		filename: string;
-		sizeBytes: number;
+		artifacts: Array<{ name: string; sizeBytes: number; kind?: string }>;
 		manual: boolean;
-		zipBase64: string | null;
+		attachment: { filename: string; zipBase64: string } | null;
 		hasSyncQueue?: boolean;
 		tooLargeForEmail?: boolean;
 	}
 ) {
-	const sizeMb = (data.sizeBytes / (1024 * 1024)).toFixed(2);
 	const trigger = data.manual ? 'Manual backup' : 'Scheduled backup';
+	const totalBytes = data.artifacts.reduce((sum, a) => sum + a.sizeBytes, 0);
+	const totalMb = (totalBytes / (1024 * 1024)).toFixed(2);
+	const artifactRows = data.artifacts
+		.map((a) => {
+			const mb = (a.sizeBytes / (1024 * 1024)).toFixed(2);
+			return `<li><strong>${backupKindLabel(a.kind)}:</strong> ${a.name} (${mb} MB)</li>`;
+		})
+		.join('');
+
 	let attachmentNote = '';
 	let attachment: BrevoEmailPayload['attachment'];
 
 	if (data.tooLargeForEmail) {
 		attachmentNote =
-			'<p><strong>Note:</strong> The backup file is too large to attach. Download it from <strong>Options → Backups</strong> in the admin app.</p>';
-	} else if (data.zipBase64) {
-		attachment = [{ content: data.zipBase64, name: data.filename }];
-		attachmentNote = '<p>The full PocketBase backup is attached.</p>';
+			'<p><strong>Note:</strong> Artifacts are too large to attach. Download them from <strong>Options → Backups</strong> in the admin app.</p>';
+	} else if (data.attachment?.zipBase64) {
+		attachment = [{ content: data.attachment.zipBase64, name: data.attachment.filename }];
+		attachmentNote = `<p><strong>${data.attachment.filename}</strong> is attached (use <code>_full.zip</code> for restore when available).</p>`;
 	}
 
 	const syncNote = data.hasSyncQueue
-		? '<p>A <code>sync_queue.json</code> snapshot from the admin device is stored on the server (download from Options → Backups).</p>'
+		? '<p>A <code>sync_queue.json</code> snapshot is stored on the server (download from Options → Backups).</p>'
 		: '';
+
+	const primaryName = data.artifacts[0]?.name ?? 'backup';
 
 	const html = `
 		<div style="font-family: sans-serif; max-width: 600px; line-height: 1.5;">
 			${LOGO_HTML}
 			<h2>Backup completed</h2>
-			<p>${trigger} finished successfully.</p>
+			<p>${trigger} finished successfully (split archive per spec §14.3).</p>
 			<ul>
-				<li><strong>File:</strong> ${data.filename}</li>
-				<li><strong>Size:</strong> ${sizeMb} MB</li>
+				<li><strong>Total size:</strong> ${totalMb} MB</li>
+				${artifactRows}
 			</ul>
 			${attachmentNote}
 			${syncNote}
@@ -313,7 +337,7 @@ export async function sendBackupSuccessEmail(
 	await sendBrevoEmail({
 		sender: SENDER,
 		to: to.map((email) => ({ email })),
-		subject: `Backup completed — ${data.filename}`,
+		subject: `Backup completed — ${primaryName}`,
 		htmlContent: html,
 		attachment
 	});
