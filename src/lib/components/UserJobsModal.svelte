@@ -1,6 +1,7 @@
 <!-- src/lib/components/UserJobsModal.svelte -->
 <script lang="ts">
-	import { getJobsForCrewMember } from '$lib/db';
+	import { getJobsForCrewMember, type Job } from '$lib/db';
+	import { startOfLocalWeek } from '$lib/utils/dates';
 
 	interface Props {
 		// userId here is actually the value stored in job.assignedCrew (the crew member's name string)
@@ -12,7 +13,19 @@
 
 	const { userId, userName, onClose }: Props = $props();
 
-	let jobs = $state<any[]>([]);
+	let jobs = $state<Job[]>([]);
+
+	const scheduleCutoff = startOfLocalWeek();
+
+	const visibleJobs = $derived.by(() => {
+		return jobs
+			.filter((job) => {
+				if (job.status === 'cancelled') return false;
+				const start = new Date(job.start);
+				return !isNaN(start.getTime()) && start >= scheduleCutoff;
+			})
+			.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+	});
 
 	$effect(() => {
 		loadJobs();
@@ -27,20 +40,53 @@
 	function stopProp(e: Event) {
 		e.stopPropagation();
 	}
+
+	function formatJobWhen(job: Job): string {
+		const start = new Date(job.start);
+		const end = job.end ? new Date(job.end) : null;
+		const dateOpts: Intl.DateTimeFormatOptions = {
+			weekday: 'short',
+			month: 'short',
+			day: 'numeric'
+		};
+		const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+
+		const startDate = start.toLocaleDateString('en-US', dateOpts);
+		const startTime = start.toLocaleTimeString('en-US', timeOpts);
+
+		if (!end || isNaN(end.getTime())) {
+			return `${startDate} · ${startTime}`;
+		}
+
+		const sameDay = start.toDateString() === end.toDateString();
+		if (sameDay) {
+			return `${startDate} · ${startTime} – ${end.toLocaleTimeString('en-US', timeOpts)}`;
+		}
+
+		return `${start.toLocaleDateString('en-US', dateOpts)} – ${end.toLocaleDateString('en-US', dateOpts)}`;
+	}
 </script>
 
 <div class="modal-overlay" onclick={onClose}>
-	<div class="modal-content" onclick={stopProp}>
+	<div class="modal-content user-jobs-modal" onclick={stopProp}>
 		<h2 class="modal__title">Jobs for {userName}</h2>
+		<p class="user-jobs-modal__subtitle">This week and upcoming assignments</p>
 
-		<div class="jobs-list">
-			{#each jobs as job (job.id || job.pbId)}
-				<div class="job-item">
-					<strong>{job.title}</strong><br />
-					{new Date(job.start).toLocaleDateString()} – {new Date(job.end).toLocaleDateString()}
+		<div class="user-jobs-modal__list">
+			{#each visibleJobs as job (job.id || job.pbId)}
+				<div class="user-jobs-modal__item">
+					<div class="user-jobs-modal__item-main">
+						<strong class="user-jobs-modal__title">{job.title}</strong>
+						<span class="user-jobs-modal__when">{formatJobWhen(job)}</span>
+					</div>
+					{#if job.status}
+						<span class="user-jobs-modal__status user-jobs-modal__status--{job.status}">
+							{job.status}
+						</span>
+					{/if}
 				</div>
 			{:else}
-				<p>No jobs assigned yet.</p>
+				<p class="user-jobs-modal__empty">No jobs scheduled this week or upcoming.</p>
 			{/each}
 		</div>
 
@@ -51,15 +97,83 @@
 <style>
 	/* Base .modal-overlay and .modal-content now come from globals.css for cohesion.
 	   Only component-specific extensions here. */
-	.jobs-list {
-		margin: var(--space-4) 0;
+	.user-jobs-modal__subtitle {
+		margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
-	.job-item {
+
+	.user-jobs-modal__list {
+		margin: var(--space-2) 0 var(--space-4);
+		max-height: min(60vh, 28rem);
+		overflow-y: auto;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+	}
+
+	.user-jobs-modal__item {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--space-3);
 		padding: var(--space-3);
 		border-bottom: 1px solid var(--color-border);
 	}
+
+	.user-jobs-modal__item:last-child {
+		border-bottom: none;
+	}
+
+	.user-jobs-modal__item-main {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+
+	.user-jobs-modal__title {
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+	}
+
+	.user-jobs-modal__when {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.user-jobs-modal__status {
+		flex-shrink: 0;
+		font-size: var(--font-size-xs);
+		padding: 0.15rem 0.5rem;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
+		text-transform: capitalize;
+	}
+
+	.user-jobs-modal__status--scheduled {
+		background: var(--color-primary-soft);
+		color: var(--color-primary-emphasis);
+	}
+
+	.user-jobs-modal__status--confirmed {
+		background: var(--color-success-soft);
+		color: var(--color-success);
+	}
+
+	.user-jobs-modal__status--completed {
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
+	}
+
+	.user-jobs-modal__empty {
+		padding: var(--space-4);
+		margin: 0;
+		text-align: center;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+	}
+
 	.modal__btn--close {
-		/* uses base .button */
 		padding: var(--space-3) var(--space-6);
 	}
 </style>

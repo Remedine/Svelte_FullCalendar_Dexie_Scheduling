@@ -9,7 +9,8 @@ import {
 	calculateDueDate,
 	getInvoiceDueDateForJob,
 	hour12To24,
-	hour24To12
+	hour24To12,
+	startOfLocalWeek
 } from './dates';
 
 describe('toLocalDateString / getLocalDateString', () => {
@@ -162,5 +163,18 @@ describe('hour24To12 / hour12To24', () => {
 			const { hour12, period } = hour24To12(hour24);
 			expect(hour12To24(hour12, period)).toBe(hour24);
 		}
+	});
+});
+
+describe('startOfLocalWeek', () => {
+	it('returns local Sunday at midnight for a mid-week date', () => {
+		// Wednesday July 1, 2026
+		const wed = new Date(2026, 6, 1, 15, 30);
+		const start = startOfLocalWeek(wed);
+		expect(start.getDay()).toBe(0);
+		expect(start.getFullYear()).toBe(2026);
+		expect(start.getMonth()).toBe(5); // June
+		expect(start.getDate()).toBe(28);
+		expect(start.getHours()).toBe(0);
 	});
 });

@@ -100,6 +100,14 @@ export function toDateString(d: any): string {
 // Convenience re-exports of the most common names used before extraction
 export { toLocalDateString as getLocalDateString };
 
+/** Start of the calendar week (Sunday) in local time — matches jobs page "This week" filter. */
+export function startOfLocalWeek(date: Date = new Date()): Date {
+	const start = new Date(date);
+	start.setDate(date.getDate() - date.getDay());
+	start.setHours(0, 0, 0, 0);
+	return start;
+}
+
 /**
  * Calculate due date for an invoice: base (usually job.end) + N days.
  * Pure and easy to unit test in isolation.
