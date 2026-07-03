@@ -20,6 +20,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
+	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
 
 	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
 	// and $effects (which do refetch/update) on every pointer event during drag.
@@ -627,30 +628,133 @@
 	let highlightJobId = $state<string | null>(initialSearchParams?.get('jobId') || null);
 	let jumpShowCancelled = $state(initialSearchParams?.get('status') === 'cancelled');
 	let hasScrolledToHighlight = false;
+	let highlightFallbackScheduled = false;
 
 	const CALENDAR_STATUS_FILTERS = ['scheduled', 'completed', 'cancelled'] as const;
 	let jobs = $state<any[]>([]);
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
-	let currentView = $state('timeGridWeek');
+	const initialIsMobile = isMobileViewport();
+	let currentView = $state(initialIsMobile ? 'timeGridDay' : 'timeGridWeek');
 	let crewOptions = $state<string[]>([]);
 
 	// Mobile detection for day-only view, compact MonthPicker, reclaimed space, anchored top month picker,
 	// and mobile footer behaviors in the parent layout.
-	let isMobile = $state(false);
+	let isMobile = $state(initialIsMobile);
+
+	function ensureMobileDayView() {
+		if (!isMobile) return;
+		if (currentView !== 'timeGridDay') currentView = 'timeGridDay';
+		if (dayApi && dayApi.view.type !== 'timeGridDay') {
+			dayApi.changeView('timeGridDay');
+			dayApi.refetchEvents();
+		}
+	}
+
+	function formatFcScrollTime(date: Date): string {
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+	}
+
+	function findHighlightedJob(): any | null {
+		if (!highlightJobId) return null;
+		return (
+			jobs.find((j: any) => j.id === highlightJobId || j.pbId === highlightJobId) ?? null
+		);
+	}
+
+	/** Mobile day view: scroll the time grid to the job slot (not page scrollIntoView). */
+	function scrollToHighlightedJob(start: Date): boolean {
+		if (!dayApi || isNaN(start.getTime())) return false;
+
+		const viewType = dayApi.view.type;
+		if (isMobile || viewType === 'timeGridDay') {
+			try {
+				dayApi.scrollToTime(formatFcScrollTime(start));
+				return true;
+			} catch {
+				// fall through to scroller positioning
+			}
+		}
+
+		const scroller = dayEl?.querySelector('.fc-scroller') as HTMLElement | null;
+		const highlighted = dayEl?.querySelector('.event-highlighted') as HTMLElement | null;
+		if (scroller && highlighted) {
+			const top =
+				highlighted.getBoundingClientRect().top -
+				scroller.getBoundingClientRect().top +
+				scroller.scrollTop;
+			scroller.scrollTo({
+				top: Math.max(0, top - scroller.clientHeight * 0.25),
+				behavior: 'smooth'
+			});
+			return true;
+		}
+
+		return false;
+	}
+
+	function focusHighlightedEvent(info: {
+		el: HTMLElement;
+		view: { type: string };
+		event: { id: string; start: Date | null; extendedProps?: any };
+	}) {
+		if (!highlightJobId || hasScrolledToHighlight) return;
+		if (!jobMatchesHighlight(info.event.id, info.event.extendedProps)) return;
+
+		const isDayish = isMobile || info.view.type === 'timeGridDay';
+
+		if (isDayish && info.event.start) {
+			const start = info.event.start;
+			requestAnimationFrame(() => {
+				window.setTimeout(() => {
+					if (scrollToHighlightedJob(start)) {
+						hasScrolledToHighlight = true;
+					}
+				}, 120);
+			});
+			return;
+		}
+
+		hasScrolledToHighlight = true;
+		requestAnimationFrame(() => {
+			window.setTimeout(() => {
+				info.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			}, 120);
+		});
+	}
+
+	function scheduleHighlightJumpFallback() {
+		if (
+			!highlightJobId ||
+			!isMobile ||
+			hasScrolledToHighlight ||
+			highlightFallbackScheduled
+		) {
+			return;
+		}
+		const job = findHighlightedJob();
+		if (!job?.start) return;
+
+		highlightFallbackScheduled = true;
+		const start = new Date(job.start);
+		window.setTimeout(() => {
+			if (hasScrolledToHighlight) return;
+			if (scrollToHighlightedJob(start)) {
+				hasScrolledToHighlight = true;
+			}
+		}, 400);
+	}
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		const mql = window.matchMedia('(max-width: 768px)');
+		const mql = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`);
 		isMobile = mql.matches;
+		ensureMobileDayView();
 
 		const listener = (e: MediaQueryListEvent) => {
 			isMobile = e.matches;
-			// When crossing to mobile, force day view only (per spec)
-			if (isMobile && currentView !== 'timeGridDay' && dayApi) {
-				currentView = 'timeGridDay';
-				dayApi.changeView('timeGridDay');
-			}
+			if (isMobile) ensureMobileDayView();
 			if (dayApi) {
 				dayApi.setOption('eventResizableFromStart', isMobile);
 			}
@@ -678,6 +782,7 @@
 		if (!highlightJobId) return;
 		highlightJobId = null;
 		hasScrolledToHighlight = false;
+		highlightFallbackScheduled = false;
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
 		url.searchParams.delete('jobId');
@@ -1205,18 +1310,7 @@
 				},
 
 				eventDidMount: (info) => {
-					if (
-						highlightJobId &&
-						!hasScrolledToHighlight &&
-						jobMatchesHighlight(info.event.id, info.event.extendedProps)
-					) {
-						hasScrolledToHighlight = true;
-						requestAnimationFrame(() => {
-							window.setTimeout(() => {
-								info.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							}, 120);
-						});
-					}
+					focusHighlightedEvent(info);
 
 					// )=- Do NOT set draggable="true" here. It enables native HTML5 drag which interferes with FullCalendar's own drag system (editable events), causing D&D to not work or behave erratically (native vs FC drag fighting).
 					// The visual drag handle + CSS hover is sufficient for UX. FC handles the actual drag start internally on the event.
@@ -1449,10 +1543,15 @@
 					}
 				},
 
+				eventsSet: () => {
+					scheduleHighlightJumpFallback();
+				},
+
 				events: (fetchInfo, successCallback) => {
 					let visibleJobs = filteredJobs;
 
-					if (currentView === 'timeGridDay') {
+					// Mobile is always day view; keep currentView in sync so jump-to-job loads that day's events.
+					if (isMobile || currentView === 'timeGridDay') {
 						const selectedStr = selectedDate;
 						visibleJobs = filteredJobs.filter((job: any) => {
 							const jobStartStr = toDateString(job.start);
@@ -1477,13 +1576,19 @@
 
 			dayApi = api; // expose the local instance to other effects (refetch, etc.)
 			ensureMobileBackgroundDeselectListener();
+			ensureMobileDayView();
 
 			api.render();
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
 				api?.setOption('height', 'auto'); // only once, during initial creation. Repeated calls from observers were a major source of idle "refreshing" and layout churn.
+				ensureMobileDayView();
 				api?.gotoDate(parseLocalDate(selectedDate));
+				if (highlightJobId) {
+					api?.refetchEvents();
+					scheduleHighlightJumpFallback();
+				}
 			});
 		});
 
