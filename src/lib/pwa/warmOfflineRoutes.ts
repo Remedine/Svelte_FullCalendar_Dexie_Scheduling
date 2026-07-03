@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
+import { OFFLINE_CORE_ROUTES } from './offlineCoreRoutes';
 
-/** App routes that must load offline after one online visit (see vite.config workbox runtimeCaching). */
-export const OFFLINE_CORE_ROUTES = ['/calendar', '/jobs', '/clients', '/login'] as const;
+export { OFFLINE_CORE_ROUTES } from './offlineCoreRoutes';
 
 let warmInFlight: Promise<void> | null = null;
 
@@ -18,7 +18,11 @@ export async function warmOfflineRouteCache(): Promise<void> {
 				await navigator.serviceWorker.ready;
 				await Promise.allSettled(
 					OFFLINE_CORE_ROUTES.map((path) =>
-						fetch(path, { credentials: 'same-origin', cache: 'reload' })
+						fetch(path, {
+							credentials: 'same-origin',
+							cache: 'reload',
+							headers: { Accept: 'text/html' }
+						})
 					)
 				);
 			} catch (err) {

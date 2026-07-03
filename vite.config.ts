@@ -2,6 +2,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vite';
+import { isOfflineCoreRoutePath } from './src/lib/pwa/offlineCoreRoutes';
 
 export default defineConfig({
 	plugins: [
@@ -51,8 +52,16 @@ export default defineConfig({
 				globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2,webmanifest}'],
 				runtimeCaching: [
 					{
-						urlPattern: ({ request, url }) =>
-							request.mode === 'navigate' && !url.pathname.startsWith('/api/'),
+						urlPattern: ({ request, url }) => {
+							if (url.pathname.startsWith('/api/')) return false;
+							if (request.mode === 'navigate') return true;
+							// warmOfflineRouteCache() prefetches via fetch (mode: cors), not navigate.
+							return (
+								request.method === 'GET' &&
+								isOfflineCoreRoutePath(url.pathname) &&
+								request.headers.get('accept')?.includes('text/html') === true
+							);
+						},
 						handler: 'NetworkFirst',
 						options: {
 							cacheName: 'ccw-pages',

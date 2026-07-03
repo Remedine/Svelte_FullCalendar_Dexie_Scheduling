@@ -1012,9 +1012,21 @@
 		gap: var(--space-5);
 	}
 
+	.area-badge {
+		display: inline-flex;
+		align-items: center;
+		font-size: var(--font-size-xs);
+		padding: 0.15rem 0.45rem;
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-semibold);
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
 	.client-card {
 		/* base from global .card; list-specific */
 		padding: var(--space-5);
+		min-width: 0;
 		cursor: pointer;
 		transition:
 			background var(--transition-fast),
@@ -1035,6 +1047,7 @@
 
 	.client-card__main {
 		flex: 1;
+		min-width: 0;
 	}
 	.client-card__header {
 		display: grid;
@@ -1055,6 +1068,7 @@
 		font-size: var(--font-size-lg);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
+		overflow-wrap: anywhere;
 	}
 
 	.client-card__contact {
@@ -1274,16 +1288,38 @@
 	}
 
 	@media (max-width: 768px) {
+		.clients-page {
+			padding: var(--space-3) var(--space-2);
+		}
+
+		.clients-page__header {
+			margin-bottom: var(--space-4);
+			flex-wrap: wrap;
+			gap: var(--space-2);
+		}
+
+		.clients-page__title {
+			font-size: var(--font-size-2xl);
+			flex-basis: 100%;
+		}
+
+		.clients-page__filters {
+			margin-bottom: var(--space-3);
+		}
+
+		.clients-page__toolbar {
+			gap: var(--space-2);
+		}
+
 		.clients-page__browse {
 			display: flex;
 			gap: var(--space-1);
 		}
 
 		.clients-page__alphabet {
-			position: fixed;
-			left: max(2px, env(safe-area-inset-left, 0px));
-			top: 50%;
-			transform: translateY(-50%);
+			position: sticky;
+			top: var(--space-4);
+			align-self: flex-start;
 			padding: var(--space-1) 0;
 			background: color-mix(in srgb, var(--color-surface) 88%, transparent);
 			border-radius: var(--radius-md);
@@ -1297,7 +1333,107 @@
 		}
 
 		.clients-page__list {
-			padding-left: 1.85rem;
+			gap: var(--space-3);
+		}
+
+		.client-card {
+			padding: var(--space-3);
+			overflow-x: clip;
+		}
+
+		.client-card:hover {
+			transform: none;
+		}
+
+		.client-card__header {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-areas:
+				'name'
+				'badges'
+				'contact';
+			gap: var(--space-2);
+		}
+
+		.client-card__name {
+			font-size: var(--font-size-base);
+		}
+
+		.client-card__badges {
+			flex-direction: row;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: flex-start;
+		}
+
+		.client-card__contact {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: var(--space-1);
+		}
+
+		.client-card__contact-sep {
+			display: none;
+		}
+
+		.contact-link {
+			display: inline-block;
+			max-width: 100%;
+			overflow-wrap: anywhere;
+		}
+
+		.client-card__meta {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1) var(--space-2);
+			line-height: var(--line-height-normal);
+		}
+
+		.client-card__related {
+			min-width: 0;
+			overflow-x: clip;
+		}
+
+		.client-card__related-toggle {
+			min-height: 2.25rem;
+			padding: var(--space-2) 0;
+			font-size: var(--font-size-sm);
+		}
+
+		.client-card__related-list {
+			min-width: 0;
+		}
+
+		.client-card__related-job {
+			grid-template-columns: auto minmax(0, 1fr);
+			grid-template-areas:
+				'title title'
+				'date meta';
+			align-items: start;
+			padding: var(--space-2);
+		}
+
+		.client-card__related-job .title {
+			grid-area: title;
+			white-space: normal;
+			overflow-wrap: anywhere;
+			font-size: var(--font-size-sm);
+		}
+
+		.client-card__related-job .date {
+			grid-area: date;
+			white-space: nowrap;
+		}
+
+		.client-card__related-meta {
+			grid-area: meta;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			min-width: 0;
+			gap: var(--space-1) var(--space-2);
+		}
+
+		.client-card__related-job .invoice-badge {
+			white-space: normal;
 		}
 
 		.clients-page__facets {
@@ -1307,27 +1443,6 @@
 
 		.clients-page__facet-group {
 			width: 100%;
-		}
-	}
-
-	/* Mobile fixes for horizontal scroll: reduce min-widths, allow header wrap, contain grids. */
-	@media (max-width: 480px) {
-		.clients-page {
-			padding: var(--space-4) var(--space-3);
-		}
-
-		.clients-page__toolbar {
-			gap: var(--space-2);
-		}
-
-		.clients-page__header {
-			flex-wrap: wrap;
-			gap: var(--space-2);
-		}
-
-		.clients-page__title {
-			font-size: var(--font-size-2xl);
-			flex-basis: 100%;
 		}
 	}
 </style>

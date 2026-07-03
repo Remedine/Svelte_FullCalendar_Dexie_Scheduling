@@ -18,11 +18,6 @@
 	     first load / login. Hover/tap preloading is nice but not essential for this internal tool.
 	     The crossorigin plugin in vite.config still tries to annotate the ones that are emitted. -->
 	<body data-sveltekit-preload-data="false">
-		<script>
-			if ('serviceWorker' in navigator) {
-				navigator.serviceWorker.register('/sw.js', { scope: '/' });
-			}
-		</script>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

@@ -1,7 +1,8 @@
 import { browser } from '$app/environment';
+import { registerSW } from 'virtual:pwa-register';
 
-/** Register the app service worker (vite-plugin-pwa generateSW output at /sw.js). */
+/** Register the app service worker with vite-plugin-pwa autoUpdate lifecycle. */
 export function registerAppServiceWorker(): void {
-	if (!browser || !('serviceWorker' in navigator)) return;
-	void navigator.serviceWorker.register('/sw.js', { scope: '/' });
+	if (!browser) return;
+	registerSW({ immediate: true });
 }

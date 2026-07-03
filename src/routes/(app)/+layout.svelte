@@ -248,7 +248,8 @@
 	</main>
 
 	<!-- Bottom tab bar (mobile-first solution for wide menu problem).
-	     Per approved look-and-feel plan: Schedule always visible. Admins get Clients/Jobs/Crew/Options.
+	     Per approved look-and-feel plan: Schedule always visible. Admins get Clients/Jobs/Crew tabs.
+	     Options lives in the avatar submenu (admin only) to reclaim bar space.
 	     Desktop hides this via media query; top-nav menu remains for wide screens.
 	     BEM: bottom-nav, bottom-nav__tab, bottom-nav__tab--active. Uses emoji icons for zero-dep consistency with existing nav. -->
 	<nav class="bottom-nav" role="tablist" aria-label="Primary navigation">
@@ -295,16 +296,6 @@
 				<span class="bottom-nav__icon">👷</span>
 				<span class="bottom-nav__label">Crew</span>
 			</a>
-			<a
-				href="/admin/options"
-				class="bottom-nav__tab"
-				class:bottom-nav__tab--active={currentPath.startsWith('/admin/options')}
-				role="tab"
-				aria-selected={currentPath.startsWith('/admin/options')}
-			>
-				<span class="bottom-nav__icon">⚙️</span>
-				<span class="bottom-nav__label">Options</span>
-			</a>
 		{/if}
 
 		<!-- Mobile-only: avatar with submenu in bottom-right corner.
@@ -345,13 +336,21 @@
 				</div>
 				<div class="bottom-nav__user-menu" class:open={showAvatarMenu} onclick={(e) => e.stopPropagation()}>
 					<a href="/profile" class="bottom-nav__user-menu-item" onclick={() => showAvatarMenu = false}>Profile</a>
-					<!-- Theme toggle inside the submenu for cleaner mobile nav -->
-					<div class="bottom-nav__user-menu-item bottom-nav__theme-item" onclick={() => showAvatarMenu = false}>
+					<div class="bottom-nav__user-menu-item bottom-nav__theme-item">
 						<span class="bottom-nav__theme-label">
 							{theme.isDark ? 'Dark' : 'Light'}
 						</span>
 						<ThemeToggle />
 					</div>
+					{#if auth.currentUser.role === 'admin'}
+						<a
+							href="/admin/options"
+							class="bottom-nav__user-menu-item"
+							onclick={() => showAvatarMenu = false}
+						>
+							Options
+						</a>
+					{/if}
 					<button
 						onclick={() => { showAvatarMenu = false; handleLogout(); }}
 						class="bottom-nav__user-menu-item bottom-nav__user-menu-item--logout"

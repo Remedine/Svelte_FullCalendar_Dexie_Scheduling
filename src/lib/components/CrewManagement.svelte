@@ -440,7 +440,7 @@
 							class="modal__btn modal__btn--cancel button button--ghost">Cancel</button
 						>
 						<button onclick={saveEdit} class="modal__btn modal__btn--save button button--primary"
-							>Save Changes</button
+							>Save</button
 						>
 					</div>
 
@@ -777,16 +777,42 @@
 
 	/* Mobile tweaks for anchored edit actions */
 	@media (max-width: 768px) {
+		.modal__title {
+			padding: 0 var(--space-3);
+			font-size: var(--font-size-lg);
+		}
+
 		.modal__body {
 			padding: 0 var(--space-3);
 		}
+
 		.modal__actions {
-			padding: 0 var(--space-3) var(--space-3);
+			align-items: stretch;
+			padding: var(--space-3);
+			gap: var(--space-3);
 		}
-		.modal__primary-actions,
+
+		.modal__primary-actions {
+			display: flex;
+			flex-direction: row;
+			width: 100%;
+			gap: var(--space-2);
+		}
+
+		.modal__primary-actions .modal__btn {
+			flex: 1;
+			width: auto;
+			min-width: 0;
+			padding: var(--space-3) var(--space-2);
+			text-align: center;
+		}
+
 		.modal__secondary-actions {
 			width: 100%;
-			justify-content: flex-end;
+			flex-wrap: wrap;
+			justify-content: center;
+			gap: var(--space-3);
+			margin-top: 0;
 		}
 	}
 

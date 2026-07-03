@@ -126,6 +126,10 @@ async function completeSessionRestore(user: any, appSessionEmail?: string): Prom
 		if (!auth.locked) markSessionActivity();
 	}
 
+	void import('$lib/pwa/warmOfflineRoutes').then(({ warmOfflineRouteCache }) =>
+		warmOfflineRouteCache()
+	);
+
 	return true;
 }
 

@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import Toast from '$lib/components/Toast.svelte';
 	import PreloadFix from '$lib/components/PreloadFix.svelte';
-
+	import { registerAppServiceWorker } from '$lib/pwa/registerServiceWorker';
 
 	// Global tokens available on public surfaces (login, root loading)
 	import '$lib/styles/globals.css';
@@ -13,7 +13,9 @@
 
 	const { children } = $props();
 
-
+	if (browser) {
+		registerAppServiceWorker();
+	}
 </script>
 
 <svelte:head>
