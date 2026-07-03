@@ -1443,6 +1443,7 @@
 			margin-left: calc(-1 * var(--space-2));
 			margin-right: calc(-1 * var(--space-2));
 			padding: var(--space-2);
+			overflow: visible;
 		}
 
 		.invoice-editor__btn--generate {
@@ -1454,8 +1455,20 @@
 			display: none;
 		}
 
+		.invoice-editor__footer-tools {
+			justify-self: end;
+			grid-column: 2;
+		}
+
 		.invoice-editor__overflow-mobile-only {
 			display: block;
+		}
+
+		.invoice-editor__overflow-menu {
+			right: 0;
+			left: auto;
+			min-width: min(12rem, calc(100vw - var(--space-8)));
+			max-width: calc(100vw - var(--space-8));
 		}
 	}
 
