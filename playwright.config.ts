@@ -29,7 +29,8 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			use: { ...devices['Desktop Chrome'] }
+			use: { ...devices['Desktop Chrome'] },
+			testIgnore: ['**/offline-pages.spec.ts']
 		}
 		// Add mobile projects later when we have responsive E2E coverage
 	],

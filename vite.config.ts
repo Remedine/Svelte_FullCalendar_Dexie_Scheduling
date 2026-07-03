@@ -8,6 +8,9 @@ export default defineConfig({
 		sveltekit(),
 		VitePWA({
 			registerType: 'autoUpdate',
+			injectRegister: false,
+			scope: '/',
+			buildBase: '/',
 			manifest: {
 				name: 'Capital City Windows',
 				short_name: 'Capital City Windows',
@@ -15,6 +18,7 @@ export default defineConfig({
 				theme_color: '#002b5c',
 				background_color: '#002b5c',
 				display: 'standalone',
+				start_url: '/calendar',
 				// )=- PWA install icons generated from Capital City Windows brand logo (user-provided PNG).
 				// 192/512 required for Chrome/Android install prompts; maskable variant uses safe-zone padding.
 				// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
@@ -37,7 +41,42 @@ export default defineConfig({
 				'pwa-192x192.png',
 				'pwa-512x512.png',
 				'apple-touch-icon.png'
-			]
+			],
+			// )=- Offline shell: SvelteKit adapter-node has no static index.html — cache navigations at runtime.
+			// Precache already covers _app/immutable/*; NetworkFirst on document requests caches each route HTML
+			// after one online visit; warmOfflineRouteCache() prefetches calendar/jobs/clients/login on login.
+			workbox: {
+				navigateFallback: null,
+				navigateFallbackDenylist: [/^\/api\//, /^\/_/],
+				globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2,webmanifest}'],
+				runtimeCaching: [
+					{
+						urlPattern: ({ request, url }) =>
+							request.mode === 'navigate' && !url.pathname.startsWith('/api/'),
+						handler: 'NetworkFirst',
+						options: {
+							cacheName: 'ccw-pages',
+							networkTimeoutSeconds: 4,
+							expiration: {
+								maxEntries: 48,
+								maxAgeSeconds: 60 * 60 * 24 * 30
+							},
+							cacheableResponse: { statuses: [0, 200] }
+						}
+					},
+					{
+						urlPattern: /\/_app\/immutable\/.*/i,
+						handler: 'CacheFirst',
+						options: {
+							cacheName: 'ccw-immutable',
+							expiration: {
+								maxEntries: 300,
+								maxAgeSeconds: 60 * 60 * 24 * 365
+							}
+						}
+					}
+				]
+			}
 		}),
 		{
 			// Add crossorigin="anonymous" (and ensure proper as= for common cases) to generated preload/modulepreload links.

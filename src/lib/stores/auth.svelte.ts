@@ -344,6 +344,9 @@ export function setCurrentUser(user: any | null) {
 				syncAppSessionPbBackup()
 			);
 		});
+		void import('$lib/pwa/warmOfflineRoutes').then(({ warmOfflineRouteCache }) =>
+			warmOfflineRouteCache()
+		);
 	} else {
 		void import('$lib/auth/sessionPersist').then(({ clearAppSession }) => clearAppSession());
 	}

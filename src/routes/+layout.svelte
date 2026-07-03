@@ -4,6 +4,7 @@
 	import Toast from '$lib/components/Toast.svelte';
 	import PreloadFix from '$lib/components/PreloadFix.svelte';
 
+
 	// Global tokens available on public surfaces (login, root loading)
 	import '$lib/styles/globals.css';
 
@@ -11,6 +12,8 @@
 	import '$lib/stores/theme.svelte.ts';
 
 	const { children } = $props();
+
+
 </script>
 
 <svelte:head>
