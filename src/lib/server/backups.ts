@@ -34,6 +34,10 @@ export type OptionsBackupFields = {
 	backupDestEmail?: boolean;
 	backupDestGoogleDrive?: boolean;
 	backupGoogleDriveFolderId?: string;
+	/** OAuth refresh token — server-only; never map into client options store. */
+	backupGoogleDriveRefreshToken?: string;
+	backupGoogleDriveEmail?: string;
+	backupGoogleDriveFolderName?: string;
 	backupAlertEmails?: string;
 	lastBackupAt?: string;
 	lastBackupSizeBytes?: number;
@@ -320,6 +324,17 @@ export async function runBackup(
 	const destEmail = options?.backupDestEmail ?? false;
 	const destDrive = options?.backupDestGoogleDrive ?? false;
 	const driveFolderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
+	const driveRefreshToken = options?.backupGoogleDriveRefreshToken ?? '';
+	const driveMeta = {
+		refreshToken: driveRefreshToken,
+		folderId: driveFolderId,
+		folderName: options?.backupGoogleDriveFolderName,
+		email: options?.backupGoogleDriveEmail
+	};
+	const driveReady = isGoogleDriveConfigured(
+		options?.backupGoogleDriveFolderId,
+		driveRefreshToken
+	);
 	const syncQueueJson = syncQueueJsonFromOptions(options?.syncQueueSnapshot);
 
 	try {
@@ -353,7 +368,7 @@ export async function runBackup(
 		await patchOptionsRecord(patchFields);
 
 		let uploadedToDrive: string[] | undefined;
-		if (destDrive && driveFolderId && isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+		if (destDrive && driveFolderId && driveReady) {
 			try {
 				const buffers = await Promise.all(
 					artifacts.map(async (a) => ({
@@ -361,13 +376,17 @@ export async function runBackup(
 						buffer: await downloadBackupBuffer(a.name)
 					}))
 				);
-				uploadedToDrive = await uploadBackupArtifactsToDrive(driveFolderId, buffers);
+				uploadedToDrive = await uploadBackupArtifactsToDrive(
+					driveFolderId,
+					buffers,
+					driveMeta
+				);
 			} catch (driveErr) {
 				console.error('[backup] Google Drive upload failed:', driveErr);
 			}
-		} else if (destDrive && !isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+		} else if (destDrive && !driveReady) {
 			console.warn(
-				'[backup] Google Drive destination enabled but GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON or folder ID missing'
+				'[backup] Google Drive destination enabled but not connected (Options → Connect Google Drive) or folder missing'
 			);
 		}
 
@@ -402,9 +421,13 @@ export async function runBackup(
 		const { pruned } = await pruneBackupsByRetention();
 
 		let drivePruned: string[] | undefined;
-		if (destDrive && driveFolderId && isGoogleDriveConfigured(options?.backupGoogleDriveFolderId)) {
+		if (destDrive && driveFolderId && driveReady) {
 			try {
-				const driveResult = await pruneGoogleDriveBackupsByRetention(driveFolderId);
+				const driveResult = await pruneGoogleDriveBackupsByRetention(
+					driveFolderId,
+					new Date(),
+					driveMeta
+				);
 				drivePruned = driveResult.pruned;
 			} catch (drivePruneErr) {
 				console.error('[backup] Google Drive retention prune failed:', drivePruneErr);

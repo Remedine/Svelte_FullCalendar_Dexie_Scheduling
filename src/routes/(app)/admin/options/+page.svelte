@@ -23,6 +23,7 @@
 		isRestorableBackupFilename,
 		type BackupArtifactKind
 	} from '$lib/backups/names';
+	import { page } from '$app/state';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
 	// This avoids duplicate redirects and race conditions on navigation.
@@ -46,6 +47,21 @@
 
 	let isSaving = $state(false);
 	let activeTab = $state<'scheduling' | 'security' | 'invoice' | 'backups'>('scheduling');
+
+	type DriveStatus = {
+		oauthAppReady: boolean;
+		connected: boolean;
+		hasOAuthToken: boolean;
+		hasServiceAccount: boolean;
+		email: string;
+		folderId: string;
+		folderName: string;
+		destEnabled: boolean;
+	};
+	let driveStatus = $state<DriveStatus | null>(null);
+	let driveStatusLoading = $state(false);
+	let driveActionBusy = $state(false);
+	let driveReturnHandled = false;
 
 	// )=- One-time flag to ensure options load/pull happens only once, preventing repeated pull attempts and error spam if pull fails.
 	let optionsInitialized = $state(false);
@@ -143,11 +159,47 @@
 				backupDestEmail: false,
 				backupDestGoogleDrive: false,
 				backupGoogleDriveFolderId: '',
+				backupGoogleDriveEmail: '',
+				backupGoogleDriveFolderName: '',
 				backupAlertEmails: '',
 				areasOfTown: [],
 				defaultBillableItems: [],
 				cancelReasons: []
 			};
+		}
+	});
+
+	/** Deep-link from Google OAuth callback: /admin/options?tab=backups&gdrive=… */
+	$effect(() => {
+		const tab = page.url.searchParams.get('tab');
+		if (tab === 'backups' || tab === 'scheduling' || tab === 'security' || tab === 'invoice') {
+			activeTab = tab;
+		}
+		if (driveReturnHandled) return;
+		const gdrive = page.url.searchParams.get('gdrive');
+		if (!gdrive) return;
+		driveReturnHandled = true;
+		if (gdrive === 'connected') {
+			const email = page.url.searchParams.get('email') || 'Google Drive';
+			toast.success(`Google Drive connected (${email}). Backups can upload there.`);
+			if (editingOptions) {
+				editingOptions.backupDestGoogleDrive = true;
+				editingOptions.backupGoogleDriveEmail = email === 'Google Drive' ? '' : email;
+			}
+			void loadDriveStatus();
+		} else if (gdrive === 'error') {
+			const message =
+				page.url.searchParams.get('message') || 'Could not connect Google Drive.';
+			toast.error(message);
+		}
+		// Clean query params without full navigation noise
+		if (typeof history !== 'undefined' && page.url.searchParams.has('gdrive')) {
+			const clean = new URL(page.url);
+			clean.searchParams.delete('gdrive');
+			clean.searchParams.delete('message');
+			clean.searchParams.delete('email');
+			if (!clean.searchParams.get('tab')) clean.searchParams.set('tab', 'backups');
+			history.replaceState(history.state, '', clean.pathname + clean.search);
 		}
 	});
 
@@ -406,6 +458,85 @@
 		return backupListLoadInFlight;
 	}
 
+	async function loadDriveStatus() {
+		if (!pb?.authStore?.token) return;
+		driveStatusLoading = true;
+		try {
+			await ensureFreshAdminSession();
+			const res = await fetch('/api/admin/backups/google-drive', {
+				headers: { Authorization: pb.authStore.token }
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(data.error || 'Failed to load Google Drive status');
+			}
+			driveStatus = data as DriveStatus;
+			if (editingOptions && data.connected) {
+				editingOptions.backupGoogleDriveEmail = data.email || '';
+				editingOptions.backupGoogleDriveFolderId = data.folderId || '';
+				editingOptions.backupGoogleDriveFolderName = data.folderName || '';
+				if (data.destEnabled) editingOptions.backupDestGoogleDrive = true;
+			}
+		} catch (err: any) {
+			console.warn('[backups] drive status:', err?.message || err);
+		} finally {
+			driveStatusLoading = false;
+		}
+	}
+
+	async function connectGoogleDrive() {
+		if (!pb?.authStore?.token) return;
+		driveActionBusy = true;
+		try {
+			await ensureFreshAdminSession();
+			const res = await fetch('/api/admin/backups/google-drive', {
+				method: 'POST',
+				headers: { Authorization: pb.authStore.token }
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(data.error || 'Could not start Google sign-in');
+			}
+			if (!data.url) throw new Error('No Google sign-in URL returned');
+			window.location.href = data.url as string;
+		} catch (err: any) {
+			toast.error(err?.message || 'Could not connect Google Drive');
+			driveActionBusy = false;
+		}
+	}
+
+	async function disconnectGoogleDrive() {
+		if (!pb?.authStore?.token) return;
+		const ok = confirm(
+			'Disconnect Google Drive? Future backups will not upload to Drive until you connect again.'
+		);
+		if (!ok) return;
+		driveActionBusy = true;
+		try {
+			await ensureFreshAdminSession();
+			const res = await fetch('/api/admin/backups/google-drive', {
+				method: 'DELETE',
+				headers: { Authorization: pb.authStore.token }
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(data.error || 'Disconnect failed');
+			}
+			if (editingOptions) {
+				editingOptions.backupDestGoogleDrive = false;
+				editingOptions.backupGoogleDriveFolderId = '';
+				editingOptions.backupGoogleDriveEmail = '';
+				editingOptions.backupGoogleDriveFolderName = '';
+			}
+			toast.success('Google Drive disconnected');
+			await loadDriveStatus();
+		} catch (err: any) {
+			toast.error(err?.message || 'Disconnect failed');
+		} finally {
+			driveActionBusy = false;
+		}
+	}
+
 	async function runBackupNow() {
 		if (!pb?.authStore?.token) return;
 		await ensureFreshAdminSession();
@@ -425,7 +556,13 @@
 				throw new Error(data.error || 'Backup failed');
 			}
 			const count = Array.isArray(data.artifacts) ? data.artifacts.length : 1;
-			toast.success(`Backup created (${count} artifact${count === 1 ? '' : 's'}): ${data.filename || 'success'}`);
+			const driveNote =
+				Array.isArray(data.uploadedToDrive) && data.uploadedToDrive.length > 0
+					? ` · uploaded ${data.uploadedToDrive.length} file(s) to Google Drive`
+					: '';
+			toast.success(
+				`Backup created (${count} artifact${count === 1 ? '' : 's'}): ${data.filename || 'success'}${driveNote}`
+			);
 			editingOptions.lastBackupAt = new Date().toISOString();
 			editingOptions.lastBackupStatus = 'success';
 			editingOptions.lastBackupFilename = data.filename;
@@ -549,6 +686,7 @@
 		if (backupListPrimedForTab) return;
 		backupListPrimedForTab = true;
 		void loadBackupList();
+		void loadDriveStatus();
 	});
 
 	// )=- Removed legacy onMount (duplicate of the $effect below, and onMount not imported — would throw ReferenceError on page load, potentially causing navigation/auth guard side-effects like redirect to login).
@@ -1067,23 +1205,98 @@
 						<input type="checkbox" bind:checked={editingOptions.backupDestEmail} />
 						Email backup artifacts when attachable (under 18 MB; larger sets: download from this page)
 					</label>
-					<label class="backup-settings__check">
-						<input type="checkbox" bind:checked={editingOptions.backupDestGoogleDrive} />
-						Upload backup artifacts to Google Drive
-					</label>
-					<label for="opt-backup-gdrive-folder" class="label">Google Drive folder ID</label>
-					<input
-						id="opt-backup-gdrive-folder"
-						type="text"
-						class="input"
-						placeholder="Leave blank to use GOOGLE_DRIVE_FOLDER_ID env var"
-						bind:value={editingOptions.backupGoogleDriveFolderId}
-					/>
-					<p class="options-page__help">
-						Create a shared folder, share it with the service account email from
-						<code>GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON</code> (Editor). Set the JSON key in Railway
-						server env vars.
-					</p>
+
+					<div class="backup-gdrive">
+						<h4 class="backup-gdrive__title">Google Drive</h4>
+						<p class="options-page__help backup-gdrive__intro">
+							Connect a Google account so each backup is also saved to Drive. No service-account
+							JSON or folder IDs required — sign in once and we create a
+							<strong>Capital City Windows Backups</strong> folder for you.
+						</p>
+
+						{#if driveStatusLoading && !driveStatus}
+							<p class="options-page__help">Checking Google Drive connection…</p>
+						{:else if driveStatus?.connected}
+							<div class="backup-gdrive__status backup-gdrive__status--connected" role="status">
+								<span class="backup-gdrive__badge">Connected</span>
+								{#if driveStatus.email || editingOptions.backupGoogleDriveEmail}
+									<p class="backup-gdrive__line">
+										<strong>Account:</strong>
+										{driveStatus.email || editingOptions.backupGoogleDriveEmail}
+									</p>
+								{/if}
+								<p class="backup-gdrive__line">
+									<strong>Folder:</strong>
+									{driveStatus.folderName ||
+										editingOptions.backupGoogleDriveFolderName ||
+										'Capital City Windows Backups'}
+								</p>
+								{#if driveStatus.hasServiceAccount && !driveStatus.hasOAuthToken}
+									<p class="options-page__help">
+										Using server service-account credentials (advanced). You can still connect a
+										personal Google account below if preferred.
+									</p>
+								{/if}
+							</div>
+							<label class="backup-settings__check">
+								<input type="checkbox" bind:checked={editingOptions.backupDestGoogleDrive} />
+								Upload backup artifacts to Google Drive
+							</label>
+							<div class="backup-gdrive__actions">
+								{#if driveStatus.hasOAuthToken || driveStatus.oauthAppReady}
+									<button
+										type="button"
+										class="options-page__btn options-page__btn--add"
+										onclick={connectGoogleDrive}
+										disabled={driveActionBusy || !driveStatus.oauthAppReady}
+									>
+										{driveActionBusy ? 'Redirecting…' : 'Reconnect Google Drive'}
+									</button>
+								{/if}
+								{#if driveStatus.hasOAuthToken}
+									<button
+										type="button"
+										class="options-page__btn options-page__btn--danger"
+										onclick={disconnectGoogleDrive}
+										disabled={driveActionBusy}
+									>
+										Disconnect
+									</button>
+								{/if}
+							</div>
+						{:else}
+							<label class="backup-settings__check backup-settings__check--disabled">
+								<input type="checkbox" checked={false} disabled />
+								Upload backup artifacts to Google Drive
+								<span class="backup-gdrive__hint">(connect first)</span>
+							</label>
+							{#if driveStatus && !driveStatus.oauthAppReady}
+								<p class="backup-gdrive__setup-warn">
+									Connect is not available yet: the app server needs Google OAuth client credentials
+									set once (<code>GOOGLE_OAUTH_CLIENT_ID</code> /
+									<code>GOOGLE_OAUTH_CLIENT_SECRET</code>). Ask your developer if you see this
+									message.
+								</p>
+							{:else}
+								<div class="backup-gdrive__actions">
+									<button
+										type="button"
+										class="options-page__btn options-page__btn--save"
+										onclick={connectGoogleDrive}
+										disabled={driveActionBusy || driveStatusLoading}
+									>
+										{driveActionBusy ? 'Redirecting to Google…' : 'Connect Google Drive'}
+									</button>
+								</div>
+								<p class="options-page__help">
+									You’ll sign in with Google, approve Drive access, then return here. Backups start
+									uploading after you save and run <strong>Backup now</strong> (or on the daily
+									schedule).
+								</p>
+							{/if}
+						{/if}
+					</div>
+
 					<label for="opt-backup-alerts" class="label">Alert / delivery emails</label>
 					<textarea
 						id="opt-backup-alerts"
@@ -1653,6 +1866,76 @@
 		font-weight: var(--font-weight-medium);
 	}
 
+	.backup-gdrive {
+		margin: var(--space-4) 0;
+		padding: var(--space-4);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+	}
+	.backup-gdrive__title {
+		margin: 0 0 var(--space-2);
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+	.backup-gdrive__intro {
+		margin-bottom: var(--space-3);
+	}
+	.backup-gdrive__status {
+		margin-bottom: var(--space-3);
+		padding: var(--space-3);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
+	}
+	.backup-gdrive__status--connected {
+		border-left: 3px solid var(--color-success, #16a34a);
+	}
+	.backup-gdrive__badge {
+		display: inline-block;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-bold);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-success, #16a34a);
+		margin-bottom: var(--space-2);
+	}
+	.backup-gdrive__line {
+		margin: 0 0 var(--space-1);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+	}
+	.backup-gdrive__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		margin-top: var(--space-3);
+	}
+	.backup-gdrive__hint {
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		margin-left: var(--space-1);
+	}
+	.backup-gdrive__setup-warn {
+		margin: var(--space-2) 0 0;
+		padding: var(--space-3);
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+		background: var(--color-warning-soft, rgba(234, 179, 8, 0.12));
+		border-radius: var(--radius-sm);
+	}
+	.backup-settings__check--disabled {
+		opacity: 0.75;
+		cursor: not-allowed;
+	}
+	.options-page__btn--danger {
+		background: var(--color-danger-soft, #fee2e2);
+		color: var(--color-danger-emphasis, #b91c1c);
+		border: 1px solid transparent;
+	}
+	.options-page__btn--danger:hover:not(:disabled) {
+		filter: brightness(0.97);
+	}
 	.backup-settings {
 		display: flex;
 		flex-direction: column;

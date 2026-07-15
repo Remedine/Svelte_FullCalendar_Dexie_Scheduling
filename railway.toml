@@ -38,8 +38,11 @@ restartPolicyMaxRetries = 10
 #   PUBLIC_POCKETBASE_URL / PUBLIC_PB_URL  → that environment's PocketBase public URL
 #   INTERNAL_SECRET                        → must match PocketBase service
 #   BODY_SIZE_LIMIT=64M                    → backup .zip uploads (adapter-node default is 512KB)
-#   GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON      → optional; full service-account JSON for Drive backups
-#   GOOGLE_DRIVE_FOLDER_ID                 → optional default folder (overridable in Options → Backups)
+#   GOOGLE_OAUTH_CLIENT_ID                 → Google Cloud OAuth client (user-friendly Connect in Options)
+#   GOOGLE_OAUTH_CLIENT_SECRET             → matching OAuth client secret
+#   PUBLIC_APP_URL                         → optional; public https origin for OAuth redirect (defaults to Railway domain)
+#   GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON      → optional advanced fallback (not needed if admins use Connect)
+#   GOOGLE_DRIVE_FOLDER_ID                 → optional default folder for service-account mode only
 #
 # Required per-environment variables (PocketBase service):
 #   PB_PUBLIC_URL, INTERNAL_SECRET, POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD

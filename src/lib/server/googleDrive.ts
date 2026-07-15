@@ -1,12 +1,38 @@
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
+import { INTERNAL_SECRET } from '$env/static/private';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 
 type DriveFile = { id: string; name: string };
 
+export type GoogleDriveConnectionMeta = {
+	refreshToken?: string | null;
+	folderId?: string | null;
+	folderName?: string | null;
+	email?: string | null;
+};
+
+const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DEFAULT_FOLDER_NAME = 'Capital City Windows Backups';
+const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
+
 function serviceAccountJson(): string | null {
 	const raw = process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON?.trim();
 	return raw || null;
+}
+
+export function oauthClientId(): string | null {
+	return process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
+}
+
+export function oauthClientSecret(): string | null {
+	return process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
+}
+
+/** True when the app can start a user OAuth connect flow (developer one-time env). */
+export function isGoogleOAuthAppConfigured(): boolean {
+	return Boolean(oauthClientId() && oauthClientSecret());
 }
 
 export function resolveGoogleDriveFolderId(optionsFolderId?: string | null): string | null {
@@ -16,14 +42,173 @@ export function resolveGoogleDriveFolderId(optionsFolderId?: string | null): str
 	return fromEnv || null;
 }
 
-export function isGoogleDriveConfigured(optionsFolderId?: string | null): boolean {
-	return Boolean(serviceAccountJson() && resolveGoogleDriveFolderId(optionsFolderId));
+/** Ready to upload: OAuth refresh token or service account, plus a folder id. */
+export function isGoogleDriveConfigured(
+	optionsFolderId?: string | null,
+	refreshToken?: string | null
+): boolean {
+	const folderId = resolveGoogleDriveFolderId(optionsFolderId);
+	if (!folderId) return false;
+	if (refreshToken?.trim()) return true;
+	return Boolean(serviceAccountJson());
 }
 
-async function getDriveClient() {
+export function isGoogleDriveConnected(meta: GoogleDriveConnectionMeta): boolean {
+	return Boolean(meta.refreshToken?.trim() || serviceAccountJson());
+}
+
+function oauthRedirectUri(appOrigin: string): string {
+	const origin = appOrigin.replace(/\/$/, '');
+	return `${origin}/api/admin/backups/google-drive/callback`;
+}
+
+function createOAuth2Client(appOrigin: string) {
+	const clientId = oauthClientId();
+	const clientSecret = oauthClientSecret();
+	if (!clientId || !clientSecret) {
+		throw new Error('Google OAuth is not configured (GOOGLE_OAUTH_CLIENT_ID / SECRET)');
+	}
+	return new google.auth.OAuth2(clientId, clientSecret, oauthRedirectUri(appOrigin));
+}
+
+function signOAuthState(payload: Record<string, unknown>): string {
+	const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+	const sig = createHmac('sha256', INTERNAL_SECRET).update(body).digest('base64url');
+	return `${body}.${sig}`;
+}
+
+function verifyOAuthState(state: string): { exp: number; nonce: string } | null {
+	const [body, sig] = state.split('.');
+	if (!body || !sig) return null;
+	const expected = createHmac('sha256', INTERNAL_SECRET).update(body).digest('base64url');
+	try {
+		const a = Buffer.from(sig);
+		const b = Buffer.from(expected);
+		if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+	} catch {
+		return null;
+	}
+	try {
+		const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
+			exp?: number;
+			nonce?: string;
+		};
+		if (!parsed.exp || !parsed.nonce || Date.now() > parsed.exp) return null;
+		return { exp: parsed.exp, nonce: parsed.nonce };
+	} catch {
+		return null;
+	}
+}
+
+/** Build Google consent URL for admin Connect button. */
+export function buildGoogleDriveAuthUrl(appOrigin: string): string {
+	const client = createOAuth2Client(appOrigin);
+	const state = signOAuthState({
+		exp: Date.now() + OAUTH_STATE_TTL_MS,
+		nonce: randomUUID()
+	});
+	return client.generateAuthUrl({
+		access_type: 'offline',
+		prompt: 'consent',
+		scope: [DRIVE_FILE_SCOPE],
+		include_granted_scopes: true,
+		state
+	});
+}
+
+export type OAuthExchangeResult = {
+	refreshToken: string;
+	email: string;
+	folderId: string;
+	folderName: string;
+};
+
+/** Exchange OAuth code, ensure backup folder exists, return connection fields. */
+export async function completeGoogleDriveOAuth(
+	appOrigin: string,
+	code: string,
+	state: string
+): Promise<OAuthExchangeResult> {
+	if (!verifyOAuthState(state)) {
+		throw new Error('Invalid or expired Google sign-in. Please try Connect again.');
+	}
+	const client = createOAuth2Client(appOrigin);
+	const { tokens } = await client.getToken(code);
+	if (!tokens.refresh_token) {
+		throw new Error(
+			'Google did not return a refresh token. Disconnect the app in your Google Account permissions and try Connect again.'
+		);
+	}
+	client.setCredentials(tokens);
+	const drive = google.drive({ version: 'v3', auth: client });
+
+	let email = '';
+	try {
+		const about = await drive.about.get({ fields: 'user(emailAddress,displayName)' });
+		email = about.data.user?.emailAddress?.trim() || '';
+	} catch {
+		// drive.file may still work without about; email is display-only
+	}
+
+	const folder = await ensureBackupFolder(drive, DEFAULT_FOLDER_NAME);
+
+	return {
+		refreshToken: tokens.refresh_token,
+		email,
+		folderId: folder.id,
+		folderName: folder.name
+	};
+}
+
+async function ensureBackupFolder(
+	drive: ReturnType<typeof google.drive>,
+	folderName: string
+): Promise<{ id: string; name: string }> {
+	const escaped = folderName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+	const existing = await drive.files.list({
+		q: `name='${escaped}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+		fields: 'files(id, name)',
+		pageSize: 5,
+		spaces: 'drive'
+	});
+	const found = existing.data.files?.[0];
+	if (found?.id && found.name) {
+		return { id: found.id, name: found.name };
+	}
+
+	const created = await drive.files.create({
+		requestBody: {
+			name: folderName,
+			mimeType: 'application/vnd.google-apps.folder'
+		},
+		fields: 'id, name'
+	});
+	if (!created.data.id) {
+		throw new Error('Could not create Google Drive backup folder');
+	}
+	return {
+		id: created.data.id,
+		name: created.data.name || folderName
+	};
+}
+
+async function getDriveClient(meta: GoogleDriveConnectionMeta = {}) {
+	const refreshToken = meta.refreshToken?.trim();
+	if (refreshToken) {
+		const clientId = oauthClientId();
+		const clientSecret = oauthClientSecret();
+		if (!clientId || !clientSecret) {
+			throw new Error('Google OAuth is not configured on the server');
+		}
+		// Redirect URI is not used for refresh, but OAuth2 client still needs credentials
+		const client = new google.auth.OAuth2(clientId, clientSecret);
+		client.setCredentials({ refresh_token: refreshToken });
+		return google.drive({ version: 'v3', auth: client });
+	}
+
 	const json = serviceAccountJson();
 	if (!json) {
-		throw new Error('GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON is not configured');
+		throw new Error('Google Drive is not connected');
 	}
 	const credentials = JSON.parse(json) as Record<string, unknown>;
 	const auth = new google.auth.GoogleAuth({
@@ -60,13 +245,14 @@ async function listAllFilesInFolder(
 	return files;
 }
 
-/** Upload backup artifacts from buffers to a shared Google Drive folder. */
+/** Upload backup artifacts from buffers to the connected Google Drive folder. */
 export async function uploadBackupArtifactsToDrive(
 	folderId: string,
-	artifacts: Array<{ name: string; buffer: Buffer }>
+	artifacts: Array<{ name: string; buffer: Buffer }>,
+	meta: GoogleDriveConnectionMeta = {}
 ): Promise<string[]> {
 	if (artifacts.length === 0) return [];
-	const drive = await getDriveClient();
+	const drive = await getDriveClient(meta);
 	const uploaded: string[] = [];
 
 	const existingByName = new Map(
@@ -100,9 +286,10 @@ export async function uploadBackupArtifactsToDrive(
 /** Prune dated backup artifacts on Google Drive per spec §14.4 retention calendar. */
 export async function pruneGoogleDriveBackupsByRetention(
 	folderId: string,
-	now = new Date()
+	now = new Date(),
+	meta: GoogleDriveConnectionMeta = {}
 ): Promise<{ pruned: string[]; kept: number }> {
-	const drive = await getDriveClient();
+	const drive = await getDriveClient(meta);
 	const files = await listAllFilesInFolder(drive, folderId);
 	const pruned: string[] = [];
 	let kept = 0;
@@ -122,4 +309,29 @@ export async function pruneGoogleDriveBackupsByRetention(
 	}
 
 	return { pruned, kept };
+}
+
+export function optionsPageRedirect(
+	appOrigin: string,
+	params: Record<string, string>
+): string {
+	const origin = appOrigin.replace(/\/$/, '');
+	const qs = new URLSearchParams({ tab: 'backups', ...params });
+	return `${origin}/admin/options?${qs.toString()}`;
+}
+
+export function resolveAppOrigin(request: Request): string {
+	const envUrl =
+		process.env.PUBLIC_APP_URL?.trim() ||
+		(process.env.RAILWAY_PUBLIC_DOMAIN
+			? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}`
+			: '');
+	if (envUrl) return envUrl.replace(/\/$/, '');
+
+	const proto = request.headers.get('x-forwarded-proto') || 'https';
+	const host =
+		request.headers.get('x-forwarded-host') ||
+		request.headers.get('host') ||
+		'localhost';
+	return `${proto}://${host}`.replace(/\/$/, '');
 }
