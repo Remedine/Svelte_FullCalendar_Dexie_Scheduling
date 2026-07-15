@@ -53,6 +53,7 @@
 		connected: boolean;
 		hasOAuthToken: boolean;
 		hasServiceAccount: boolean;
+		needsReconnect?: boolean;
 		email: string;
 		folderId: string;
 		folderName: string;
@@ -569,6 +570,10 @@
 			toast.success(
 				`Backup created (${count} artifact${count === 1 ? '' : 's'}): ${data.filename || 'success'}${driveNote}`
 			);
+			if (data.driveError) {
+				driveErrorBanner = String(data.driveError);
+				toast.error(String(data.driveError), 20000);
+			}
 			editingOptions.lastBackupAt = new Date().toISOString();
 			editingOptions.lastBackupStatus = 'success';
 			editingOptions.lastBackupFilename = data.filename;
@@ -1234,9 +1239,19 @@
 
 						{#if driveStatusLoading && !driveStatus}
 							<p class="options-page__help">Checking Google Drive connection…</p>
-						{:else if driveStatus?.connected}
-							<div class="backup-gdrive__status backup-gdrive__status--connected" role="status">
-								<span class="backup-gdrive__badge">Connected</span>
+						{:else if driveStatus?.connected || driveStatus?.needsReconnect || driveStatus?.folderId}
+							<div
+								class="backup-gdrive__status"
+								class:backup-gdrive__status--connected={driveStatus.connected}
+								class:backup-gdrive__status--warn={driveStatus.needsReconnect ||
+									!driveStatus.connected}
+								role="status"
+							>
+								{#if driveStatus.connected}
+									<span class="backup-gdrive__badge">Connected</span>
+								{:else}
+									<span class="backup-gdrive__badge backup-gdrive__badge--warn">Reconnect needed</span>
+								{/if}
 								{#if driveStatus.email || editingOptions.backupGoogleDriveEmail}
 									<p class="backup-gdrive__line">
 										<strong>Account:</strong>
@@ -1249,6 +1264,13 @@
 										editingOptions.backupGoogleDriveFolderName ||
 										'Capital City Windows Backups'}
 								</p>
+								{#if driveStatus.needsReconnect || !driveStatus.hasOAuthToken}
+									<p class="options-page__help">
+										Google created the backup folder, but the server did not keep the sign-in token
+										(schema was incomplete). Click <strong>Connect Google Drive</strong> again so
+										uploads can work, then run <strong>Backup now</strong>.
+									</p>
+								{/if}
 								{#if driveStatus.hasServiceAccount && !driveStatus.hasOAuthToken}
 									<p class="options-page__help">
 										Using server service-account credentials (advanced). You can still connect a
@@ -1257,18 +1279,26 @@
 								{/if}
 							</div>
 							<label class="backup-settings__check">
-								<input type="checkbox" bind:checked={editingOptions.backupDestGoogleDrive} />
+								<input
+									type="checkbox"
+									bind:checked={editingOptions.backupDestGoogleDrive}
+									disabled={!driveStatus.connected}
+								/>
 								Upload backup artifacts to Google Drive
 							</label>
 							<div class="backup-gdrive__actions">
-								{#if driveStatus.hasOAuthToken || driveStatus.oauthAppReady}
+								{#if driveStatus.oauthAppReady}
 									<button
 										type="button"
-										class="options-page__btn options-page__btn--add"
+										class="options-page__btn options-page__btn--save"
 										onclick={connectGoogleDrive}
-										disabled={driveActionBusy || !driveStatus.oauthAppReady}
+										disabled={driveActionBusy}
 									>
-										{driveActionBusy ? 'Redirecting…' : 'Reconnect Google Drive'}
+										{driveActionBusy
+											? 'Redirecting…'
+											: driveStatus.connected
+												? 'Reconnect Google Drive'
+												: 'Connect Google Drive'}
 									</button>
 								{/if}
 								{#if driveStatus.hasOAuthToken}
@@ -1909,6 +1939,9 @@
 	.backup-gdrive__status--connected {
 		border-left: 3px solid var(--color-success, #16a34a);
 	}
+	.backup-gdrive__status--warn {
+		border-left: 3px solid var(--color-warning, #ca8a04);
+	}
 	.backup-gdrive__badge {
 		display: inline-block;
 		font-size: var(--font-size-xs);
@@ -1917,6 +1950,9 @@
 		letter-spacing: 0.04em;
 		color: var(--color-success, #16a34a);
 		margin-bottom: var(--space-2);
+	}
+	.backup-gdrive__badge--warn {
+		color: var(--color-warning, #ca8a04);
 	}
 	.backup-gdrive__line {
 		margin: 0 0 var(--space-1);

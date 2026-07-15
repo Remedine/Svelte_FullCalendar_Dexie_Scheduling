@@ -6,6 +6,7 @@ import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/reten
 import { sendBackupFailureAlert, sendBackupSuccessEmail } from '$lib/server/brevo';
 import {
 	isGoogleDriveConfigured,
+	openDriveRefreshToken,
 	pruneGoogleDriveBackupsByRetention,
 	resolveGoogleDriveFolderId,
 	uploadBackupArtifactsToDrive
@@ -289,6 +290,8 @@ export type RunBackupResult = {
 	error?: string;
 	emailed?: boolean;
 	uploadedToDrive?: string[];
+	/** Set when Drive destination is on but upload was skipped or failed. */
+	driveError?: string;
 	drivePruned?: string[];
 	pruned?: string[];
 };
@@ -324,7 +327,7 @@ export async function runBackup(
 	const destEmail = options?.backupDestEmail ?? false;
 	const destDrive = options?.backupDestGoogleDrive ?? false;
 	const driveFolderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
-	const driveRefreshToken = options?.backupGoogleDriveRefreshToken ?? '';
+	const driveRefreshToken = openDriveRefreshToken(options?.backupGoogleDriveRefreshToken);
 	const driveMeta = {
 		refreshToken: driveRefreshToken,
 		folderId: driveFolderId,
@@ -368,6 +371,7 @@ export async function runBackup(
 		await patchOptionsRecord(patchFields);
 
 		let uploadedToDrive: string[] | undefined;
+		let driveError: string | undefined;
 		if (destDrive && driveFolderId && driveReady) {
 			try {
 				const buffers = await Promise.all(
@@ -382,12 +386,14 @@ export async function runBackup(
 					driveMeta
 				);
 			} catch (driveErr) {
+				driveError =
+					driveErr instanceof Error ? driveErr.message : String(driveErr);
 				console.error('[backup] Google Drive upload failed:', driveErr);
 			}
 		} else if (destDrive && !driveReady) {
-			console.warn(
-				'[backup] Google Drive destination enabled but not connected (Options → Connect Google Drive) or folder missing'
-			);
+			driveError =
+				'Google Drive is enabled but not fully connected (missing refresh token). Open Options → Backups → Connect / Reconnect Google Drive, then try Backup now again.';
+			console.warn('[backup]', driveError);
 		}
 
 		let emailed = false;
@@ -442,6 +448,7 @@ export async function runBackup(
 			artifacts,
 			emailed,
 			uploadedToDrive,
+			driveError,
 			drivePruned,
 			pruned
 		};

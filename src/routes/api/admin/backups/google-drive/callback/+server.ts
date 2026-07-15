@@ -3,7 +3,8 @@ import { patchOptionsRecord } from '$lib/server/backups';
 import {
 	completeGoogleDriveOAuth,
 	optionsPageRedirect,
-	resolveAppOrigin
+	resolveAppOrigin,
+	sealDriveRefreshToken
 } from '$lib/server/googleDrive';
 
 /**
@@ -37,8 +38,9 @@ export async function GET({ request, url }: { request: Request; url: URL }) {
 
 	try {
 		const result = await completeGoogleDriveOAuth(origin, code, state);
+		const sealedToken = sealDriveRefreshToken(result.refreshToken);
 		const ok = await patchOptionsRecord({
-			backupGoogleDriveRefreshToken: result.refreshToken,
+			backupGoogleDriveRefreshToken: sealedToken,
 			backupGoogleDriveEmail: result.email,
 			backupGoogleDriveFolderId: result.folderId,
 			backupGoogleDriveFolderName: result.folderName,
@@ -47,6 +49,15 @@ export async function GET({ request, url }: { request: Request; url: URL }) {
 		});
 		if (!ok) {
 			throw new Error('Connected to Google but failed to save settings. Try again.');
+		}
+		// Confirm token is readable via internal options (catches hidden-field / schema issues).
+		const { fetchOptionsRecord } = await import('$lib/server/backups');
+		const verify = await fetchOptionsRecord();
+		const stored = verify?.backupGoogleDriveRefreshToken?.trim() || '';
+		if (!stored) {
+			throw new Error(
+				'Google connected but the server could not store the Drive token on options. Check PocketBase options fields, then try Connect again.'
+			);
 		}
 		throw redirect(
 			302,

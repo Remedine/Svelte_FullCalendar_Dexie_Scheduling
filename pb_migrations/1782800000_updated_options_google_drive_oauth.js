@@ -22,8 +22,9 @@ migrate((app) => {
     }
   }
 
-  // Refresh token: hidden so normal collection API responses omit it (admin UI uses status API).
-  addText("backupGoogleDriveRefreshToken", "txtbkgdrvtoken1", true)
+  // Refresh token must NOT be PocketBase-hidden: the internal options API strips hidden fields,
+  // which broke Drive uploads. Value is AES-GCM sealed by the Svelte server before save.
+  addText("backupGoogleDriveRefreshToken", "txtbkgdrvtoken1", false)
   addText("backupGoogleDriveEmail", "txtbkgdrvemail1", false)
   addText("backupGoogleDriveFolderName", "txtbkgdrvfname1", false)
 

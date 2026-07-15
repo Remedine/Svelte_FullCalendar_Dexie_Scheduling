@@ -1,8 +1,54 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+	createCipheriv,
+	createDecipheriv,
+	createHash,
+	createHmac,
+	randomBytes,
+	randomUUID,
+	timingSafeEqual
+} from 'node:crypto';
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
+
+/** Prefix for AES-GCM sealed refresh tokens stored on options (readable by internal API). */
+const TOKEN_SEAL_PREFIX = 'enc:v1:';
+
+function tokenEncryptionKey(): Buffer {
+	return createHash('sha256').update(`ccw-gdrive-token:${INTERNAL_SECRET}`).digest();
+}
+
+/** Seal a Google refresh token for storage (internal options field is not hidden — encrypt). */
+export function sealDriveRefreshToken(plain: string): string {
+	const value = plain?.trim();
+	if (!value) return '';
+	if (value.startsWith(TOKEN_SEAL_PREFIX)) return value;
+	const iv = randomBytes(12);
+	const cipher = createCipheriv('aes-256-gcm', tokenEncryptionKey(), iv);
+	const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+	const tag = cipher.getAuthTag();
+	return TOKEN_SEAL_PREFIX + Buffer.concat([iv, tag, ciphertext]).toString('base64url');
+}
+
+/** Open a stored refresh token (supports sealed + legacy plain values). */
+export function openDriveRefreshToken(stored?: string | null): string {
+	const value = stored?.trim();
+	if (!value) return '';
+	if (!value.startsWith(TOKEN_SEAL_PREFIX)) return value;
+	try {
+		const raw = Buffer.from(value.slice(TOKEN_SEAL_PREFIX.length), 'base64url');
+		const iv = raw.subarray(0, 12);
+		const tag = raw.subarray(12, 28);
+		const data = raw.subarray(28);
+		const decipher = createDecipheriv('aes-256-gcm', tokenEncryptionKey(), iv);
+		decipher.setAuthTag(tag);
+		return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+	} catch (err) {
+		console.error('[googleDrive] failed to open sealed refresh token:', err);
+		return '';
+	}
+}
 
 type DriveFile = { id: string; name: string };
 

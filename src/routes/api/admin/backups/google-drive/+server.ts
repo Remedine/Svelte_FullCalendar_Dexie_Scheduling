@@ -5,6 +5,7 @@ import {
 	buildGoogleDriveAuthUrl,
 	isGoogleDriveConfigured,
 	isGoogleOAuthAppConfigured,
+	openDriveRefreshToken,
 	resolveAppOrigin,
 	resolveGoogleDriveFolderId
 } from '$lib/server/googleDrive';
@@ -21,18 +22,21 @@ export async function GET({ request }: { request: Request }) {
 	}
 
 	const options = await fetchOptionsRecord();
-	const refreshToken = options?.backupGoogleDriveRefreshToken ?? '';
+	const refreshToken = openDriveRefreshToken(options?.backupGoogleDriveRefreshToken);
 	const folderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
 	const oauthAppReady = isGoogleOAuthAppConfigured();
 	const connected = isGoogleDriveConfigured(options?.backupGoogleDriveFolderId, refreshToken);
-	const hasOAuthToken = Boolean(refreshToken?.trim());
+	const hasOAuthToken = Boolean(refreshToken);
 	const hasServiceAccount = Boolean(process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON?.trim());
+	// Folder saved without token (e.g. schema missing fields on first connect)
+	const needsReconnect = Boolean(folderId && !hasOAuthToken && !hasServiceAccount);
 
 	return json({
 		oauthAppReady,
 		connected,
 		hasOAuthToken,
 		hasServiceAccount,
+		needsReconnect,
 		email: options?.backupGoogleDriveEmail || '',
 		folderId: folderId || '',
 		folderName: options?.backupGoogleDriveFolderName || '',
