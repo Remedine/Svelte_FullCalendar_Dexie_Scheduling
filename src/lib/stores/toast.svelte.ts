@@ -114,8 +114,12 @@ export const toast = $state({
 		this.show(message, 'success', duration);
 	},
 
-	error(message: string, duration = 6000) {
-		this.show(message, 'error', duration);
+	error(message: string, duration?: number) {
+		// Longer default for multi-sentence / setup errors so they stay readable.
+		const ms =
+			duration ??
+			(message.length > 80 ? 14000 : message.length > 40 ? 10000 : 6000);
+		this.show(message, 'error', ms);
 	},
 
 	info(message: string, duration = 4500) {

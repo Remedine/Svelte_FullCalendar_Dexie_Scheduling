@@ -62,6 +62,8 @@
 	let driveStatusLoading = $state(false);
 	let driveActionBusy = $state(false);
 	let driveReturnHandled = false;
+	/** Sticky on-page error (toasts alone dismiss too fast for long Google setup messages). */
+	let driveErrorBanner = $state('');
 
 	// )=- One-time flag to ensure options load/pull happens only once, preventing repeated pull attempts and error spam if pull fails.
 	let optionsInitialized = $state(false);
@@ -180,6 +182,7 @@
 		if (!gdrive) return;
 		driveReturnHandled = true;
 		if (gdrive === 'connected') {
+			driveErrorBanner = '';
 			const email = page.url.searchParams.get('email') || 'Google Drive';
 			toast.success(`Google Drive connected (${email}). Backups can upload there.`);
 			if (editingOptions) {
@@ -190,7 +193,8 @@
 		} else if (gdrive === 'error') {
 			const message =
 				page.url.searchParams.get('message') || 'Could not connect Google Drive.';
-			toast.error(message);
+			driveErrorBanner = message;
+			toast.error(message, 20000);
 		}
 		// Clean query params without full navigation noise
 		if (typeof history !== 'undefined' && page.url.searchParams.has('gdrive')) {
@@ -500,7 +504,9 @@
 			if (!data.url) throw new Error('No Google sign-in URL returned');
 			window.location.href = data.url as string;
 		} catch (err: any) {
-			toast.error(err?.message || 'Could not connect Google Drive');
+			const message = err?.message || 'Could not connect Google Drive';
+			driveErrorBanner = message;
+			toast.error(message, 20000);
 			driveActionBusy = false;
 		}
 	}
@@ -1213,6 +1219,18 @@
 							JSON or folder IDs required — sign in once and we create a
 							<strong>Capital City Windows Backups</strong> folder for you.
 						</p>
+						{#if driveErrorBanner}
+							<div class="backup-gdrive__error" role="alert">
+								<p class="backup-gdrive__error-text">{driveErrorBanner}</p>
+								<button
+									type="button"
+									class="options-page__btn options-page__btn--add"
+									onclick={() => (driveErrorBanner = '')}
+								>
+									Dismiss
+								</button>
+							</div>
+						{/if}
 
 						{#if driveStatusLoading && !driveStatus}
 							<p class="options-page__help">Checking Google Drive connection…</p>
@@ -1923,6 +1941,25 @@
 		color: var(--color-text);
 		background: var(--color-warning-soft, rgba(234, 179, 8, 0.12));
 		border-radius: var(--radius-sm);
+	}
+	.backup-gdrive__error {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		gap: var(--space-3);
+		margin: 0 0 var(--space-3);
+		padding: var(--space-3);
+		background: var(--color-danger-soft, #fee2e2);
+		border-radius: var(--radius-sm);
+		border-left: 3px solid var(--color-danger-emphasis, #b91c1c);
+	}
+	.backup-gdrive__error-text {
+		flex: 1 1 16rem;
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-danger-emphasis, #b91c1c);
+		white-space: pre-wrap;
+		word-break: break-word;
 	}
 	.backup-settings__check--disabled {
 		opacity: 0.75;
