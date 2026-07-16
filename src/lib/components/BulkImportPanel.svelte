@@ -432,9 +432,10 @@
 	.bulk-import__results {
 		margin-bottom: 1.75rem;
 		padding: 1rem 1.1rem;
-		border: 1px solid var(--color-border, #e2e8f0);
+		border: 1px solid var(--color-border);
 		border-radius: 10px;
-		background: var(--color-surface, #fff);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.bulk-import__template-list {
@@ -443,17 +444,31 @@
 		gap: 0.5rem;
 	}
 
+	/* Shared interactive chrome — all tokens flip with light/dark theme */
+	.bulk-import__template-btn,
+	.bulk-import__mode-tab,
+	.bulk-import__btn {
+		font: inherit;
+		cursor: pointer;
+		transition:
+			background var(--transition-fast, 0.15s ease),
+			border-color var(--transition-fast, 0.15s ease),
+			color var(--transition-fast, 0.15s ease);
+	}
+
 	.bulk-import__template-btn {
 		padding: 0.4rem 0.75rem;
 		font-size: 0.85rem;
 		border-radius: 6px;
-		border: 1px solid var(--color-border, #cbd5e1);
-		background: var(--color-surface-2, #f8fafc);
-		cursor: pointer;
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface-alt);
+		color: var(--color-text);
 	}
 
-	.bulk-import__template-btn:hover {
-		border-color: var(--color-primary, #2563eb);
+	.bulk-import__template-btn:hover:not(:disabled) {
+		border-color: var(--color-primary);
+		color: var(--color-primary);
+		background: var(--color-primary-soft);
 	}
 
 	.bulk-import__field-row {
@@ -466,6 +481,7 @@
 	.bulk-import__label {
 		font-size: 0.85rem;
 		font-weight: 600;
+		color: var(--color-text);
 	}
 
 	.bulk-import__select,
@@ -478,20 +494,21 @@
 	.bulk-import__select {
 		padding: 0.45rem 0.6rem;
 		border-radius: 6px;
-		border: 1px solid var(--color-border, #cbd5e1);
-		background: var(--color-surface, #fff);
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.bulk-import__textarea {
 		padding: 0.65rem 0.75rem;
 		border-radius: 8px;
-		border: 1px solid var(--color-border, #cbd5e1);
+		border: 1px solid var(--color-border-strong);
 		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 		font-size: 0.82rem;
 		line-height: 1.45;
 		resize: vertical;
-		background: var(--color-surface, #fff);
-		color: inherit;
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.bulk-import__mode-tabs {
@@ -503,22 +520,33 @@
 	.bulk-import__mode-tab {
 		padding: 0.4rem 0.85rem;
 		border-radius: 6px;
-		border: 1px solid var(--color-border, #cbd5e1);
-		background: transparent;
-		cursor: pointer;
+		border: 1px solid var(--color-border-strong);
+		background: var(--color-surface);
+		color: var(--color-text);
 		font-size: 0.9rem;
 	}
 
+	.bulk-import__mode-tab:hover:not(:disabled) {
+		background: var(--color-surface-alt);
+		border-color: var(--color-primary);
+	}
+
 	.bulk-import__mode-tab--active {
-		background: var(--color-primary, #2563eb);
-		border-color: var(--color-primary, #2563eb);
+		background: var(--color-primary);
+		border-color: var(--color-primary);
+		color: #fff;
+	}
+
+	.bulk-import__mode-tab--active:hover:not(:disabled) {
+		background: var(--color-primary-hover);
+		border-color: var(--color-primary-hover);
 		color: #fff;
 	}
 
 	.bulk-import__file-name {
 		margin: 0.4rem 0 0;
 		font-size: 0.85rem;
-		color: var(--color-text-muted, #64748b);
+		color: var(--color-text-muted);
 	}
 
 	.bulk-import__actions {
@@ -533,8 +561,8 @@
 		border-radius: 8px;
 		font-weight: 600;
 		font-size: 0.9rem;
-		cursor: pointer;
 		border: 1px solid transparent;
+		min-height: 40px;
 	}
 
 	.bulk-import__btn:disabled {
@@ -543,28 +571,41 @@
 	}
 
 	.bulk-import__btn--primary {
-		background: var(--color-primary, #2563eb);
+		background: var(--color-primary);
+		border-color: var(--color-primary);
+		color: #fff;
+	}
+
+	.bulk-import__btn--primary:hover:not(:disabled) {
+		background: var(--color-primary-hover);
+		border-color: var(--color-primary-hover);
 		color: #fff;
 	}
 
 	.bulk-import__btn--secondary {
-		background: var(--color-surface-2, #f1f5f9);
-		border-color: var(--color-border, #cbd5e1);
-		color: inherit;
+		background: var(--color-surface-alt);
+		border-color: var(--color-border-strong);
+		color: var(--color-text);
+	}
+
+	.bulk-import__btn--secondary:hover:not(:disabled) {
+		border-color: var(--color-primary);
+		color: var(--color-primary);
+		background: var(--color-primary-soft);
 	}
 
 	.bulk-import__error {
 		margin: 0.75rem 0 0;
-		color: var(--color-danger, #b91c1c);
+		color: var(--color-danger-emphasis);
 		font-size: 0.9rem;
 	}
 
 	.bulk-import__payload-errors {
 		margin: 0 0 1rem;
 		padding: 0.65rem 0.85rem;
-		background: #fef2f2;
+		background: var(--color-danger-soft);
 		border-radius: 8px;
-		color: #991b1b;
+		color: var(--color-danger-emphasis);
 		font-size: 0.9rem;
 	}
 
@@ -579,8 +620,9 @@
 		min-width: 5.5rem;
 		padding: 0.5rem 0.75rem;
 		border-radius: 8px;
-		background: var(--color-surface-2, #f8fafc);
-		border: 1px solid var(--color-border, #e2e8f0);
+		background: var(--color-surface-alt);
+		border: 1px solid var(--color-border);
+		color: var(--color-text);
 	}
 
 	.bulk-import__stat-label {
@@ -588,26 +630,27 @@
 		font-size: 0.72rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: var(--color-text-muted, #64748b);
+		color: var(--color-text-muted);
 	}
 
 	.bulk-import__stat-value {
 		font-size: 1.15rem;
 		font-weight: 700;
+		color: var(--color-text-strong);
 	}
 
 	.bulk-import__stat-value--ok {
-		color: #15803d;
+		color: var(--color-success);
 	}
 
 	.bulk-import__stat-value--err {
-		color: #b91c1c;
+		color: var(--color-danger-emphasis);
 	}
 
 	.bulk-import__commit-note {
 		margin: 0 0 0.75rem;
 		font-size: 0.85rem;
-		color: var(--color-text-muted, #64748b);
+		color: var(--color-text-muted);
 	}
 
 	.bulk-import__filter {
@@ -617,36 +660,40 @@
 		font-size: 0.9rem;
 		margin-bottom: 0.65rem;
 		cursor: pointer;
+		color: var(--color-text);
 	}
 
 	.bulk-import__table-wrap {
 		overflow-x: auto;
-		border: 1px solid var(--color-border, #e2e8f0);
+		border: 1px solid var(--color-border);
 		border-radius: 8px;
+		background: var(--color-surface);
 	}
 
 	.bulk-import__table {
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 0.85rem;
+		color: var(--color-text);
 	}
 
 	.bulk-import__table th,
 	.bulk-import__table td {
 		padding: 0.5rem 0.65rem;
 		text-align: left;
-		border-bottom: 1px solid var(--color-border, #e2e8f0);
+		border-bottom: 1px solid var(--color-border);
 		vertical-align: top;
 	}
 
 	.bulk-import__table th {
-		background: var(--color-surface-2, #f8fafc);
+		background: var(--color-surface-alt);
+		color: var(--color-text);
 		font-weight: 600;
 		white-space: nowrap;
 	}
 
 	.bulk-import__row--error {
-		background: #fff7f7;
+		background: var(--color-danger-soft);
 	}
 
 	.bulk-import__mono {
@@ -660,39 +707,42 @@
 		border-radius: 999px;
 		font-size: 0.75rem;
 		font-weight: 600;
-		background: #e2e8f0;
+		background: var(--color-surface-alt);
+		color: var(--color-text);
+		border: 1px solid var(--color-border);
 	}
 
 	.bulk-import__badge--ok {
-		background: #dcfce7;
-		color: #166534;
+		background: var(--color-success-soft);
+		color: var(--color-success);
+		border-color: transparent;
 	}
 
 	.bulk-import__badge--err {
-		background: #fee2e2;
-		color: #991b1b;
+		background: var(--color-danger-soft);
+		color: var(--color-danger-emphasis);
+		border-color: transparent;
 	}
 
 	.bulk-import__row-errors {
 		margin: 0;
 		padding-left: 1.1rem;
-		color: #991b1b;
+		color: var(--color-danger-emphasis);
 	}
 
 	.bulk-import__empty {
 		text-align: center;
-		color: var(--color-text-muted, #64748b);
+		color: var(--color-text-muted);
 		padding: 1rem !important;
 	}
 
-	:global([data-theme='dark']) .bulk-import__templates,
-	:global([data-theme='dark']) .bulk-import__input,
-	:global([data-theme='dark']) .bulk-import__results {
-		background: var(--color-surface, #1e293b);
-		border-color: var(--color-border, #334155);
+	.bulk-import__title,
+	.bulk-import__section-title {
+		color: var(--color-text-strong);
 	}
 
-	:global([data-theme='dark']) .bulk-import__row--error {
-		background: rgba(185, 28, 28, 0.15);
+	.bulk-import__lede,
+	.bulk-import__hint {
+		color: var(--color-text-muted);
 	}
 </style>
