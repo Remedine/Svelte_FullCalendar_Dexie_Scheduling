@@ -183,6 +183,10 @@ export interface Client {
 	phone: string;
 	email: string;
 	notes?: string;
+	/** Stable external id from bulk import (idempotent re-runs). */
+	importKey?: string;
+	/** Origin label e.g. bulk-upload, csv-upload */
+	importSource?: string;
 	createdAt: Date | string;
 	updatedAt: Date | string;
 }
@@ -452,6 +456,20 @@ db.version(24).stores({
 // v25: device quick-unlock (local PIN / biometric gate)
 db.version(25).stores({
 	clients: 'id, name, areaOfTown, email, pbId',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName',
+	appSession: 'id',
+	deviceAuth: 'id'
+});
+
+// v26: bulk import keys on clients
+db.version(26).stores({
+	clients: 'id, name, areaOfTown, email, pbId, importKey',
 	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, pbId, *assignedCrew',
 	users:
 		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',

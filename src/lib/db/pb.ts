@@ -593,6 +593,8 @@ export async function pullClientsFromServer() {
 					phone: rec.phone || '',
 					email: rec.email || '',
 					notes: rec.notes || '',
+					importKey: rec.importKey || undefined,
+					importSource: rec.importSource || undefined,
 					createdAt: new Date(rec.created),
 					updatedAt: new Date(rec.updated)
 				};

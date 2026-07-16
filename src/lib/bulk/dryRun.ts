@@ -1,6 +1,6 @@
 /**
- * Validate a bulk payload and produce a dry-run report (no database I/O).
- * Later slices will add create/update/skip against PocketBase.
+ * Validate a bulk payload and produce a dry-run / apply report.
+ * Client rows can resolve create vs update when a ClientLookupIndex is provided.
  */
 import {
 	bulkClientSchema,
@@ -13,8 +13,15 @@ import {
 	type BulkJob,
 	type BulkPayload
 } from './schema';
+import { matchExistingClient, type ClientLookupIndex } from './pbClients';
 
-export type BulkRowAction = 'would_create' | 'error';
+export type BulkRowAction =
+	| 'would_create'
+	| 'would_update'
+	| 'created'
+	| 'updated'
+	| 'error'
+	| 'deferred';
 
 export type BulkRowResult = {
 	entity: BulkEntity;
@@ -24,20 +31,34 @@ export type BulkRowResult = {
 	key: string;
 	summary: string;
 	errors?: string[];
-	/** Validated data when action is would_create */
+	/** Validated data when not error */
 	data?: BulkClient | BulkJob | BulkInvoice;
+	/** Matched PocketBase id when updating */
+	pbId?: string;
 };
 
 export type BulkEntitySummary = {
 	total: number;
 	valid: number;
 	error: number;
+	wouldCreate: number;
+	wouldUpdate: number;
+	created: number;
+	updated: number;
+	deferred: number;
+};
+
+export type BulkCommitSupport = {
+	clients: boolean;
+	jobs: boolean;
+	invoices: boolean;
 };
 
 export type BulkDryRunResult = {
-	dryRun: true;
-	/** Commit is not implemented in slice 1 */
-	commitSupported: false;
+	/** true = preview only; false = commit result */
+	dryRun: boolean;
+	/** Slice 2: clients can be committed; jobs/invoices still deferred */
+	commitSupported: BulkCommitSupport;
 	summary: {
 		clients: BulkEntitySummary;
 		jobs: BulkEntitySummary;
@@ -47,12 +68,27 @@ export type BulkDryRunResult = {
 		totalRows: number;
 	};
 	rows: BulkRowResult[];
-	/** Payload-level errors (e.g. too many rows) */
 	payloadErrors: string[];
 };
 
+export type BulkDryRunOptions = {
+	/** When set, client rows resolve would_create vs would_update */
+	clientIndex?: ClientLookupIndex;
+	/** When true, jobs/invoices that validate are still marked deferred (commit not ready) */
+	markJobsInvoicesDeferred?: boolean;
+};
+
 function emptySummary(): BulkEntitySummary {
-	return { total: 0, valid: 0, error: 0 };
+	return {
+		total: 0,
+		valid: 0,
+		error: 0,
+		wouldCreate: 0,
+		wouldUpdate: 0,
+		created: 0,
+		updated: 0,
+		deferred: 0
+	};
 }
 
 function formatZodIssues(issues: { path: PropertyKey[]; message: string }[]): string[] {
@@ -74,7 +110,29 @@ function invoiceKey(inv: BulkInvoice, index: number): string {
 	return inv.externalId || inv.invoiceNumber || `row-${index}`;
 }
 
-export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
+function guessKey(raw: unknown, index: number): string {
+	if (raw && typeof raw === 'object') {
+		const o = raw as Record<string, unknown>;
+		for (const k of ['externalId', 'name', 'title', 'invoiceNumber', 'email']) {
+			if (typeof o[k] === 'string' && o[k]) return String(o[k]);
+		}
+	}
+	return `row-${index}`;
+}
+
+function tallyValid(summary: BulkEntitySummary, action: BulkRowAction) {
+	summary.valid++;
+	if (action === 'would_create' || action === 'created') summary.wouldCreate++;
+	if (action === 'would_update' || action === 'updated') summary.wouldUpdate++;
+	if (action === 'created') summary.created++;
+	if (action === 'updated') summary.updated++;
+	if (action === 'deferred') summary.deferred++;
+}
+
+export function runBulkDryRun(
+	payload: BulkPayload,
+	options: BulkDryRunOptions = {}
+): BulkDryRunResult {
 	const rows: BulkRowResult[] = [];
 	const payloadErrors: string[] = [];
 	const summary = {
@@ -98,7 +156,6 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 		payloadErrors.push(`Too many rows (${total}); max is ${MAX_BULK_ROWS}`);
 	}
 
-	// Track externalIds within this payload for duplicate + cross-ref checks
 	const clientExternalIds = new Set<string>();
 	const jobExternalIds = new Set<string>();
 	const seenClientExt = new Map<string, number>();
@@ -139,6 +196,21 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 				}
 			}
 
+			let action: BulkRowAction = 'would_create';
+			let pbId: string | undefined;
+
+			if (!errors.length && options.clientIndex) {
+				const match = matchExistingClient(data, options.clientIndex);
+				if (match.kind === 'error') {
+					errors.push(match.message);
+				} else if (match.kind === 'update') {
+					action = 'would_update';
+					pbId = match.existing.id;
+				} else {
+					action = 'would_create';
+				}
+			}
+
 			if (errors.length) {
 				summary.clients.error++;
 				summary.totalError++;
@@ -151,15 +223,18 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 					errors
 				});
 			} else {
-				summary.clients.valid++;
+				tallyValid(summary.clients, action);
 				summary.totalValid++;
+				const matchNote =
+					action === 'would_update' ? ` · update ${pbId}` : ' · create';
 				rows.push({
 					entity: 'clients',
 					index: i,
-					action: 'would_create',
+					action,
 					key,
-					summary: `${data.name} · ${data.serviceAddressCity}`,
-					data
+					summary: `${data.name} · ${data.serviceAddressCity}${matchNote}`,
+					data,
+					pbId
 				});
 			}
 		}
@@ -198,10 +273,8 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 				}
 			}
 
-			// Cross-ref: if clientExternalId is set and clients are in this payload, require match
 			if (data.clientExternalId && payload.clients?.length) {
 				if (!clientExternalIds.has(data.clientExternalId)) {
-					// Also allow if that client row failed validation — still report missing
 					const anyClientExt = (payload.clients as unknown[]).some((c) => {
 						if (c && typeof c === 'object' && 'externalId' in c) {
 							return String((c as { externalId?: string }).externalId) === data.clientExternalId;
@@ -232,16 +305,26 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 					errors
 				});
 			} else {
-				summary.jobs.valid++;
+				const action: BulkRowAction = options.markJobsInvoicesDeferred
+					? 'deferred'
+					: 'would_create';
+				tallyValid(summary.jobs, action);
 				summary.totalValid++;
 				const clientRef = data.clientExternalId || data.clientEmail || data.clientPbId || '';
 				rows.push({
 					entity: 'jobs',
 					index: i,
-					action: 'would_create',
+					action,
 					key,
-					summary: `${data.title} → ${clientRef}`,
-					data
+					summary:
+						action === 'deferred'
+							? `${data.title} → ${clientRef} (job commit not available yet)`
+							: `${data.title} → ${clientRef}`,
+					data,
+					errors:
+						action === 'deferred'
+							? ['Job commit not implemented yet — clients only in this release']
+							: undefined
 				});
 			}
 		}
@@ -318,41 +401,36 @@ export function runBulkDryRun(payload: BulkPayload): BulkDryRunResult {
 					errors
 				});
 			} else {
-				summary.invoices.valid++;
+				const action: BulkRowAction = options.markJobsInvoicesDeferred
+					? 'deferred'
+					: 'would_create';
+				tallyValid(summary.invoices, action);
 				summary.totalValid++;
 				const jobRef = data.jobExternalId || data.jobPbId || '';
 				rows.push({
 					entity: 'invoices',
 					index: i,
-					action: 'would_create',
+					action,
 					key,
-					summary: `${data.invoiceNumber || key} · ${data.status} · job ${jobRef}`,
-					data
+					summary:
+						action === 'deferred'
+							? `${data.invoiceNumber || key} (invoice commit not available yet)`
+							: `${data.invoiceNumber || key} · ${data.status} · job ${jobRef}`,
+					data,
+					errors:
+						action === 'deferred'
+							? ['Invoice commit not implemented yet — clients only in this release']
+							: undefined
 				});
 			}
 		}
 	}
 
-	// If payload-level fatal errors, mark nothing as commit-ready beyond report
-	if (payloadErrors.length && summary.totalRows === 0) {
-		// already empty
-	}
-
 	return {
 		dryRun: true,
-		commitSupported: false,
+		commitSupported: { clients: true, jobs: false, invoices: false },
 		summary,
 		rows,
 		payloadErrors
 	};
-}
-
-function guessKey(raw: unknown, index: number): string {
-	if (raw && typeof raw === 'object') {
-		const o = raw as Record<string, unknown>;
-		for (const k of ['externalId', 'name', 'title', 'invoiceNumber', 'email']) {
-			if (typeof o[k] === 'string' && o[k]) return String(o[k]);
-		}
-	}
-	return `row-${index}`;
 }

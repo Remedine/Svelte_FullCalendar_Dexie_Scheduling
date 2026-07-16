@@ -22,7 +22,9 @@
 	let fileText = $state('');
 	let fileIsCsv = $state(false);
 	let loading = $state(false);
+	let committing = $state(false);
 	let result = $state<BulkDryRunResult | null>(null);
+	let lastPayload = $state<Parameters<typeof runBulkDryRun>[0] | null>(null);
 	let apiError = $state('');
 	let filterErrorsOnly = $state(false);
 
@@ -32,6 +34,19 @@
 		if (!result) return [];
 		if (filterErrorsOnly) return result.rows.filter((r) => r.action === 'error');
 		return result.rows;
+	});
+
+	const canCommitClients = $derived.by(() => {
+		if (!result || !lastPayload?.clients?.length) return false;
+		if (result.summary.clients.error > 0) return false;
+		if (result.summary.clients.total === 0) return false;
+		// Allow commit after dry-run preview (not after a successful commit with only created/updated)
+		const hasPreviewActions = result.rows.some(
+			(r) =>
+				r.entity === 'clients' &&
+				(r.action === 'would_create' || r.action === 'would_update')
+		);
+		return hasPreviewActions && result.dryRun !== false;
 	});
 
 	function downloadTemplate(id: BulkTemplateId) {
@@ -87,16 +102,18 @@
 		return { ok: true, payload: parsed.payload };
 	}
 
-	/** Local dry-run (instant) — same logic as the API. */
+	/** Local dry-run (instant schema checks; no PocketBase match). */
 	function runLocalPreview() {
 		apiError = '';
 		const built = buildPayloadFromLocal();
 		if (!built.ok) {
 			apiError = built.error;
 			result = null;
+			lastPayload = null;
 			toast.error(built.error);
 			return;
 		}
+		lastPayload = built.payload;
 		result = runBulkDryRun(built.payload);
 		if (result.payloadErrors.length) {
 			toast.error(result.payloadErrors[0]);
@@ -107,7 +124,7 @@
 		}
 	}
 
-	/** Server dry-run (auth + same validator as production will use). */
+	/** Server dry-run (matches existing clients for create vs update). */
 	async function runServerPreview() {
 		apiError = '';
 		loading = true;
@@ -116,9 +133,11 @@
 			const built = buildPayloadFromLocal();
 			if (!built.ok) {
 				apiError = built.error;
+				lastPayload = null;
 				toast.error(built.error);
 				return;
 			}
+			lastPayload = built.payload;
 
 			const token = pb.authStore.token;
 			if (!token) {
@@ -149,7 +168,10 @@
 			} else if (result.summary.totalError > 0) {
 				toast.error(`${result.summary.totalError} row(s) with errors`);
 			} else {
-				toast.success(`Server preview OK — ${result.summary.totalValid} valid row(s)`);
+				const c = result.summary.clients;
+				toast.success(
+					`Server preview — clients: ${c.wouldCreate} create, ${c.wouldUpdate} update`
+				);
 			}
 		} catch (err) {
 			apiError = err instanceof Error ? err.message : 'Preview failed';
@@ -159,10 +181,83 @@
 		}
 	}
 
+	/** Write clients to PocketBase (jobs/invoices deferred). */
+	async function commitClients() {
+		apiError = '';
+		if (!lastPayload?.clients?.length) {
+			toast.error('No clients in payload to commit');
+			return;
+		}
+		if (!canCommitClients) {
+			toast.error('Run a successful preview first (fix any client errors)');
+			return;
+		}
+
+		const n = lastPayload.clients.length;
+		const ok = confirm(
+			`Commit ${n} client row(s) to the live database?\n\n` +
+				`Matching externalId/email will update existing clients; others will be created.\n` +
+				`Jobs and invoices in this package are not written yet.`
+		);
+		if (!ok) return;
+
+		committing = true;
+		try {
+			const token = pb.authStore.token;
+			if (!token) {
+				apiError = 'Not signed in';
+				toast.error('Not signed in');
+				return;
+			}
+
+			const res = await fetch('/api/admin/bulk', {
+				method: 'POST',
+				headers: {
+					Authorization: token,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ dryRun: false, ...lastPayload })
+			});
+
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				apiError = data.error || `Commit failed (${res.status})`;
+				toast.error(apiError);
+				return;
+			}
+
+			result = data as BulkDryRunResult;
+			const c = result.summary.clients;
+			if (c.error > 0) {
+				toast.error(`Commit finished with ${c.error} client error(s); ${c.created} created, ${c.updated} updated`);
+			} else {
+				toast.success(`Clients committed — ${c.created} created, ${c.updated} updated`);
+			}
+		} catch (err) {
+			apiError = err instanceof Error ? err.message : 'Commit failed';
+			toast.error(apiError);
+		} finally {
+			committing = false;
+		}
+	}
+
 	function actionLabel(action: string): string {
-		if (action === 'would_create') return 'Would create';
-		if (action === 'error') return 'Error';
-		return action;
+		switch (action) {
+			case 'would_create':
+				return 'Would create';
+			case 'would_update':
+				return 'Would update';
+			case 'created':
+				return 'Created';
+			case 'updated':
+				return 'Updated';
+			case 'deferred':
+				return 'Deferred';
+			case 'error':
+				return 'Error';
+			default:
+				return action;
+		}
 	}
 </script>
 
@@ -170,8 +265,8 @@
 		<header class="bulk-import__header">
 			<h2 class="bulk-import__title">Bulk import</h2>
 			<p class="bulk-import__lede">
-				Validate a CSV or JSON package before any data is written. Commit (write to the database)
-				is not available yet — this page is <strong>dry-run only</strong>.
+				Upload CSV or JSON, preview validation, then <strong>commit clients</strong> to the live
+				database. Job and invoice writes are not available yet (preview only).
 			</p>
 		</header>
 
@@ -263,7 +358,7 @@
 					type="button"
 					class="bulk-import__btn bulk-import__btn--secondary"
 					onclick={runLocalPreview}
-					disabled={loading}
+					disabled={loading || committing}
 				>
 					Preview locally
 				</button>
@@ -271,9 +366,20 @@
 					type="button"
 					class="bulk-import__btn bulk-import__btn--primary"
 					onclick={runServerPreview}
-					disabled={loading}
+					disabled={loading || committing}
 				>
 					{loading ? 'Running…' : 'Preview via API'}
+				</button>
+				<button
+					type="button"
+					class="bulk-import__btn bulk-import__btn--primary"
+					onclick={commitClients}
+					disabled={!canCommitClients || loading || committing}
+					title={canCommitClients
+						? 'Write clients to PocketBase'
+						: 'Run Preview via API first (clients only)'}
+				>
+					{committing ? 'Committing…' : 'Commit clients'}
 				</button>
 			</div>
 
@@ -328,7 +434,14 @@
 				</div>
 
 				<p class="bulk-import__commit-note">
-					Commit not available yet (slice 1). When enabled, valid rows will write to PocketBase.
+					{#if result.dryRun === false}
+						Commit complete for clients. Pull or refresh the app to see new clients on other
+						devices. Jobs/invoices remain deferred until a later release.
+					{:else}
+						Use <strong>Commit clients</strong> after a clean API preview. Matching
+						<code>externalId</code> (importKey) or email updates an existing client; otherwise a
+						new one is created. Jobs/invoices are not written yet.
+					{/if}
 				</p>
 
 				<label class="bulk-import__filter">
@@ -352,14 +465,22 @@
 							{#each displayRows as row (`${row.entity}-${row.index}`)}
 								<tr
 									class:bulk-import__row--error={row.action === 'error'}
-									class:bulk-import__row--ok={row.action === 'would_create'}
+									class:bulk-import__row--ok={row.action === 'would_create' ||
+										row.action === 'would_update' ||
+										row.action === 'created' ||
+										row.action === 'updated'}
+									class:bulk-import__row--deferred={row.action === 'deferred'}
 								>
 									<td>{row.entity}</td>
 									<td>{row.index}</td>
 									<td>
 										<span
 											class="bulk-import__badge"
-											class:bulk-import__badge--ok={row.action === 'would_create'}
+											class:bulk-import__badge--ok={row.action === 'would_create' ||
+												row.action === 'created'}
+											class:bulk-import__badge--upd={row.action === 'would_update' ||
+												row.action === 'updated'}
+											class:bulk-import__badge--def={row.action === 'deferred'}
 											class:bulk-import__badge--err={row.action === 'error'}
 										>
 											{actionLabel(row.action)}
@@ -718,10 +839,25 @@
 		border-color: transparent;
 	}
 
+	.bulk-import__badge--upd {
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
+		border-color: transparent;
+	}
+
+	.bulk-import__badge--def {
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
+	}
+
 	.bulk-import__badge--err {
 		background: var(--color-danger-soft);
 		color: var(--color-danger-emphasis);
 		border-color: transparent;
+	}
+
+	.bulk-import__row--deferred {
+		opacity: 0.85;
 	}
 
 	.bulk-import__row-errors {

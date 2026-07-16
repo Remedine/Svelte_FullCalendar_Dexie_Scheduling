@@ -20,6 +20,18 @@ export {
 	type BulkDryRunResult,
 	type BulkRowResult,
 	type BulkRowAction,
-	type BulkEntitySummary
+	type BulkEntitySummary,
+	type BulkDryRunOptions
 } from './dryRun';
 export { BULK_TEMPLATES, type BulkTemplateId } from './templates';
+export { bulkClientToPbPayload, normalizeEmail } from './clientMap';
+export {
+	loadClientLookupIndex,
+	matchExistingClient,
+	createPbClient,
+	updatePbClient,
+	type ClientLookupIndex,
+	type ExistingClient,
+	type ClientMatch
+} from './pbClients';
+export { commitBulkClients, type BulkCommitResult } from './applyClients';
