@@ -23,6 +23,7 @@
 		isRestorableBackupFilename,
 		type BackupArtifactKind
 	} from '$lib/backups/names';
+	import { dateFromBackupFilename } from '$lib/backups/retention';
 	import { page } from '$app/state';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
@@ -90,6 +91,16 @@
 		modifiedTime: string;
 		restorable: boolean;
 	};
+	type UnifiedBackupRow = {
+		name: string;
+		size: number;
+		created: string;
+		kind: BackupArtifactKind;
+		restorable: boolean;
+		onServer: boolean;
+		onDrive: boolean;
+		driveFileId?: string;
+	};
 	let backupItems = $state<BackupRow[]>([]);
 	let backupRetention = $state<{ total: number; wouldKeep: number; wouldPrune: number } | null>(
 		null
@@ -101,6 +112,72 @@
 	let driveBackupLoading = $state(false);
 	let driveBackupError = $state('');
 	let restoreTarget = $state<string | null>(null);
+
+	/** Merge server + Drive lists by filename; show where each artifact lives. */
+	const unifiedBackupItems = $derived.by((): UnifiedBackupRow[] => {
+		const map = new Map<string, UnifiedBackupRow>();
+
+		for (const item of backupItems) {
+			const kind = backupArtifactKindFromFilename(item.name);
+			map.set(item.name, {
+				name: item.name,
+				size: item.size,
+				created: item.created,
+				kind,
+				restorable: isRestorableBackupFilename(item.name),
+				onServer: true,
+				onDrive: false
+			});
+		}
+
+		for (const item of driveBackupItems) {
+			const existing = map.get(item.name);
+			if (existing) {
+				existing.onDrive = true;
+				existing.driveFileId = item.id;
+				if (!existing.size && item.size) existing.size = item.size;
+				if (!existing.created && item.modifiedTime) existing.created = item.modifiedTime;
+			} else {
+				const kind = backupArtifactKindFromFilename(item.name);
+				map.set(item.name, {
+					name: item.name,
+					size: item.size,
+					created: item.modifiedTime,
+					kind,
+					restorable: item.restorable || isRestorableBackupFilename(item.name),
+					onServer: false,
+					onDrive: true,
+					driveFileId: item.id
+				});
+			}
+		}
+
+		return [...map.values()].sort((a, b) => {
+			const da = dateFromBackupFilename(a.name) || '';
+			const db = dateFromBackupFilename(b.name) || '';
+			if (da !== db) return db.localeCompare(da);
+			if (a.name !== b.name) return b.name.localeCompare(a.name);
+			return 0;
+		});
+	});
+
+	function locationLabel(row: UnifiedBackupRow): string {
+		if (row.onServer && row.onDrive) return 'Server + Drive';
+		if (row.onDrive) return 'Google Drive';
+		return 'Server';
+	}
+
+	function openRestoreForRow(row: UnifiedBackupRow) {
+		if (!row.restorable) return;
+		// Prefer server copy when both exist (faster, no Drive download).
+		if (row.onServer) {
+			openRestoreDialog(row.name);
+			return;
+		}
+		if (row.onDrive && row.driveFileId) {
+			openRestoreDialog(row.name, { source: 'drive', fileId: row.driveFileId });
+		}
+	}
 	let restoreSource = $state<'server' | 'drive'>('server');
 	let restoreDriveFileId = $state<string | null>(null);
 	let restoreConfirmText = $state('');
@@ -1484,8 +1561,8 @@
 					<label for="backup-upload-input" class="label">Upload a restorable .zip</label>
 					<p class="options-page__help">
 						Upload a <code>_full.zip</code> or legacy <code>_Backup.zip</code> from email or your
-						computer. It appears in the server list; then tap <strong>Restore</strong>. Prefer
-						<strong>Restore from Google Drive</strong> below when the file is already in Drive.
+						computer. It appears in the combined list below as <strong>Server</strong>; then tap
+						<strong>Restore</strong>. Drive-only copies restore via download-then-restore.
 					</p>
 					<div class="backup-upload__row">
 						<input
@@ -1508,124 +1585,119 @@
 			</div>
 
 			<div class="form-section">
-				<h3>Server backups</h3>
+				<h3>Backups</h3>
+				<p class="options-page__help">
+					Combined list of server and Google Drive artifacts. The <strong>Stored on</strong> column
+					shows where each file lives. Mixed copies (same name on both) are one row. Retention
+					prunes <strong>each store independently</strong> with the same calendar rules after a
+					successful backup — a file only on Drive is not removed from the server list (and vice
+					versa). Email copies are never pruned.
+				</p>
 				{#if backupRetention}
 					<p class="options-page__help">
-						Retention preview: would keep <strong>{backupRetention.wouldKeep}</strong> of
+						Server retention preview: would keep <strong>{backupRetention.wouldKeep}</strong> of
 						<strong>{backupRetention.total}</strong> backup dates; prune
-						<strong>{backupRetention.wouldPrune}</strong> on server (email copies unaffected).
+						<strong>{backupRetention.wouldPrune}</strong> on server. Drive uses the same rules when
+						Drive upload is connected.
 					</p>
 				{/if}
-				{#if backupLoading}
-					<p>Loading…</p>
-				{:else if backupItems.length === 0}
-					<p class="options-page__help">No backups on server yet.</p>
+				{#if driveBackupError}
+					<p class="backup-gdrive__error-text" style="margin-bottom: var(--space-3)">
+						Drive list: {driveBackupError}
+					</p>
+				{/if}
+				{#if backupLoading || driveBackupLoading}
+					<p>Loading backups…</p>
+				{:else if unifiedBackupItems.length === 0}
+					<p class="options-page__help">
+						No backups yet. Run <strong>Backup now</strong> or wait for the scheduled job.
+						{#if !driveStatus?.connected}
+							Connect Google Drive above to include off-site copies in this list.
+						{/if}
+					</p>
 				{:else}
-					<div class="backup-list">
-						{#each backupItems as item (item.name)}
-							{@const kind = backupArtifactKindFromFilename(item.name)}
-							{@const restorable = isRestorableBackupFilename(item.name)}
-							<div class="backup-list__row">
-								<div class="backup-list__meta">
+					<div class="backup-list backup-list--unified" role="table" aria-label="Backup files">
+						<div class="backup-list__header" role="row">
+							<span class="backup-list__col backup-list__col--file" role="columnheader">File</span>
+							<span class="backup-list__col backup-list__col--location" role="columnheader"
+								>Stored on</span
+							>
+							<span class="backup-list__col backup-list__col--meta" role="columnheader"
+								>Size / date</span
+							>
+							<span class="backup-list__col backup-list__col--actions" role="columnheader"
+								>Actions</span
+							>
+						</div>
+						{#each unifiedBackupItems as item (item.name)}
+							<div class="backup-list__row backup-list__row--unified" role="row">
+								<div class="backup-list__col backup-list__col--file" role="cell">
 									<span class="backup-list__name">
-										<span class="backup-list__badge backup-list__badge--{kind}">{backupKindLabel(kind)}</span>
+										<span class="backup-list__badge backup-list__badge--{item.kind}"
+											>{backupKindLabel(item.kind)}</span
+										>
 										{item.name}
 									</span>
+								</div>
+								<div class="backup-list__col backup-list__col--location" role="cell">
+									<span
+										class="backup-list__location"
+										class:backup-list__location--both={item.onServer && item.onDrive}
+										class:backup-list__location--drive={item.onDrive && !item.onServer}
+										class:backup-list__location--server={item.onServer && !item.onDrive}
+										title={locationLabel(item)}
+									>
+										{locationLabel(item)}
+									</span>
+								</div>
+								<div class="backup-list__col backup-list__col--meta" role="cell">
 									<span class="backup-list__detail">
 										{formatBytes(item.size)} · {formatBackupDate(item.created)}
 									</span>
 								</div>
-								<div class="backup-list__actions">
-									<button
-										type="button"
-										class="options-page__btn options-page__btn--add backup-list__dl"
-										onclick={() => downloadBackup(item.name)}
-									>
-										Download
-									</button>
-									<button
-										type="button"
-										class="options-page__btn backup-list__restore"
-										onclick={() => openRestoreDialog(item.name)}
-										disabled={!restorable}
-										title={restorable ? 'Restore this backup' : 'Only full or legacy zips can be restored'}
-									>
-										Restore
-									</button>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<div class="form-section">
-				<h3>Google Drive backups</h3>
-				<p class="options-page__help">
-					Files in your connected <strong>Capital City Windows Backups</strong> folder. Only
-					<strong>Full</strong> and legacy archives can be restored. Restore downloads the zip to
-					the server, then runs the same restore as above.
-				</p>
-				{#if !driveStatus?.connected && !driveStatusLoading}
-					<p class="options-page__help">Connect Google Drive above to list and restore from Drive.</p>
-				{:else if driveBackupLoading}
-					<p>Loading Drive backups…</p>
-				{:else if driveBackupError}
-					<p class="backup-gdrive__error-text">{driveBackupError}</p>
-					<button
-						type="button"
-						class="options-page__btn options-page__btn--add"
-						onclick={() => loadDriveBackupList()}
-					>
-						Retry
-					</button>
-				{:else if driveBackupItems.length === 0}
-					<p class="options-page__help">
-						No backup files in Drive yet. Run <strong>Backup now</strong> with Drive upload
-						enabled, or wait for the scheduled backup.
-					</p>
-				{:else}
-					<div class="backup-list">
-						{#each driveBackupItems as item (item.id)}
-							{@const kind = backupArtifactKindFromFilename(item.name)}
-							<div class="backup-list__row">
-								<div class="backup-list__meta">
-									<span class="backup-list__name">
-										<span class="backup-list__badge backup-list__badge--{kind}"
-											>{backupKindLabel(kind)}</span
+								<div
+									class="backup-list__col backup-list__col--actions backup-list__actions"
+									role="cell"
+								>
+									{#if item.onServer}
+										<button
+											type="button"
+											class="options-page__btn options-page__btn--add backup-list__dl"
+											onclick={() => downloadBackup(item.name)}
 										>
-										{item.name}
-									</span>
-									<span class="backup-list__detail">
-										{formatBytes(item.size)} · {formatBackupDate(item.modifiedTime)} · Drive
-									</span>
-								</div>
-								<div class="backup-list__actions">
+											Download
+										</button>
+									{/if}
 									<button
 										type="button"
 										class="options-page__btn backup-list__restore"
-										onclick={() =>
-											openRestoreDialog(item.name, { source: 'drive', fileId: item.id })}
+										onclick={() => openRestoreForRow(item)}
 										disabled={!item.restorable}
 										title={item.restorable
-											? 'Download from Drive and restore'
+											? item.onServer
+												? 'Restore from server copy'
+												: 'Download from Google Drive and restore'
 											: 'Only full or legacy zips can be restored'}
 									>
-										Restore from Drive
+										{item.onServer ? 'Restore' : 'Restore from Drive'}
 									</button>
 								</div>
 							</div>
 						{/each}
 					</div>
-					<button
-						type="button"
-						class="options-page__btn options-page__btn--add"
-						style="margin-top: var(--space-3)"
-						onclick={() => loadDriveBackupList()}
-						disabled={driveBackupLoading}
-					>
-						Refresh Drive list
-					</button>
+					<div class="backup-list__toolbar">
+						<button
+							type="button"
+							class="options-page__btn options-page__btn--add"
+							onclick={() => {
+								void loadBackupList({ showLoading: true });
+								void loadDriveBackupList();
+							}}
+							disabled={backupLoading || driveBackupLoading}
+						>
+							Refresh list
+						</button>
+					</div>
 				{/if}
 			</div>
 		{/if}
@@ -2263,6 +2335,72 @@
 	.backup-list__detail {
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
+	}
+	.backup-list--unified {
+		overflow-x: auto;
+	}
+	.backup-list__header {
+		display: none;
+		gap: var(--space-3);
+		padding: 0 var(--space-3) var(--space-2);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--color-text-muted);
+	}
+	.backup-list__row--unified {
+		align-items: flex-start;
+	}
+	.backup-list__col--location {
+		flex: 0 0 auto;
+		min-width: 7.5rem;
+	}
+	.backup-list__location {
+		display: inline-block;
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		padding: 0.15rem 0.5rem;
+		border-radius: var(--radius-full);
+		white-space: nowrap;
+	}
+	.backup-list__location--server {
+		background: var(--color-surface-alt, #f3f4f6);
+		color: var(--color-text);
+		border: 1px solid var(--color-border);
+	}
+	.backup-list__location--drive {
+		background: #e0f2fe;
+		color: #075985;
+	}
+	.backup-list__location--both {
+		background: #dcfce7;
+		color: #166534;
+	}
+	.backup-list__toolbar {
+		margin-top: var(--space-3);
+	}
+	@media (min-width: 720px) {
+		.backup-list__header {
+			display: grid;
+			grid-template-columns: minmax(0, 1.6fr) minmax(7rem, 0.7fr) minmax(8rem, 0.8fr) auto;
+			align-items: end;
+		}
+		.backup-list__row--unified {
+			display: grid;
+			grid-template-columns: minmax(0, 1.6fr) minmax(7rem, 0.7fr) minmax(8rem, 0.8fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+		}
+		.backup-list__col--file {
+			min-width: 0;
+		}
+		.backup-list__col--meta {
+			font-size: var(--font-size-sm);
+		}
+		.backup-list__col--actions {
+			justify-content: flex-end;
+		}
 	}
 	.backup-list__actions {
 		display: flex;
