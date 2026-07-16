@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
+import { isFullBackupFilename } from '$lib/backups/names';
 import { assertAdminFromAuthHeader } from '$lib/server/pbAdmin';
 import { uploadPbBackup } from '$lib/server/backups';
 
-/** Upload a .zip backup from disk (e.g. email attachment) to the server backup store. */
+/** Upload a full .zip backup from disk to the server backup store. */
 export async function POST({ request }: { request: Request }) {
 	const token = request.headers.get('Authorization');
 	if (!(await assertAdminFromAuthHeader(token))) {
@@ -16,6 +17,12 @@ export async function POST({ request }: { request: Request }) {
 	}
 	if (!file.name.toLowerCase().endsWith('.zip')) {
 		return json({ error: 'Backup must be a .zip file' }, { status: 400 });
+	}
+	if (!isFullBackupFilename(file.name)) {
+		return json(
+			{ error: 'Only full backups are accepted (filename must end with _full.zip)' },
+			{ status: 400 }
+		);
 	}
 
 	try {

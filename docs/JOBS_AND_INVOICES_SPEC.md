@@ -368,44 +368,23 @@ export function openJobDetailsModal(
 |-------------|--------|
 | Frequency | **Daily** automated backup. |
 | Timezone | **`America/Anchorage`** — defines calendar date in filenames and retention anchor days. |
-| Delivery options | Admin-configurable **one or more** of: **Google Drive**, **email**, **direct download**. |
-| Filename format | `YYYY-MM-DD_{Business Name from Options}_Backup` + extension. Read `businessName` from Options; sanitize for filesystem. |
-| Manual backup | **“Backup now”** button on **Options → Backups** tab (same archive builder as scheduled job). |
-| Failure alerting | Email address(es) configured on **Options → Backups** tab when a scheduled backup fails. |
+| Delivery options | **Server** always (with optional short safety net when Drive is on); optional **Google Drive** as durable off-site store; **download** from admin UI. Email is for **failure alerts only** (no zip attachments). |
+| Filename format | `YYYY-MM-DD_{Business Name from Options}_full.zip`. Read `businessName` from Options; sanitize for filesystem. |
+| Manual backup | **“Backup now”** on **Options → Backups** (same full zip as scheduled job). |
+| Failure alerting | Email address(es) on **Options → Backups** when backup or Drive upload fails. |
+| Drive vs server | When Drive upload succeeds, Drive is long-term storage; server keeps about **5 recent calendar days** as a safety net. If Drive upload fails, keep the server copy. |
 
-### 14.3 Archive format — split strategy (decided)
+### 14.3 Archive format — daily full zip (decided)
 
-Daily backups use a **split archive** (not a single full PocketBase native zip every night).
+Each successful backup produces **one** restorable archive:
 
 | Artifact | Contents | When |
 |----------|----------|------|
-| `{date}_{business}_records.zip` | Nightly **`data.db` copy** + `types.d.ts` / migrations folder as needed | **Daily** |
-| `{date}_{business}_files.zip` | **Incremental** files changed since last manifest (path + mtime/size manifest) | **Daily**, only if files changed |
-| `sync_queue.json` | Dexie offline queue from admin PWA | When admin app uploads snapshot (periodic use) + always on **Backup now** |
-| `{date}_{business}_full.zip` | Full PocketBase native backup (`pb.backups.create` — records + all local files) | **Retention anchor days** and before major migrations |
+| `{date}_{business}_full.zip` | Full PocketBase native backup (`pb.backups.create` — records + all local files) | **Every** scheduled or manual backup |
 
-**Records (`data.db` copy)**
-
-- Server cron copies `pb_data/data.db` during a brief write quiesce (stop PB or use SQLite backup API if available).
-- Simpler restore than JSON export: replace `data.db` and restart PocketBase.
-- Does **not** include uploaded files — those are in the files artifact.
-
-**Incremental files**
-
-- Cron manifest scan of `pb_data/storage/` → zip only new/changed paths vs last manifest.
-- Manifest records deletions for restore reconciliation.
-- On retention anchor days (1st, 8th, 15th, 22nd, 29th / Feb last day), run a **full file snapshot** as incremental chain base.
-
-**Full native zip (anchor days only)**
-
-- `pb.backups.create()` includes local `storage/`; does **not** include S3-backed files.
-- Used for complete point-in-time recovery on calendar anchors, not nightly.
-
-**Optional portability (not v1 restore path)**
-
-- JSON/CSV collection export toggles on **Backup now** for analysis / non-PB tools — supplementary only.
-
-**S3 note:** If storage moves off local disk, shift file backup to S3 lifecycle/versioning; keep nightly `data.db` copy on schedule.
+- One-click restore in the admin UI uses **only** `_full.zip`.
+- Retired fragment types (`_records.zip`, `_files.zip`, `sync_queue.json`, legacy `_Backup.zip`) are pruned from server and Google Drive when a backup runs.
+- **S3 note:** If storage moves off local disk, document parallel S3 backup; keep daily full for local `storage/` until then.
 
 ### 14.4 Retention policy (calendar anchors — decided)
 
@@ -433,13 +412,12 @@ Oct 2026–2027:  keep 1st of each month
 
 ### 14.5 Admin UI — Options → Backups tab
 
-- Enable/disable scheduled backup
-- Destination(s): Google Drive, email, direct download
-- Alert email(s) for failures
-- **Backup now** (manual)
-- Optional: JSON/CSV export toggles
-- Last successful backup timestamp + size + destination
-- Retention preview (“would keep N backups / prune M”)
+- Status hero (last success/fail, schedule, destinations) + **Backup now**
+- Enable/disable daily schedule + Alaska time
+- Google Drive connect + “also save to Drive”
+- Failure alert email(s)
+- Combined list of full restore points with **Stored on** (Server / Drive / both)
+- Restore (server or from Drive) + optional upload of `_full.zip` under Advanced
 
 ### 14.6 Open items (remaining)
 

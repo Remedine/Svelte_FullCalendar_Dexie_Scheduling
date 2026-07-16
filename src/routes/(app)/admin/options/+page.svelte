@@ -17,13 +17,8 @@
 		type Hour12Period
 	} from '$lib/utils/dates';
 	import { pb } from '$lib/db/pb';
-	import { uploadSyncQueueSnapshotIfDue } from '$lib/backups/syncQueueUpload';
-	import {
-		backupArtifactKindFromFilename,
-		isRestorableBackupFilename,
-		type BackupArtifactKind
-	} from '$lib/backups/names';
-	import { dateFromBackupFilename } from '$lib/backups/retention';
+	import { isFullBackupFilename } from '$lib/backups/names';
+	import { dateFromBackupFilename, SERVER_SAFETY_NET_DAYS } from '$lib/backups/retention';
 	import { page } from '$app/state';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
@@ -95,8 +90,6 @@
 		name: string;
 		size: number;
 		created: string;
-		kind: BackupArtifactKind;
-		restorable: boolean;
 		onServer: boolean;
 		onDrive: boolean;
 		driveFileId?: string;
@@ -112,25 +105,26 @@
 	let driveBackupLoading = $state(false);
 	let driveBackupError = $state('');
 	let restoreTarget = $state<string | null>(null);
+	let backupsHowOpen = $state(false);
+	let backupsAdvancedOpen = $state(false);
 
-	/** Merge server + Drive lists by filename; show where each artifact lives. */
+	/** Merge server + Drive full backups by filename. */
 	const unifiedBackupItems = $derived.by((): UnifiedBackupRow[] => {
 		const map = new Map<string, UnifiedBackupRow>();
 
 		for (const item of backupItems) {
-			const kind = backupArtifactKindFromFilename(item.name);
+			if (!isFullBackupFilename(item.name)) continue;
 			map.set(item.name, {
 				name: item.name,
 				size: item.size,
 				created: item.created,
-				kind,
-				restorable: isRestorableBackupFilename(item.name),
 				onServer: true,
 				onDrive: false
 			});
 		}
 
 		for (const item of driveBackupItems) {
+			if (!isFullBackupFilename(item.name)) continue;
 			const existing = map.get(item.name);
 			if (existing) {
 				existing.onDrive = true;
@@ -138,13 +132,10 @@
 				if (!existing.size && item.size) existing.size = item.size;
 				if (!existing.created && item.modifiedTime) existing.created = item.modifiedTime;
 			} else {
-				const kind = backupArtifactKindFromFilename(item.name);
 				map.set(item.name, {
 					name: item.name,
 					size: item.size,
 					created: item.modifiedTime,
-					kind,
-					restorable: item.restorable || isRestorableBackupFilename(item.name),
 					onServer: false,
 					onDrive: true,
 					driveFileId: item.id
@@ -156,9 +147,15 @@
 			const da = dateFromBackupFilename(a.name) || '';
 			const db = dateFromBackupFilename(b.name) || '';
 			if (da !== db) return db.localeCompare(da);
-			if (a.name !== b.name) return b.name.localeCompare(a.name);
-			return 0;
+			return b.name.localeCompare(a.name);
 		});
+	});
+
+	const backupStatusTone = $derived.by(() => {
+		const s = String(editingOptions?.lastBackupStatus || '').toLowerCase();
+		if (s === 'success' || s === 'ok') return 'ok';
+		if (s === 'failed' || s === 'error') return 'fail';
+		return 'unknown';
 	});
 
 	function locationLabel(row: UnifiedBackupRow): string {
@@ -167,9 +164,26 @@
 		return 'Server';
 	}
 
+	function friendlyBackupDate(row: UnifiedBackupRow): string {
+		const fromName = dateFromBackupFilename(row.name);
+		if (fromName) {
+			try {
+				const [y, m, d] = fromName.split('-').map(Number);
+				return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+					weekday: 'short',
+					year: 'numeric',
+					month: 'short',
+					day: 'numeric',
+					timeZone: 'America/Anchorage'
+				});
+			} catch {
+				return fromName;
+			}
+		}
+		return formatBackupDate(row.created);
+	}
+
 	function openRestoreForRow(row: UnifiedBackupRow) {
-		if (!row.restorable) return;
-		// Prefer server copy when both exist (faster, no Drive download).
 		if (row.onServer) {
 			openRestoreDialog(row.name);
 			return;
@@ -372,6 +386,8 @@
 				desktopSecurityIdleMinutes: desktopIdleMinutes,
 				crewAssignmentHour: hour,
 				backupScheduledHour: backupHour,
+				// Success email attach retired — failure alerts use backupAlertEmails only
+				backupDestEmail: false,
 				lastUpdated: new Date(),
 				updatedBy: auth.currentUser?.name || 'Admin'
 			};
@@ -483,21 +499,6 @@
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 		return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-	}
-
-	function backupKindLabel(kind: BackupArtifactKind): string {
-		switch (kind) {
-			case 'records':
-				return 'Records';
-			case 'files':
-				return 'Files';
-			case 'full':
-				return 'Full';
-			case 'sync_queue':
-				return 'Sync queue';
-			default:
-				return 'Legacy';
-		}
 	}
 
 	function formatBackupDate(iso: string | undefined): string {
@@ -643,7 +644,6 @@
 		await ensureFreshAdminSession();
 		backupRunning = true;
 		try {
-			await uploadSyncQueueSnapshotIfDue(true);
 			const res = await fetch('/api/admin/backups', {
 				method: 'POST',
 				headers: {
@@ -656,14 +656,13 @@
 			if (!res.ok) {
 				throw new Error(data.error || 'Backup failed');
 			}
-			const count = Array.isArray(data.artifacts) ? data.artifacts.length : 1;
 			const driveNote =
 				Array.isArray(data.uploadedToDrive) && data.uploadedToDrive.length > 0
-					? ` · uploaded ${data.uploadedToDrive.length} file(s) to Google Drive`
-					: '';
-			toast.success(
-				`Backup created (${count} artifact${count === 1 ? '' : 's'}): ${data.filename || 'success'}${driveNote}`
-			);
+					? ' Saved to Google Drive.'
+					: editingOptions.backupDestGoogleDrive
+						? ' Kept on server (Drive upload did not complete).'
+						: ' Saved on this server.';
+			toast.success(`Backup complete.${driveNote}`);
 			if (data.driveError) {
 				driveErrorBanner = String(data.driveError);
 				toast.error(String(data.driveError), 20000);
@@ -674,9 +673,7 @@
 			editingOptions.lastBackupSizeBytes = data.size;
 			editingOptions.lastBackupError = '';
 			await loadBackupList();
-			if (Array.isArray(data.uploadedToDrive) && data.uploadedToDrive.length > 0) {
-				void loadDriveBackupList();
-			}
+			void loadDriveBackupList();
 			await optionsStore.pullFromPB();
 		} catch (err: any) {
 			toast.error(err?.message || 'Backup failed');
@@ -818,6 +815,10 @@
 			toast.error('Backup must be a .zip file');
 			return;
 		}
+		if (!isFullBackupFilename(file.name)) {
+			toast.error('Upload a full backup file (name ends with _full.zip)');
+			return;
+		}
 		await ensureFreshAdminSession();
 		backupUploading = true;
 		try {
@@ -830,7 +831,7 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(data.error || 'Upload failed');
-			toast.success(`Uploaded ${data.name}. You can restore it from the list below.`);
+			toast.success(`Uploaded ${data.name}. You can restore it from the list.`);
 			if (uploadFileInput) uploadFileInput.value = '';
 			await loadBackupList();
 		} catch (err: any) {
@@ -1326,23 +1327,102 @@
 				</button>
 			</div>
 		{:else if activeTab === 'backups'}
-			<h2>Data Backups</h2>
+			<h2>Backups</h2>
 			<p class="options-page__help">
-				Split daily archives: <strong>records</strong> (database), <strong>files</strong>
-				(incremental), optional <strong>sync queue</strong>, and a restorable <strong>full</strong>
-				zip on retention anchor days (1st, 8th, 15th, 22nd, 29th / month-end). Alaska time drives
-				filenames and retention. Save settings below, then use <strong>Backup now</strong> or enable
-				the daily cron.
+				Automatic copies of your CRM data. Most days you only need <strong>Backup now</strong> and
+				the list below if something goes wrong.
 			</p>
 
+			<!-- Status hero -->
+			<div
+				class="backup-status-hero"
+				class:backup-status-hero--ok={backupStatusTone === 'ok'}
+				class:backup-status-hero--fail={backupStatusTone === 'fail'}
+				role="status"
+			>
+				<div class="backup-status-hero__main">
+					{#if backupStatusTone === 'ok'}
+						<p class="backup-status-hero__title">Last backup succeeded</p>
+					{:else if backupStatusTone === 'fail'}
+						<p class="backup-status-hero__title">Last backup failed</p>
+					{:else}
+						<p class="backup-status-hero__title">No backup recorded yet</p>
+					{/if}
+					<p class="backup-status-hero__when">
+						{formatBackupDate(editingOptions.lastBackupAt)}
+						{#if editingOptions.lastBackupFilename}
+							· {editingOptions.lastBackupFilename}
+						{/if}
+						{#if editingOptions.lastBackupSizeBytes}
+							· {formatBytes(Number(editingOptions.lastBackupSizeBytes))}
+						{/if}
+					</p>
+					{#if backupStatusTone === 'fail' && editingOptions.lastBackupError}
+						<pre class="backup-error backup-status-hero__error">{editingOptions.lastBackupError}</pre>
+					{/if}
+					<p class="backup-status-hero__meta">
+						{#if editingOptions.backupScheduledEnabled}
+							Scheduled daily at {backupScheduledHour12}
+							{backupScheduledPeriod} Alaska time.
+						{:else}
+							Schedule is off — only manual backups run.
+						{/if}
+					</p>
+					<p class="backup-status-hero__meta">
+						Copies go to:
+						<strong>this server</strong>
+						{#if editingOptions.backupDestGoogleDrive && driveStatus?.connected}
+							· <strong>Google Drive</strong>
+							{#if driveStatus.email || editingOptions.backupGoogleDriveEmail}
+								({driveStatus.email || editingOptions.backupGoogleDriveEmail})
+							{/if}
+							<span class="options-page__help-inline">
+								(Drive is the long-term store; server keeps about {SERVER_SAFETY_NET_DAYS} recent days)
+							</span>
+						{:else if editingOptions.backupDestGoogleDrive}
+							· Google Drive (not connected yet)
+						{/if}
+					</p>
+				</div>
+				<button
+					type="button"
+					class="options-page__btn options-page__btn--save backup-now-btn"
+					onclick={runBackupNow}
+					disabled={backupRunning}
+				>
+					{backupRunning ? 'Creating backup…' : 'Backup now'}
+				</button>
+			</div>
+
+			<details class="backup-details" bind:open={backupsHowOpen}>
+				<summary class="backup-details__summary">How backups work</summary>
+				<div class="backup-details__body options-page__help">
+					<ul class="backup-details__list">
+						<li>
+							Each backup is one <strong>full restore point</strong> (database + uploaded files).
+						</li>
+						<li>Dates and the daily schedule use <strong>Alaska time</strong>.</li>
+						<li>
+							With Google Drive connected and enabled, new backups upload there. The server keeps
+							about the last <strong>{SERVER_SAFETY_NET_DAYS} days</strong> as a safety net; older
+							server copies are removed. Drive keeps longer history using calendar retention.
+						</li>
+						<li>
+							If Drive upload fails, the copy stays on the server and alert emails are notified.
+						</li>
+						<li>Email is used for <strong>failure alerts only</strong> (no backup attachments).</li>
+					</ul>
+				</div>
+			</details>
+
 			<div class="form-section">
-				<h3>Schedule &amp; delivery</h3>
+				<h3>Schedule</h3>
 				<div class="backup-settings">
 					<label class="backup-settings__check">
 						<input type="checkbox" bind:checked={editingOptions.backupScheduledEnabled} />
-						Enable daily scheduled backup (hourly cron checks Alaska time)
+						Run a backup every day
 					</label>
-					<label for="opt-backup-hour" class="label">Scheduled backup time (Alaska)</label>
+					<label for="opt-backup-hour" class="label">Time (Alaska)</label>
 					<div class="options-page__time-row">
 						<input
 							id="opt-backup-hour"
@@ -1362,20 +1442,37 @@
 						</select>
 					</div>
 					<p class="options-page__help">
-						Uses <strong>America/Anchorage</strong>. Default 11:00 PM. Save settings after changing.
+						Tap <strong>Save All Changes</strong> at the bottom after changing schedule or destinations.
 					</p>
-					<label class="backup-settings__check">
-						<input type="checkbox" bind:checked={editingOptions.backupDestEmail} />
-						Email backup artifacts when attachable (under 18 MB; larger sets: download from this page)
-					</label>
+				</div>
+			</div>
+
+			<div class="form-section">
+				<h3>Where copies are saved</h3>
+				<div class="backup-settings">
+					<div class="backup-dest-row">
+						<span class="backup-dest-row__label">This server</span>
+						<span class="backup-dest-row__value">
+							{#if editingOptions.backupDestGoogleDrive && driveStatus?.connected}
+								Safety net (~{SERVER_SAFETY_NET_DAYS} days). Long-term copies live on Drive.
+							{:else}
+								Primary store (always available for download &amp; restore).
+							{/if}
+						</span>
+					</div>
 
 					<div class="backup-gdrive">
-						<h4 class="backup-gdrive__title">Google Drive</h4>
-						<p class="options-page__help backup-gdrive__intro">
-							Connect a Google account so each backup is also saved to Drive. No service-account
-							JSON or folder IDs required — sign in once and we create a
-							<strong>Capital City Windows Backups</strong> folder for you.
-						</p>
+						<div class="backup-dest-row backup-dest-row--gdrive">
+							<span class="backup-dest-row__label">Google Drive</span>
+							{#if driveStatus?.connected}
+								<span class="backup-gdrive__badge">Connected</span>
+							{:else if driveStatus?.needsReconnect}
+								<span class="backup-gdrive__badge backup-gdrive__badge--warn">Reconnect needed</span>
+							{:else}
+								<span class="backup-dest-row__value">Not connected</span>
+							{/if}
+						</div>
+
 						{#if driveErrorBanner}
 							<div class="backup-gdrive__error" role="alert">
 								<p class="backup-gdrive__error-text">{driveErrorBanner}</p>
@@ -1390,53 +1487,33 @@
 						{/if}
 
 						{#if driveStatusLoading && !driveStatus}
-							<p class="options-page__help">Checking Google Drive connection…</p>
+							<p class="options-page__help">Checking Google Drive…</p>
 						{:else if driveStatus?.connected || driveStatus?.needsReconnect || driveStatus?.folderId}
-							<div
-								class="backup-gdrive__status"
-								class:backup-gdrive__status--connected={driveStatus.connected}
-								class:backup-gdrive__status--warn={driveStatus.needsReconnect ||
-									!driveStatus.connected}
-								role="status"
-							>
-								{#if driveStatus.connected}
-									<span class="backup-gdrive__badge">Connected</span>
-								{:else}
-									<span class="backup-gdrive__badge backup-gdrive__badge--warn">Reconnect needed</span>
-								{/if}
-								{#if driveStatus.email || editingOptions.backupGoogleDriveEmail}
-									<p class="backup-gdrive__line">
-										<strong>Account:</strong>
-										{driveStatus.email || editingOptions.backupGoogleDriveEmail}
-									</p>
-								{/if}
+							{#if driveStatus.email || editingOptions.backupGoogleDriveEmail}
 								<p class="backup-gdrive__line">
-									<strong>Folder:</strong>
-									{driveStatus.folderName ||
-										editingOptions.backupGoogleDriveFolderName ||
-										'Capital City Windows Backups'}
+									<strong>Account:</strong>
+									{driveStatus.email || editingOptions.backupGoogleDriveEmail}
 								</p>
-								{#if driveStatus.needsReconnect || !driveStatus.hasOAuthToken}
-									<p class="options-page__help">
-										Google created the backup folder, but the server did not keep the sign-in token
-										(schema was incomplete). Click <strong>Connect Google Drive</strong> again so
-										uploads can work, then run <strong>Backup now</strong>.
-									</p>
-								{/if}
-								{#if driveStatus.hasServiceAccount && !driveStatus.hasOAuthToken}
-									<p class="options-page__help">
-										Using server service-account credentials (advanced). You can still connect a
-										personal Google account below if preferred.
-									</p>
-								{/if}
-							</div>
+							{/if}
+							<p class="backup-gdrive__line">
+								<strong>Folder:</strong>
+								{driveStatus.folderName ||
+									editingOptions.backupGoogleDriveFolderName ||
+									'Capital City Windows Backups'}
+							</p>
+							{#if driveStatus.needsReconnect || !driveStatus.hasOAuthToken}
+								<p class="options-page__help">
+									Connection expired or incomplete. Connect Google Drive again, save, then run
+									<strong>Backup now</strong>.
+								</p>
+							{/if}
 							<label class="backup-settings__check">
 								<input
 									type="checkbox"
 									bind:checked={editingOptions.backupDestGoogleDrive}
 									disabled={!driveStatus.connected}
 								/>
-								Upload backup artifacts to Google Drive
+								Also save a copy to Google Drive
 							</label>
 							<div class="backup-gdrive__actions">
 								{#if driveStatus.oauthAppReady}
@@ -1467,15 +1544,12 @@
 						{:else}
 							<label class="backup-settings__check backup-settings__check--disabled">
 								<input type="checkbox" checked={false} disabled />
-								Upload backup artifacts to Google Drive
+								Also save a copy to Google Drive
 								<span class="backup-gdrive__hint">(connect first)</span>
 							</label>
 							{#if driveStatus && !driveStatus.oauthAppReady}
 								<p class="backup-gdrive__setup-warn">
-									Connect is not available yet: the app server needs Google OAuth client credentials
-									set once (<code>GOOGLE_OAUTH_CLIENT_ID</code> /
-									<code>GOOGLE_OAUTH_CLIENT_SECRET</code>). Ask your developer if you see this
-									message.
+									Off-site backup isn’t set up on this server yet. Contact your administrator.
 								</p>
 							{:else}
 								<div class="backup-gdrive__actions">
@@ -1489,118 +1563,34 @@
 									</button>
 								</div>
 								<p class="options-page__help">
-									You’ll sign in with Google, approve Drive access, then return here. Backups start
-									uploading after you save and run <strong>Backup now</strong> (or on the daily
-									schedule).
+									Sign in with Google, approve access, then return here. Save settings and run
+									<strong>Backup now</strong> (or wait for the daily schedule).
 								</p>
 							{/if}
 						{/if}
 					</div>
 
-					<label for="opt-backup-alerts" class="label">Alert / delivery emails</label>
+					<label for="opt-backup-alerts" class="label">Failure alert emails</label>
 					<textarea
 						id="opt-backup-alerts"
 						class="input backup-settings__textarea"
-						rows="3"
+						rows="2"
 						placeholder="admin@example.com, ops@example.com"
 						bind:value={editingOptions.backupAlertEmails}
 					></textarea>
 					<p class="options-page__help">
-						Comma-separated. Used for successful delivery (if enabled) and failure alerts. Email
-						copies are never auto-deleted.
+						Comma-separated. Notified only when a backup fails (or Drive upload fails). Backups are
+						not emailed as attachments.
 					</p>
 				</div>
 			</div>
 
 			<div class="form-section">
-				<h3>Manual backup</h3>
+				<h3>Restore points</h3>
 				<p class="options-page__help">
-					Includes the latest sync queue snapshot from this device when you tap Backup now.
+					Each row is a full restore point. <strong>Stored on</strong> shows whether the file is on
+					this server, Google Drive, or both.
 				</p>
-				<button
-					type="button"
-					class="options-page__btn options-page__btn--save backup-now-btn"
-					onclick={runBackupNow}
-					disabled={backupRunning}
-				>
-					{backupRunning ? 'Creating backup…' : 'Backup now'}
-				</button>
-			</div>
-
-			<div class="form-section">
-				<h3>Last backup</h3>
-				<ul class="backup-status-list">
-					<li><strong>Status:</strong> {editingOptions.lastBackupStatus || '—'}</li>
-					<li><strong>When:</strong> {formatBackupDate(editingOptions.lastBackupAt)}</li>
-					<li><strong>File:</strong> {editingOptions.lastBackupFilename || '—'}</li>
-					<li><strong>Size:</strong> {formatBytes(Number(editingOptions.lastBackupSizeBytes ?? 0))}</li>
-					{#if editingOptions.syncQueueSnapshotAt}
-						<li>
-							<strong>Sync queue snapshot:</strong>
-							{formatBackupDate(editingOptions.syncQueueSnapshotAt)} (server)
-						</li>
-					{/if}
-				</ul>
-				{#if editingOptions.lastBackupStatus === 'failed' && editingOptions.lastBackupError}
-					<pre class="backup-error">{editingOptions.lastBackupError}</pre>
-				{/if}
-			</div>
-
-			<div class="form-section backup-restore-section">
-				<h3>Restore from backup</h3>
-				<p class="options-page__help backup-restore-warning">
-					<strong>Destructive.</strong> Restore replaces all server data (database + uploaded files)
-					with the chosen backup. Only <strong>_full.zip</strong> and legacy <strong>_Backup.zip</strong>
-					archives can be restored — records/files/sync-queue artifacts are for download only.
-					You can restore from the <strong>server list</strong>, from <strong>Google Drive</strong>
-					below, or by uploading a zip. PocketBase restarts and the app will be unavailable for
-					about 1–2 minutes. All signed-in devices are automatically signed out when restore
-					finishes.
-				</p>
-				<div class="backup-upload">
-					<label for="backup-upload-input" class="label">Upload a restorable .zip</label>
-					<p class="options-page__help">
-						Upload a <code>_full.zip</code> or legacy <code>_Backup.zip</code> from email or your
-						computer. It appears in the combined list below as <strong>Server</strong>; then tap
-						<strong>Restore</strong>. Drive-only copies restore via download-then-restore.
-					</p>
-					<div class="backup-upload__row">
-						<input
-							id="backup-upload-input"
-							type="file"
-							accept=".zip,application/zip"
-							bind:this={uploadFileInput}
-							class="backup-upload__input"
-						/>
-						<button
-							type="button"
-							class="options-page__btn options-page__btn--add"
-							onclick={uploadBackupZip}
-							disabled={backupUploading}
-						>
-							{backupUploading ? 'Uploading…' : 'Upload to server'}
-						</button>
-					</div>
-				</div>
-			</div>
-
-			<div class="form-section">
-				<h3>Backups</h3>
-				<p class="options-page__help">
-					Combined list of server and Google Drive artifacts. The <strong>Stored on</strong> column
-					shows where each file lives. Mixed copies (same name on both) are one row. Retention
-					prunes <strong>each store independently</strong> with the same calendar rules after a
-					successful backup — a file only on Drive is not removed from the server list (and vice
-					versa). Email copies are never pruned.
-				</p>
-				{#if backupRetention}
-					<p class="options-page__help">
-						Server retention preview: would keep <strong>{backupRetention.wouldKeep}</strong> of
-						<strong>{backupRetention.total}</strong> backup dates; prune
-						<strong>{backupRetention.wouldPrune}</strong> on server. Drive uses the same rules when
-						Drive upload is connected.
-					</p>
-				{/if}
 				{#if driveBackupError}
 					<p class="backup-gdrive__error-text" style="margin-bottom: var(--space-3)">
 						Drive list: {driveBackupError}
@@ -1610,21 +1600,25 @@
 					<p>Loading backups…</p>
 				{:else if unifiedBackupItems.length === 0}
 					<p class="options-page__help">
-						No backups yet. Run <strong>Backup now</strong> or wait for the scheduled job.
-						{#if !driveStatus?.connected}
-							Connect Google Drive above to include off-site copies in this list.
-						{/if}
+						No restore points yet.
+						<button
+							type="button"
+							class="options-page__btn options-page__btn--save"
+							style="margin-top: var(--space-2)"
+							onclick={runBackupNow}
+							disabled={backupRunning}
+						>
+							{backupRunning ? 'Creating backup…' : 'Create first backup'}
+						</button>
 					</p>
 				{:else}
-					<div class="backup-list backup-list--unified" role="table" aria-label="Backup files">
+					<div class="backup-list backup-list--unified" role="table" aria-label="Restore points">
 						<div class="backup-list__header" role="row">
-							<span class="backup-list__col backup-list__col--file" role="columnheader">File</span>
+							<span class="backup-list__col backup-list__col--file" role="columnheader">When</span>
 							<span class="backup-list__col backup-list__col--location" role="columnheader"
 								>Stored on</span
 							>
-							<span class="backup-list__col backup-list__col--meta" role="columnheader"
-								>Size / date</span
-							>
+							<span class="backup-list__col backup-list__col--meta" role="columnheader">Size</span>
 							<span class="backup-list__col backup-list__col--actions" role="columnheader"
 								>Actions</span
 							>
@@ -1633,11 +1627,12 @@
 							<div class="backup-list__row backup-list__row--unified" role="row">
 								<div class="backup-list__col backup-list__col--file" role="cell">
 									<span class="backup-list__name">
-										<span class="backup-list__badge backup-list__badge--{item.kind}"
-											>{backupKindLabel(item.kind)}</span
-										>
-										{item.name}
+										<span class="backup-list__badge backup-list__badge--full">Full</span>
+										<span class="backup-list__date">{friendlyBackupDate(item)}</span>
 									</span>
+									<span class="backup-list__detail backup-list__filename" title={item.name}
+										>{item.name}</span
+									>
 								</div>
 								<div class="backup-list__col backup-list__col--location" role="cell">
 									<span
@@ -1651,9 +1646,7 @@
 									</span>
 								</div>
 								<div class="backup-list__col backup-list__col--meta" role="cell">
-									<span class="backup-list__detail">
-										{formatBytes(item.size)} · {formatBackupDate(item.created)}
-									</span>
+									<span class="backup-list__detail">{formatBytes(item.size)}</span>
 								</div>
 								<div
 									class="backup-list__col backup-list__col--actions backup-list__actions"
@@ -1672,12 +1665,9 @@
 										type="button"
 										class="options-page__btn backup-list__restore"
 										onclick={() => openRestoreForRow(item)}
-										disabled={!item.restorable}
-										title={item.restorable
-											? item.onServer
-												? 'Restore from server copy'
-												: 'Download from Google Drive and restore'
-											: 'Only full or legacy zips can be restored'}
+										title={item.onServer
+											? 'Restore from server copy'
+											: 'Download from Google Drive and restore'}
 									>
 										{item.onServer ? 'Restore' : 'Restore from Drive'}
 									</button>
@@ -1700,6 +1690,47 @@
 					</div>
 				{/if}
 			</div>
+
+			<details class="backup-details" bind:open={backupsAdvancedOpen}>
+				<summary class="backup-details__summary">Advanced</summary>
+				<div class="backup-details__body">
+					{#if backupRetention}
+						<p class="options-page__help">
+							Long-term retention (Drive / server when Drive is off): would keep
+							<strong>{backupRetention.wouldKeep}</strong> of
+							<strong>{backupRetention.total}</strong> backup dates on the calendar policy.
+						</p>
+					{/if}
+					<p class="options-page__help backup-restore-warning">
+						<strong>Restore replaces all live CRM data</strong> with the chosen backup. The app will
+						be unavailable for a few minutes and everyone will be signed out.
+					</p>
+					<div class="backup-upload">
+						<label for="backup-upload-input" class="label">Upload a full backup (.zip)</label>
+						<p class="options-page__help">
+							Use a file whose name ends with <code>_full.zip</code> (from Download or Drive). It
+							appears in the list as <strong>Server</strong>; then tap Restore.
+						</p>
+						<div class="backup-upload__row">
+							<input
+								id="backup-upload-input"
+								type="file"
+								accept=".zip,application/zip"
+								bind:this={uploadFileInput}
+								class="backup-upload__input"
+							/>
+							<button
+								type="button"
+								class="options-page__btn options-page__btn--add"
+								onclick={uploadBackupZip}
+								disabled={backupUploading}
+							>
+								{backupUploading ? 'Uploading…' : 'Upload to server'}
+							</button>
+						</div>
+					</div>
+				</div>
+			</details>
 		{/if}
 	</div>
 
@@ -1712,19 +1743,17 @@
 		>
 			<div class="backup-restore-dialog">
 				<h3 id="restore-dialog-title">Confirm restore</h3>
-				<p>
-					This will replace <strong>all</strong> server data with:
+				<p class="backup-restore-warning">
+					This replaces <strong>all</strong> live CRM data with the backup below. The app will be down
+					briefly and everyone will be signed out.
 				</p>
 				<p class="backup-restore-dialog__filename">{restoreTarget}</p>
 				{#if restoreSource === 'drive'}
 					<p class="options-page__help">
-						Source: <strong>Google Drive</strong> — the file is downloaded to the server, then
-						restored. Large archives may take a minute to transfer.
+						Source: <strong>Google Drive</strong> — downloaded to the server first, then restored.
 					</p>
 				{/if}
-				<p class="options-page__help">
-					PocketBase will restart. Type the filename below to confirm.
-				</p>
+				<p class="options-page__help">Type the exact filename to confirm.</p>
 				<input
 					class="input backup-restore-dialog__input"
 					type="text"
@@ -2146,6 +2175,100 @@
 		font-weight: var(--font-weight-medium);
 	}
 
+	.backup-status-hero {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--space-4);
+		margin: 0 0 var(--space-5);
+		padding: var(--space-4) var(--space-5);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+		border-left: 4px solid var(--color-text-muted);
+	}
+	.backup-status-hero--ok {
+		border-left-color: var(--color-success, #16a34a);
+	}
+	.backup-status-hero--fail {
+		border-left-color: var(--color-danger-emphasis, #b91c1c);
+	}
+	.backup-status-hero__title {
+		margin: 0 0 var(--space-1);
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-semibold);
+	}
+	.backup-status-hero--ok .backup-status-hero__title {
+		color: var(--color-success, #16a34a);
+	}
+	.backup-status-hero--fail .backup-status-hero__title {
+		color: var(--color-danger-emphasis, #b91c1c);
+	}
+	.backup-status-hero__when,
+	.backup-status-hero__meta {
+		margin: 0 0 var(--space-1);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+	.backup-status-hero__error {
+		margin: var(--space-2) 0;
+		max-width: 40rem;
+	}
+	.backup-status-hero__main {
+		flex: 1 1 16rem;
+		min-width: 0;
+	}
+	.backup-details {
+		margin: 0 0 var(--space-5);
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-surface-alt);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+	}
+	.backup-details__summary {
+		cursor: pointer;
+		font-weight: var(--font-weight-semibold);
+		font-size: var(--font-size-sm);
+	}
+	.backup-details__body {
+		margin-top: var(--space-3);
+	}
+	.backup-details__list {
+		margin: 0;
+		padding-left: var(--space-5);
+		line-height: 1.5;
+	}
+	.backup-dest-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--space-2) var(--space-3);
+		margin-bottom: var(--space-3);
+	}
+	.backup-dest-row__label {
+		font-weight: var(--font-weight-semibold);
+		min-width: 7rem;
+	}
+	.backup-dest-row__value {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		flex: 1 1 12rem;
+	}
+	.options-page__help-inline {
+		display: block;
+		margin-top: var(--space-1);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+	.backup-list__date {
+		font-weight: var(--font-weight-medium);
+	}
+	.backup-list__filename {
+		display: block;
+		margin-top: 0.15rem;
+		word-break: break-all;
+	}
 	.backup-gdrive {
 		margin: var(--space-4) 0;
 		padding: var(--space-4);

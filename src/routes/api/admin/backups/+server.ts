@@ -1,20 +1,22 @@
 import { json } from '@sveltejs/kit';
 import { assertAdminFromAuthHeader } from '$lib/server/pbAdmin';
 import { listBackups, runBackup } from '$lib/server/backups';
+import { isFullBackupFilename } from '$lib/backups/names';
 import { previewRetention, dateFromBackupFilename } from '$lib/backups/retention';
 
 function authHeader(request: Request): string | null {
 	return request.headers.get('Authorization');
 }
 
-/** GET: list backups + retention preview. POST: manual backup now. */
+/** GET: list full backups + retention preview. POST: manual backup now. */
 export async function GET({ request }: { request: Request }) {
 	const token = authHeader(request);
 	if (!(await assertAdminFromAuthHeader(token))) {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	const items = await listBackups();
+	const all = await listBackups();
+	const items = all.filter((i) => isFullBackupFilename(i.name));
 	const dates = items
 		.map((i) => dateFromBackupFilename(i.name))
 		.filter((d): d is string => Boolean(d));

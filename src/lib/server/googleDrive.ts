@@ -10,7 +10,10 @@ import {
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
 import { INTERNAL_SECRET } from '$env/static/private';
-import { isRestorableBackupFilename } from '$lib/backups/names';
+import {
+	isNonFullBackupArtifact,
+	isRestorableBackupFilename
+} from '$lib/backups/names';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 
 /** Prefix for AES-GCM sealed refresh tokens stored on options (readable by internal API). */
@@ -400,7 +403,29 @@ export async function uploadBackupArtifactsToDrive(
 	return uploaded;
 }
 
-/** Prune dated backup artifacts on Google Drive per spec §14.4 retention calendar. */
+/** Delete retired fragment/legacy backup files from the Drive backup folder. */
+export async function pruneGoogleDriveNonFullArtifacts(
+	folderId: string,
+	meta: GoogleDriveConnectionMeta = {}
+): Promise<string[]> {
+	const drive = await getDriveClient(meta);
+	const files = await listAllFilesInFolder(drive, folderId);
+	const pruned: string[] = [];
+
+	for (const file of files) {
+		if (!isNonFullBackupArtifact(file.name)) continue;
+		try {
+			await drive.files.delete({ fileId: file.id, supportsAllDrives: true });
+			pruned.push(file.name);
+		} catch (err) {
+			console.error('[googleDrive] non-full prune failed for', file.name, err);
+		}
+	}
+
+	return pruned;
+}
+
+/** Prune dated full backups on Google Drive per calendar retention. */
 export async function pruneGoogleDriveBackupsByRetention(
 	folderId: string,
 	now = new Date(),
@@ -412,6 +437,10 @@ export async function pruneGoogleDriveBackupsByRetention(
 	let kept = 0;
 
 	for (const file of files) {
+		if (isNonFullBackupArtifact(file.name)) {
+			// Handled by pruneGoogleDriveNonFullArtifacts
+			continue;
+		}
 		const date = dateFromBackupFilename(file.name);
 		if (!date) {
 			kept++;

@@ -74,3 +74,31 @@ export function dateFromBackupFilename(filename: string): string | null {
 	const m = /^(\d{4}-\d{2}-\d{2})_/.exec(filename);
 	return m?.[1] ?? null;
 }
+
+/**
+ * When Google Drive is the durable store, keep only this many recent calendar days
+ * of full backups on the app server as a local safety net.
+ */
+export const SERVER_SAFETY_NET_DAYS = 5;
+
+/**
+ * Whether a backup dated `backupDate` should remain on the server safety net
+ * (age in Alaska calendar days ≤ SERVER_SAFETY_NET_DAYS).
+ */
+export function shouldKeepServerSafetyNetDate(
+	backupDate: string,
+	today = new Date(),
+	maxAgeDays = SERVER_SAFETY_NET_DAYS
+): boolean {
+	const parts = alaskaPartsFromDateString(backupDate);
+	if (!parts) return false;
+
+	const todayStr = backupDateInAlaska(today);
+	const ageDays = Math.floor(
+		(Date.parse(`${todayStr}T12:00:00Z`) - Date.parse(`${backupDate}T12:00:00Z`)) /
+			(24 * 60 * 60 * 1000)
+	);
+
+	if (ageDays < 0) return true;
+	return ageDays <= maxAgeDays;
+}

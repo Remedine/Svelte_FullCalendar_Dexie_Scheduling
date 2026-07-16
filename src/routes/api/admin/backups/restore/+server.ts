@@ -30,7 +30,7 @@ export async function POST({ request }: { request: Request }) {
 	}
 	if (!isRestorableBackupFilename(name)) {
 		return json(
-			{ error: 'Only _full.zip or legacy _Backup.zip archives can be restored' },
+			{ error: 'Only _full.zip archives can be restored' },
 			{ status: 400 }
 		);
 	}

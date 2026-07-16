@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
 	dateFromBackupFilename,
 	previewRetention,
-	shouldKeepBackupDate
+	shouldKeepBackupDate,
+	shouldKeepServerSafetyNetDate,
+	SERVER_SAFETY_NET_DAYS
 } from './retention';
 
 describe('shouldKeepBackupDate', () => {
@@ -53,5 +55,14 @@ describe('previewRetention', () => {
 		expect(result.total).toBe(4);
 		expect(result.wouldKeep).toBe(3);
 		expect(result.wouldPrune).toBe(1);
+	});
+});
+
+describe('shouldKeepServerSafetyNetDate', () => {
+	it(`keeps the last ${SERVER_SAFETY_NET_DAYS} Alaska calendar days only`, () => {
+		const today = new Date('2026-06-20T12:00:00Z');
+		expect(shouldKeepServerSafetyNetDate('2026-06-20', today)).toBe(true);
+		expect(shouldKeepServerSafetyNetDate('2026-06-15', today)).toBe(true);
+		expect(shouldKeepServerSafetyNetDate('2026-06-14', today)).toBe(false);
 	});
 });

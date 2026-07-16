@@ -20,15 +20,16 @@ export function sanitizeBusinessName(name: string): string {
 	return cleaned || 'Business';
 }
 
-export type BackupArtifactKind = 'records' | 'files' | 'full' | 'legacy' | 'sync_queue';
+/** Known backup filename kinds (full is the only supported product artifact). */
+export type BackupArtifactKind = 'full' | 'records' | 'files' | 'legacy' | 'sync_queue' | 'other';
 
-/** Spec §14.2 legacy MVP name — still accepted for restore/upload. */
-export function buildBackupFilename(businessName: string, date?: string): string {
+/** Daily restorable archive name: `YYYY-MM-DD_{Business}_full.zip`. */
+export function buildFullBackupFilename(businessName: string, date?: string): string {
 	const d = date ?? backupDateInAlaska();
-	return `${d}_${sanitizeBusinessName(businessName)}_Backup.zip`;
+	return `${d}_${sanitizeBusinessName(businessName)}_full.zip`;
 }
 
-/** Spec §14.3 split archive artifact names. */
+/** @deprecated Prefer buildFullBackupFilename — kept for tests/migration parsing. */
 export function buildSplitBackupFilename(
 	businessName: string,
 	kind: 'records' | 'files' | 'full',
@@ -38,24 +39,30 @@ export function buildSplitBackupFilename(
 	return `${d}_${sanitizeBusinessName(businessName)}_${kind}.zip`;
 }
 
-export function buildSyncQueueFilename(businessName: string, date?: string): string {
-	const d = date ?? backupDateInAlaska();
-	return `${d}_${sanitizeBusinessName(businessName)}_sync_queue.json`;
-}
-
 export function backupArtifactKindFromFilename(filename: string): BackupArtifactKind {
 	const lower = filename.toLowerCase();
 	if (lower.endsWith('_sync_queue.json')) return 'sync_queue';
 	if (lower.endsWith('_records.zip')) return 'records';
 	if (lower.endsWith('_files.zip')) return 'files';
 	if (lower.endsWith('_full.zip')) return 'full';
-	return 'legacy';
+	if (lower.endsWith('_backup.zip')) return 'legacy';
+	return 'other';
 }
 
-/** Only full native zips and legacy MVP archives can use pb.RestoreBackup. */
+/** Only daily full native zips are restorable in-app. */
+export function isFullBackupFilename(filename: string): boolean {
+	return backupArtifactKindFromFilename(filename) === 'full';
+}
+
+/** Alias used by restore APIs — full zips only (legacy no longer accepted). */
 export function isRestorableBackupFilename(filename: string): boolean {
+	return isFullBackupFilename(filename);
+}
+
+/** Fragment / legacy files that should be cleaned up (not restorable full zips). */
+export function isNonFullBackupArtifact(filename: string): boolean {
 	const kind = backupArtifactKindFromFilename(filename);
-	return kind === 'full' || kind === 'legacy';
+	return kind === 'records' || kind === 'files' || kind === 'legacy' || kind === 'sync_queue';
 }
 
 /** Parse comma/semicolon/newline-separated alert emails. */

@@ -1,23 +1,31 @@
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
-import { isRetentionAnchorDay } from '$lib/backups/anchorDays';
-import { backupDateInAlaska, parseAlertEmails } from '$lib/backups/names';
-import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
-import { sendBackupFailureAlert, sendBackupSuccessEmail } from '$lib/server/brevo';
+import {
+	backupDateInAlaska,
+	isFullBackupFilename,
+	isNonFullBackupArtifact,
+	isRestorableBackupFilename,
+	parseAlertEmails
+} from '$lib/backups/names';
+import {
+	dateFromBackupFilename,
+	shouldKeepBackupDate,
+	shouldKeepServerSafetyNetDate
+} from '$lib/backups/retention';
+import { sendBackupFailureAlert } from '$lib/server/brevo';
 import {
 	downloadGoogleDriveFileBuffer,
 	isGoogleDriveConfigured,
 	listGoogleDriveBackupFiles,
 	openDriveRefreshToken,
 	pruneGoogleDriveBackupsByRetention,
+	pruneGoogleDriveNonFullArtifacts,
 	resolveGoogleDriveFolderId,
 	uploadBackupArtifactsToDrive,
 	type DriveBackupFile,
 	type GoogleDriveConnectionMeta
 } from '$lib/server/googleDrive';
-import { isRestorableBackupFilename } from '$lib/backups/names';
 
-const BREVO_MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
 const INTERNAL_BACKUP_FILES = new Set(['_backup_file_manifest.json']);
 
 export type BackupListItem = {
@@ -37,6 +45,7 @@ export type OptionsBackupFields = {
 	backupScheduledEnabled?: boolean;
 	backupScheduledHour?: number;
 	lastScheduledBackupDate?: string;
+	/** @deprecated Success/email attach disabled; field retained for schema compat. */
 	backupDestEmail?: boolean;
 	backupDestGoogleDrive?: boolean;
 	backupGoogleDriveFolderId?: string;
@@ -91,31 +100,57 @@ export async function listBackups(): Promise<BackupListItem[]> {
 	);
 }
 
-/** Spec §14.3 — records + incremental files + optional full zip + sync queue snapshot. */
-export async function createSplitPbBackup(req: {
+/**
+ * Create a daily full native PocketBase backup.
+ * Uses the PB create-split endpoint with includeFull=true, then removes any
+ * fragment artifacts so only `_full.zip` remains.
+ */
+export async function createFullPbBackup(req: {
 	datePrefix: string;
 	business: string;
-	includeFull: boolean;
-	forceFullFiles: boolean;
-	syncQueueJson: string;
-}): Promise<BackupArtifact[]> {
+}): Promise<BackupArtifact> {
 	const res = await internalFetch('/api/internal/backups/create-split', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
 			datePrefix: req.datePrefix,
 			business: req.business,
-			includeFull: req.includeFull,
-			forceFullFiles: req.forceFullFiles,
-			syncQueueJson: req.syncQueueJson
+			includeFull: true,
+			forceFullFiles: true,
+			syncQueueJson: ''
 		})
 	});
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
-		throw new Error(`Split backup create failed (${res.status}): ${text}`);
+		throw new Error(`Full backup create failed (${res.status}): ${text}`);
 	}
 	const data = await res.json();
-	return (data.artifacts || []) as BackupArtifact[];
+	const artifacts = (data.artifacts || []) as BackupArtifact[];
+	if (artifacts.length === 0) {
+		throw new Error('Backup create returned no artifacts');
+	}
+
+	const full =
+		artifacts.find((a) => a.kind === 'full' || isFullBackupFilename(a.name)) ?? null;
+
+	// Drop fragments / sync_queue immediately so only full remains on the server.
+	for (const a of artifacts) {
+		if (full && a.name === full.name) continue;
+		if (isFullBackupFilename(a.name)) continue;
+		try {
+			await deleteBackup(a.name);
+		} catch (err) {
+			console.warn('[backup] failed to remove non-full artifact after create:', a.name, err);
+		}
+	}
+
+	if (!full) {
+		throw new Error(
+			'Backup create did not produce a _full.zip. Check PocketBase create-split (includeFull).'
+		);
+	}
+
+	return full;
 }
 
 export async function downloadBackupBuffer(name: string): Promise<Buffer> {
@@ -241,7 +276,7 @@ export async function getDriveConnectionFromOptions(): Promise<DriveConnectionCo
 	return { ready: true, folderId, meta };
 }
 
-/** List restorable and other backup artifacts in the connected Drive folder. */
+/** List backup files in the connected Drive folder. */
 export async function listDriveBackups(): Promise<DriveBackupFile[]> {
 	const conn = await getDriveConnectionFromOptions();
 	if (!conn.ready || !conn.folderId) {
@@ -251,7 +286,7 @@ export async function listDriveBackups(): Promise<DriveBackupFile[]> {
 }
 
 /**
- * Download a restorable archive from Google Drive, stage it on the PocketBase
+ * Download a restorable full archive from Google Drive, stage it on the PocketBase
  * server backup store, then start a normal restore (PB restarts).
  */
 export async function restoreBackupFromGoogleDrive(
@@ -264,7 +299,7 @@ export async function restoreBackupFromGoogleDrive(
 		throw new Error('Drive file id and name are required');
 	}
 	if (!isRestorableBackupFilename(trimmedName)) {
-		throw new Error('Only _full.zip or legacy _Backup.zip archives can be restored');
+		throw new Error('Only _full.zip archives can be restored');
 	}
 
 	const conn = await getDriveConnectionFromOptions();
@@ -281,7 +316,7 @@ export async function restoreBackupFromGoogleDrive(
 		throw new Error('Drive file name does not match the selected backup');
 	}
 	if (!match.restorable) {
-		throw new Error('Only _full.zip or legacy _Backup.zip archives can be restored');
+		throw new Error('Only _full.zip archives can be restored');
 	}
 
 	console.log(`[backup] Downloading from Google Drive: ${trimmedName} (${match.size} bytes)`);
@@ -290,7 +325,6 @@ export async function restoreBackupFromGoogleDrive(
 		throw new Error('Downloaded empty file from Google Drive');
 	}
 
-	// Stage onto the server backup store so PB restore can run as usual.
 	const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
 	const staged = await uploadPbBackup(blob, trimmedName);
 	console.log(`[backup] Staged Drive backup on server as ${staged.name}; starting restore`);
@@ -357,12 +391,32 @@ export async function finalizeRestoreAfterPbRestart(): Promise<{
 	}
 }
 
-/** Prune backups that fall outside the retention calendar (server store only). */
+/** Delete retired fragment/legacy artifacts from the server backup store. */
+export async function pruneServerNonFullArtifacts(): Promise<string[]> {
+	const items = await listBackups();
+	const pruned: string[] = [];
+	for (const item of items) {
+		if (!isNonFullBackupArtifact(item.name)) continue;
+		try {
+			await deleteBackup(item.name);
+			pruned.push(item.name);
+		} catch (err) {
+			console.error('[backup] non-full prune failed for', item.name, err);
+		}
+	}
+	return pruned;
+}
+
+/** Prune server full zips outside the calendar retention policy (Drive off). */
 export async function pruneBackupsByRetention(): Promise<{ pruned: string[]; kept: number }> {
 	const items = await listBackups();
 	const pruned: string[] = [];
 	let kept = 0;
 	for (const item of items) {
+		if (isNonFullBackupArtifact(item.name)) {
+			// Handled by pruneServerNonFullArtifacts
+			continue;
+		}
 		const date = dateFromBackupFilename(item.name);
 		if (!date) {
 			kept++;
@@ -383,6 +437,38 @@ export async function pruneBackupsByRetention(): Promise<{ pruned: string[]; kep
 	return { pruned, kept };
 }
 
+/**
+ * When Drive is durable store: keep only recent full zips on the server (safety net).
+ */
+export async function pruneServerToSafetyNet(
+	now = new Date()
+): Promise<{ pruned: string[]; kept: number }> {
+	const items = await listBackups();
+	const pruned: string[] = [];
+	let kept = 0;
+	for (const item of items) {
+		if (isNonFullBackupArtifact(item.name)) continue;
+		const date = dateFromBackupFilename(item.name);
+		if (!date) {
+			// Keep undated (e.g. staged odd names) to avoid deleting restore stages blindly
+			kept++;
+			continue;
+		}
+		if (shouldKeepServerSafetyNetDate(date, now)) {
+			kept++;
+			continue;
+		}
+		try {
+			await deleteBackup(item.name);
+			pruned.push(item.name);
+		} catch (err) {
+			console.error('[backup] safety-net prune failed for', item.name, err);
+			kept++;
+		}
+	}
+	return { pruned, kept };
+}
+
 export type RunBackupResult = {
 	ok: boolean;
 	filename?: string;
@@ -396,37 +482,18 @@ export type RunBackupResult = {
 	driveError?: string;
 	drivePruned?: string[];
 	pruned?: string[];
+	serverSafetyNetPruned?: string[];
+	nonFullPruned?: string[];
 };
 
-function syncQueueJsonFromOptions(snapshot: unknown): string {
-	if (!Array.isArray(snapshot)) return '';
-	try {
-		return JSON.stringify(snapshot);
-	} catch {
-		return '';
-	}
-}
-
-function pickEmailAttachment(
-	artifacts: BackupArtifact[]
-): { name: string; size: number } | null {
-	const full = artifacts.find((a) => a.kind === 'full');
-	if (full && (full.size ?? 0) <= BREVO_MAX_ATTACHMENT_BYTES) return full;
-	const records = artifacts.find((a) => a.kind === 'records');
-	if (records && (records.size ?? 0) <= BREVO_MAX_ATTACHMENT_BYTES) return records;
-	return null;
-}
-
-/** Create a backup, update options metadata, optionally email/Drive, then prune old copies. */
+/** Create a daily full backup, upload to Drive when enabled, prune, alert on failure only. */
 export async function runBackup(
 	opts: { manual?: boolean; scheduled?: boolean } = {}
 ): Promise<RunBackupResult> {
 	const options = await fetchOptionsRecord();
 	const businessName = options?.businessName || 'Capital City Windows';
 	const datePrefix = backupDateInAlaska();
-	const anchorDay = isRetentionAnchorDay(datePrefix);
 	const alertEmails = parseAlertEmails(options?.backupAlertEmails);
-	const destEmail = options?.backupDestEmail ?? false;
 	const destDrive = options?.backupDestGoogleDrive ?? false;
 	const driveFolderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
 	const driveRefreshToken = openDriveRefreshToken(options?.backupGoogleDriveRefreshToken);
@@ -440,32 +507,22 @@ export async function runBackup(
 		options?.backupGoogleDriveFolderId,
 		driveRefreshToken
 	);
-	const syncQueueJson = syncQueueJsonFromOptions(options?.syncQueueSnapshot);
 
 	try {
-		const artifacts = await createSplitPbBackup({
+		const full = await createFullPbBackup({
 			datePrefix,
-			business: businessName,
-			includeFull: anchorDay,
-			forceFullFiles: anchorDay,
-			syncQueueJson
+			business: businessName
 		});
-		if (artifacts.length === 0) {
-			throw new Error('Split backup returned no artifacts');
-		}
 
-		const records =
-			artifacts.find((a) => a.kind === 'records') ??
-			artifacts[0];
-		const totalSize = artifacts.reduce((sum, a) => sum + (a.size ?? 0), 0);
 		const now = new Date().toISOString();
-
 		const patchFields: Record<string, unknown> = {
 			lastBackupAt: now,
-			lastBackupSizeBytes: totalSize,
-			lastBackupFilename: records.name,
+			lastBackupSizeBytes: full.size ?? 0,
+			lastBackupFilename: full.name,
 			lastBackupStatus: 'success',
-			lastBackupError: ''
+			lastBackupError: '',
+			// Success email attach retired — keep flag off
+			backupDestEmail: false
 		};
 		if (opts.scheduled) {
 			patchFields.lastScheduledBackupDate = datePrefix;
@@ -474,85 +531,88 @@ export async function runBackup(
 
 		let uploadedToDrive: string[] | undefined;
 		let driveError: string | undefined;
+		let driveUploadOk = false;
+
 		if (destDrive && driveFolderId && driveReady) {
 			try {
-				const buffers = await Promise.all(
-					artifacts.map(async (a) => ({
-						name: a.name,
-						buffer: await downloadBackupBuffer(a.name)
-					}))
-				);
+				const buffer = await downloadBackupBuffer(full.name);
 				uploadedToDrive = await uploadBackupArtifactsToDrive(
 					driveFolderId,
-					buffers,
+					[{ name: full.name, buffer }],
 					driveMeta
 				);
+				driveUploadOk = (uploadedToDrive?.length ?? 0) > 0;
 			} catch (driveErr) {
 				driveError =
 					driveErr instanceof Error ? driveErr.message : String(driveErr);
 				console.error('[backup] Google Drive upload failed:', driveErr);
+				// Keep server copy when Drive fails (safety).
 			}
 		} else if (destDrive && !driveReady) {
 			driveError =
-				'Google Drive is enabled but not fully connected (missing refresh token). Open Options → Backups → Connect / Reconnect Google Drive, then try Backup now again.';
+				'Google Drive is enabled but not fully connected. Open Options → Backups → Connect Google Drive, then try Backup now again.';
 			console.warn('[backup]', driveError);
 		}
 
-		let emailed = false;
-		if (destEmail && alertEmails.length > 0) {
-			const attachTarget = pickEmailAttachment(artifacts);
-			try {
-				let zipBase64: string | null = null;
-				if (attachTarget) {
-					const buf = await downloadBackupBuffer(attachTarget.name);
-					zipBase64 = buf.toString('base64');
-				}
-				await sendBackupSuccessEmail(alertEmails, {
-					artifacts: artifacts.map((a) => ({
-						name: a.name,
-						sizeBytes: a.size ?? 0,
-						kind: a.kind
-					})),
-					manual: opts.manual ?? false,
-					attachment: attachTarget
-						? { filename: attachTarget.name, zipBase64: zipBase64! }
-						: null,
-					hasSyncQueue: artifacts.some((a) => a.kind === 'sync_queue'),
-					tooLargeForEmail: !attachTarget
-				});
-				emailed = true;
-			} catch (emailErr) {
-				console.error('[backup] email delivery failed:', emailErr);
-			}
-		}
+		const nonFullPruned = await pruneServerNonFullArtifacts();
 
-		const { pruned } = await pruneBackupsByRetention();
+		let pruned: string[] = [];
+		let serverSafetyNetPruned: string[] | undefined;
+
+		if (destDrive && driveUploadOk) {
+			// Durable store is Drive: keep ~5 days on server only.
+			const safety = await pruneServerToSafetyNet();
+			serverSafetyNetPruned = safety.pruned;
+			pruned = safety.pruned;
+		} else {
+			// Server is durable (or Drive failed): calendar retention on server.
+			const ret = await pruneBackupsByRetention();
+			pruned = ret.pruned;
+		}
 
 		let drivePruned: string[] | undefined;
 		if (destDrive && driveFolderId && driveReady) {
 			try {
+				const nonFullDrive = await pruneGoogleDriveNonFullArtifacts(
+					driveFolderId,
+					driveMeta
+				);
 				const driveResult = await pruneGoogleDriveBackupsByRetention(
 					driveFolderId,
 					new Date(),
 					driveMeta
 				);
-				drivePruned = driveResult.pruned;
+				drivePruned = [...nonFullDrive, ...driveResult.pruned];
 			} catch (drivePruneErr) {
 				console.error('[backup] Google Drive retention prune failed:', drivePruneErr);
 			}
 		}
 
+		// Drive enabled but upload failed: alert like a failure for visibility
+		if (destDrive && driveError && alertEmails.length > 0) {
+			try {
+				await sendBackupFailureAlert(alertEmails, {
+					error: `Backup was created on the server, but Google Drive upload failed: ${driveError}`,
+					manual: opts.manual ?? false
+				});
+			} catch (alertErr) {
+				console.error('[backup] Drive failure alert email failed:', alertErr);
+			}
+		}
+
 		return {
 			ok: true,
-			filename: records.name,
-			size: totalSize,
-			created: records.created,
-			artifacts,
-			emailed,
+			filename: full.name,
+			size: full.size ?? 0,
+			created: full.created,
+			artifacts: [full],
+			emailed: false,
 			uploadedToDrive,
 			driveError,
 			drivePruned,
-			pruned
+			pruned,
+			serverSafetyNetPruned,
+			nonFullPruned
 		};
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
