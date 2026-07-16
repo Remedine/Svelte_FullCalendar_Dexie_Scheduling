@@ -294,8 +294,18 @@ export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
 
 let logoutInFlight: Promise<void> | null = null;
 
-export async function logout() {
+export type LogoutOptions = {
+	/**
+	 * When true (post-restore authEpoch), do not attempt to push the outbound queue —
+	 * local state must be discarded so it cannot re-infect a restored server.
+	 */
+	discardQueue?: boolean;
+};
+
+export async function logout(options: LogoutOptions = {}) {
 	if (logoutInFlight) return logoutInFlight;
+
+	const discardQueue = options.discardQueue === true;
 
 	logoutInFlight = (async () => {
 		const rememberedEmail = auth.currentUser?.email;
@@ -307,37 +317,24 @@ export async function logout() {
 			clearSessionActivity()
 		);
 
-		// 1) Stop background writers before wiping IndexedDB (prevents DatabaseClosedError on re-login).
+		// 1) Stop background pulls/realtime, but keep PB token until queue flush finishes.
 		try {
-			const { invalidateAppDataSync, drainAppDataSync, pb } = await import('$lib/db/pb');
+			const { invalidateAppDataSync, drainAppDataSync } = await import('$lib/db/pb');
 			const { disconnectJobsRealtime } = await import('$lib/db/realtime');
 			invalidateAppDataSync();
 			disconnectJobsRealtime();
-			pb.authStore.clear();
 			await drainAppDataSync(4_000);
 		} catch {
 			// ignore
 		}
 
-		// 2) Clear session markers (localStorage first; Dexie row is optional and may race delete).
-		try {
-			const { clearAppSession, setLastLoginEmail } = await import('$lib/auth/sessionPersist');
-			await clearAppSession();
-			if (rememberedEmail) setLastLoginEmail(rememberedEmail);
-		} catch {
-			// ignore
-		}
-
-		// 3) Flush outbound queue (best-effort), then wipe + reopen Dexie under a reset lock.
+		// 2) Flush outbound queue while auth token is still valid (unless discard after restore).
 		try {
 			const { db, processSyncQueue } = await import('$lib/db');
-			const { snapshotDeviceAuth, restoreDeviceAuth } = await import('$lib/auth/deviceUnlock');
-			const { ensureDbOpen, resetAppDatabase } = await import('$lib/auth/sessionPersist');
-
+			const { ensureDbOpen } = await import('$lib/auth/sessionPersist');
 			await ensureDbOpen();
-			const deviceAuthSnapshot = await snapshotDeviceAuth();
 
-			if (typeof navigator === 'undefined' || navigator.onLine) {
+			if (!discardQueue && (typeof navigator === 'undefined' || navigator.onLine)) {
 				try {
 					await processSyncQueue();
 				} catch (syncErr) {
@@ -349,12 +346,41 @@ export async function logout() {
 				const pending = await db.syncQueue.count();
 				if (pending > 0) {
 					console.warn(
-						`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared`
+						`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared` +
+							(discardQueue ? ' (discardQueue)' : '')
 					);
 				}
 			} catch {
 				// DB may already be unstable; continue with wipe.
 			}
+		} catch {
+			// ignore
+		}
+
+		// 3) Clear PB auth only after flush attempt.
+		try {
+			const { pb } = await import('$lib/db/pb');
+			pb.authStore.clear();
+		} catch {
+			// ignore
+		}
+
+		// 4) Clear session markers (localStorage first; Dexie row is optional and may race delete).
+		try {
+			const { clearAppSession, setLastLoginEmail } = await import('$lib/auth/sessionPersist');
+			await clearAppSession();
+			if (rememberedEmail) setLastLoginEmail(rememberedEmail);
+		} catch {
+			// ignore
+		}
+
+		// 5) Wipe + reopen Dexie under a reset lock (preserve device PIN/bio settings).
+		try {
+			const { snapshotDeviceAuth, restoreDeviceAuth } = await import('$lib/auth/deviceUnlock');
+			const { ensureDbOpen, resetAppDatabase } = await import('$lib/auth/sessionPersist');
+
+			await ensureDbOpen();
+			const deviceAuthSnapshot = await snapshotDeviceAuth();
 
 			await resetAppDatabase(async () => {
 				await restoreDeviceAuth(deviceAuthSnapshot);

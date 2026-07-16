@@ -30,7 +30,8 @@ export async function fetchServerAuthEpoch(): Promise<number | null> {
 
 /**
  * After a backup restore the server bumps authEpoch. Any device whose local epoch
- * is behind is signed out through the normal app logout flow (no PocketBase access needed).
+ * is behind must wipe local CRM data and re-login (even on cold start before
+ * session flags are set — otherwise we advance local epoch and keep stale data).
  */
 export async function checkAuthEpochAndForceLogoutIfNeeded(): Promise<boolean> {
 	if (!browser || !navigator.onLine) return false;
@@ -41,16 +42,16 @@ export async function checkAuthEpochAndForceLogoutIfNeeded(): Promise<boolean> {
 	const localEpoch = getLocalAuthEpoch();
 	if (serverEpoch <= localEpoch) return false;
 
-	const { auth, logout } = await import('$lib/stores/auth.svelte');
-	if (!auth.isAuthenticated || !auth.currentUser) {
-		setLocalAuthEpoch(serverEpoch);
-		return false;
-	}
-
 	console.info(
 		`[auth] Server auth epoch ${serverEpoch} > local ${localEpoch} — forcing app logout after restore`
 	);
-	await logout();
+
+	const { logout } = await import('$lib/stores/auth.svelte');
+	// Discard queue: post-restore local mutations must not push into rolled-back server data.
+	await logout({ discardQueue: true });
+	// Advance local epoch only after wipe so a failed wipe does not skip future checks.
+	setLocalAuthEpoch(serverEpoch);
+
 	const { goto } = await import('$app/navigation');
 	goto('/login?session=restored', { replaceState: true });
 	return true;

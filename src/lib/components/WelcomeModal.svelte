@@ -66,20 +66,22 @@
 				updatedAt: new Date()
 			});
 
-			// Use the internal/elevated server route (same pattern as send-welcome) so that the PB record
-			// itself gets verified:true even when the current (newly onboarded) user session may not have
-			// direct rights to write the verified field. This ensures "going through the set new password modal"
-			// results in verified=true on the PocketBase side (in addition to the local Dexie marker).
-			// Prefer email for resolution in the server route (more reliable if pbId is stale).
+			// Elevated server route (auth required): self may mark only own record verified after password set.
 			try {
-				await fetch('/api/auth/mark-verified', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ 
-						pbId: realId, 
-						email: user.email || authModel?.email 
-					})
-				});
+				const token = pb.authStore.token;
+				if (token) {
+					await fetch('/api/auth/mark-verified', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							Authorization: token
+						},
+						body: JSON.stringify({
+							pbId: realId,
+							email: user.email || authModel?.email
+						})
+					});
+				}
 			} catch (e) {
 				// Non-blocking — local marker + app gating still work.
 				console.warn('mark-verified server call failed (non-blocking):', e);

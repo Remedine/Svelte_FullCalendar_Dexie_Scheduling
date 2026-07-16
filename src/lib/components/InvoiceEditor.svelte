@@ -85,7 +85,7 @@
 	let revisedFileInput = $state<HTMLInputElement | null>(null);
 	let supportingFileInput = $state<HTMLInputElement | null>(null);
 
-	const taxRatePercent = $derived(normalizeTaxRateToPercent(optionsStore.data?.taxRate, 8));
+	const taxRatePercent = $derived(normalizeTaxRateToPercent(optionsStore.data?.taxRate));
 
 	const totals = $derived(
 		calculateInvoiceTotals({
@@ -375,6 +375,10 @@
 	async function handleSendInvoiceToClient() {
 		const email = clientSnapshot.email || linkedClient?.email;
 		if (!job || !invoice?.id || !canEmailInvoice || !email) return;
+		if (docxStale) {
+			toast.error('Regenerate the invoice file before sending — billing details changed.');
+			return;
+		}
 		isSending = true;
 		try {
 			const blob = await fetchPrimaryInvoiceBlob(invoice);
@@ -389,6 +393,11 @@
 			for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
 			const docxBase64 = btoa(binary);
 			const dueLabel = dueDate ? dueDate.toLocaleDateString() : '—';
+			// Prefer stored snapshot amount so email body matches the attached .docx.
+			const emailAmount =
+				invoice.amount != null && Number.isFinite(Number(invoice.amount))
+					? Number(invoice.amount)
+					: totals.total;
 			const res = await fetch('/api/invoices/send-email', {
 				method: 'POST',
 				headers: {
@@ -399,7 +408,7 @@
 					clientEmail: email,
 					clientName: clientSnapshot.name || linkedClient?.name,
 					jobTitle: job.title || 'Service',
-					amount: totals.total,
+					amount: emailAmount,
 					dueDate: dueLabel,
 					filename,
 					docxBase64
@@ -859,8 +868,12 @@
 					type="button"
 					class="invoice-editor__btn invoice-editor__btn--secondary invoice-editor__footer-send"
 					onclick={handleSendInvoiceToClient}
-					disabled={isSending || !invoice.pbId}
-					title={invoice.pbId ? 'Email invoice to client' : 'Waiting for sync'}
+					disabled={isSending || !invoice.pbId || docxStale}
+					title={docxStale
+						? 'Regenerate invoice before sending'
+						: invoice.pbId
+							? 'Email invoice to client'
+							: 'Waiting for sync'}
 				>
 					{isSending ? 'Sending…' : 'Send'}
 				</button>

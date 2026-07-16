@@ -451,7 +451,10 @@
 					const currentEmailForChange = (auth.currentUser.email || '').trim().toLowerCase();
 					await fetch('/api/auth/request-email-change', {
 						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
+						headers: {
+							'Content-Type': 'application/json',
+							Authorization: pb.authStore.token
+						},
 						body: JSON.stringify({ email: currentEmailForChange, newEmail: trimmed })
 					});
 				} catch (reqErr: any) {
@@ -494,7 +497,7 @@
 					pendingEmailChange = null; // no confirmation pending for direct dev update
 				} else {
 					success =
-						'Email change requested successfully. A confirmation link has been sent to the new address. The server-side record will update only after you confirm it.';
+						`Email change requested successfully. A confirmation link was sent to ${currentEmailForChange}. Confirm it to switch to ${trimmed}.`;
 					pendingEmailChange = trimmed; // show pending pill + resend until user confirms via email link
 				}
 			} else if (navigator.onLine) {
@@ -565,10 +568,14 @@
 			const currentEmailForResend = (auth.currentUser.email || '').trim().toLowerCase();
 			await fetch('/api/auth/request-email-change', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: pb.authStore.token
+				},
 				body: JSON.stringify({ email: currentEmailForResend, newEmail: pendingEmailChange })
 			});
-			success = `Confirmation re-sent to ${pendingEmailChange}. Check the new inbox.`;
+			// Confirmation is emailed to the *current* address (proof of control), not the new one.
+			success = `Confirmation re-sent to ${currentEmailForResend}. Open the link to confirm the change to ${pendingEmailChange}.`;
 		} catch (e: any) {
 			error = e.message || 'Failed to resend confirmation email.';
 		} finally {

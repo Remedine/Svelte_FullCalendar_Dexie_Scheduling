@@ -2076,7 +2076,7 @@ async function runProcessSyncQueue(): Promise<void> {
 
 						// Note: We no longer attempt direct verified update here (often 400s due to collection rules on non-superuser tokens).
 						// Instead, NewUserModal (after awaiting createUser which processes the queue) calls the elevated
-						// /api/auth/mark-verified route using the internal secret to set verified on PB reliably.
+						// /api/auth/mark-verified (authenticated self/admin) sets verified on PB after onboarding.
 						// The local Dexie marker (verified:false) is what drives the first-login Welcome gate.
 
 						const existing = await db.users.get(item.recordId);

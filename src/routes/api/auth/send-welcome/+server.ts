@@ -2,15 +2,21 @@ import { json } from '@sveltejs/kit';
 import { INTERNAL_SECRET } from '$env/static/private';
 import { PUBLIC_PB_URL } from '$env/static/public';
 import { sendWelcomeEmail } from '$lib/server/brevo';
+import { requireAdminFromAuthHeader } from '$lib/server/pbAuth';
 
+/** Admin-only: generate a password-set welcome link and email it via Brevo. */
 export async function POST({ request }: { request: Request }) {
+	const admin = await requireAdminFromAuthHeader(request.headers.get('Authorization'));
+	if (!admin) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
+	}
+
 	const { email } = await request.json();
 
 	if (!email) {
 		return json({ error: 'Email is required' }, { status: 400 });
 	}
 
-	// Request password reset link (this flow also activates the account via server hook on confirm)
 	const resetRes = await fetch(`${PUBLIC_PB_URL}/api/internal/request-password-reset`, {
 		method: 'POST',
 		headers: {

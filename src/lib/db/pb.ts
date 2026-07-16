@@ -458,7 +458,7 @@ export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipp
 		status: rec.status,
 		billableItems: rec.billableItems || [],
 		subtotal: rec.subtotal || 0,
-		taxRate: normalizeTaxRateToPercent(rec.taxRate, 8),
+		taxRate: normalizeTaxRateToPercent(rec.taxRate),
 		taxAmount: rec.taxAmount || 0,
 		totalAmount: rec.totalAmount || 0,
 		areaOfTown: rec.areaOfTown,
@@ -699,12 +699,18 @@ export async function pullInvoicesFromServer() {
 			page++;
 		}
 
-		const localInvoices = await db.invoices.toArray();
-		for (const localInvoice of localInvoices) {
-			if (localInvoice.pbId && !pbInvoiceIds.has(localInvoice.pbId)) {
-				await db.invoices.delete(localInvoice.id!);
-				totalDeleted++;
+		// Match jobs/clients: never stale-delete when the pulled roster is empty
+		// (empty collection, list-rule filtering, or partial failure recovered as zero rows).
+		if (pbInvoiceIds.size > 0) {
+			const localInvoices = await db.invoices.toArray();
+			for (const localInvoice of localInvoices) {
+				if (localInvoice.pbId && !pbInvoiceIds.has(localInvoice.pbId)) {
+					await db.invoices.delete(localInvoice.id!);
+					totalDeleted++;
+				}
 			}
+		} else {
+			console.warn('[pullInvoices] Skipping stale delete — empty PocketBase invoice roster');
 		}
 
 		console.log(

@@ -189,7 +189,7 @@
 		currentJob.billableItems.reduce((sum: number, item: any) => sum + (item.total || 0), 0)
 	);
 
-	const taxRatePercent = $derived(normalizeTaxRateToPercent(optionsStore.data?.taxRate, 8));
+	const taxRatePercent = $derived(normalizeTaxRateToPercent(optionsStore.data?.taxRate));
 	const taxRateDecimal = $derived(taxRatePercent / 100);
 	const taxAmount = $derived(Math.round(subtotal * taxRateDecimal * 100) / 100);
 	const totalAmount = $derived(subtotal + taxAmount);

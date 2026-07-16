@@ -6,7 +6,8 @@
 	// )=- No PIN anywhere (PIN login completely removed; only email/password auth).
 	// Zod for the admin creation form. BEM + runes used.
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	import { createUser, db } from '$lib/db';
+	import { createUser } from '$lib/db';
+	import { pb } from '$lib/db/pb';
 	import { z } from 'zod';
 
 	interface Props {
@@ -68,34 +69,26 @@
 			} as any);
 			tempPasswordForUser = tempPass; // show to admin (user will normally use the welcome email link instead)
 
-			// After the queue has processed (createUser awaits processSyncQueue), the local record has pbId.
-			// Use the elevated mark-verified route (internal secret) to set verified:true on PB, since direct
-			// update after create often 400s depending on collection rules (the admin token may not write verified).
-			// This ensures PB shows verified after creation.
-			try {
-				const created = await db.users.get(localId);
-				if (created) {
-					await fetch('/api/auth/mark-verified', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ pbId: created.pbId, email: created.email })
-					});
-				}
-			} catch (e) {
-				console.warn('Failed to call mark-verified after creation (non-blocking):', e);
+			// Do NOT mark-verified on create — keeps WelcomeModal / first-login password gate intact.
+			// Welcome email (admin-only API) provides the set-password link; WelcomeModal marks verified after real password.
+			if (!localId) {
+				throw new Error('User create did not return a local id');
 			}
-
-			// Send a single welcome email with one action: set password + activate account.
-			// (The email link path uses a server hook + internal request-password-reset.)
-			// For the direct temp-password login path (shown temp pass), the WelcomeModal itself calls
-			// /api/auth/mark-verified (internal secret) after the user sets their real password.
 			const normalizedForWelcome = data.email.trim().toLowerCase();
 			try {
-				await fetch('/api/auth/send-welcome', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ email: normalizedForWelcome })
-				});
+				const token = pb.authStore.token;
+				if (!token) {
+					console.warn('Cannot send welcome email: admin session has no PB token');
+				} else {
+					await fetch('/api/auth/send-welcome', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							Authorization: token
+						},
+						body: JSON.stringify({ email: normalizedForWelcome })
+					});
+				}
 			} catch (e) {
 				console.warn('Failed to send welcome email for new user (non-blocking):', e);
 			}
