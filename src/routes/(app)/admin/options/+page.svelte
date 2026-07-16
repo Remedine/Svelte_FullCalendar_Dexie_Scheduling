@@ -20,6 +20,7 @@
 	import { isFullBackupFilename } from '$lib/backups/names';
 	import { dateFromBackupFilename, SERVER_SAFETY_NET_DAYS } from '$lib/backups/retention';
 	import { page } from '$app/state';
+	import BulkImportPanel from '$lib/components/BulkImportPanel.svelte';
 
 	// )=- Removed top-level non-admin redirect $effect (layout guard already handles role-based access and redirects non-admins away from /admin/* to /calendar).
 	// This avoids duplicate redirects and race conditions on navigation.
@@ -42,7 +43,9 @@
 	});
 
 	let isSaving = $state(false);
-	let activeTab = $state<'scheduling' | 'security' | 'invoice' | 'backups'>('scheduling');
+	let activeTab = $state<'scheduling' | 'security' | 'invoice' | 'backups' | 'import'>(
+		'scheduling'
+	);
 
 	type DriveStatus = {
 		oauthAppReady: boolean;
@@ -75,7 +78,8 @@
 		{ id: 'scheduling', label: 'Scheduling Options' },
 		{ id: 'invoice', label: 'Invoice Options' },
 		{ id: 'security', label: 'App Security' },
-		{ id: 'backups', label: 'Backups' }
+		{ id: 'backups', label: 'Backups' },
+		{ id: 'import', label: 'Import' }
 	] as const;
 
 	type BackupRow = { name: string; size: number; created: string };
@@ -278,7 +282,13 @@
 	/** Deep-link from Google OAuth callback: /admin/options?tab=backups&gdrive=… */
 	$effect(() => {
 		const tab = page.url.searchParams.get('tab');
-		if (tab === 'backups' || tab === 'scheduling' || tab === 'security' || tab === 'invoice') {
+		if (
+			tab === 'backups' ||
+			tab === 'scheduling' ||
+			tab === 'security' ||
+			tab === 'invoice' ||
+			tab === 'import'
+		) {
 			activeTab = tab;
 		}
 		if (driveReturnHandled) return;
@@ -1731,6 +1741,8 @@
 					</div>
 				</div>
 			</details>
+		{:else if activeTab === 'import'}
+			<BulkImportPanel />
 		{/if}
 	</div>
 
@@ -1792,16 +1804,19 @@
 	<!-- )=- Sticky footer bar for the main Save action.
 	     Matches the visual treatment and sticky behavior of .new-job-modal__footer (and the updated client modal).
 	     Keeps the save button visible while scrolling through long areas/billables/reasons lists.
+	     Hidden on Import (bulk upload does not use Save All Changes).
 	     )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
-	<div class="options-page__footer">
-		<button
-			class="options-page__btn options-page__btn--save"
-			onclick={saveOptions}
-			disabled={isSaving}
-		>
-			{isSaving ? 'Saving & Syncing...' : '💾 Save All Changes'}
-		</button>
-	</div>
+	{#if activeTab !== 'import'}
+		<div class="options-page__footer">
+			<button
+				class="options-page__btn options-page__btn--save"
+				onclick={saveOptions}
+				disabled={isSaving}
+			>
+				{isSaving ? 'Saving & Syncing...' : '💾 Save All Changes'}
+			</button>
+		</div>
+	{/if}
 </div>
 
 <style>
