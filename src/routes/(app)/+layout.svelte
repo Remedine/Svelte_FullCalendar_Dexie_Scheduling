@@ -188,6 +188,13 @@
 					Crew
 				</a>
 				<a
+					href="/admin/import"
+					class="top-nav__link"
+					class:active={currentPath.startsWith('/admin/import')}
+				>
+					Bulk import
+				</a>
+				<a
 					href="/admin/options"
 					class="top-nav__link"
 					class:active={currentPath.startsWith('/admin/options')}
@@ -345,6 +352,13 @@
 						<ThemeToggle />
 					</div>
 					{#if auth.currentUser.role === 'admin'}
+						<a
+							href="/admin/import"
+							class="bottom-nav__user-menu-item"
+							onclick={() => showAvatarMenu = false}
+						>
+							Bulk import
+						</a>
 						<a
 							href="/admin/options"
 							class="bottom-nav__user-menu-item"
