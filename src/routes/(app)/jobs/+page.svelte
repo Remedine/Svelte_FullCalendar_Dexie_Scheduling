@@ -9,7 +9,13 @@
 		isInvoiceOverdue,
 		dedupJobs
 	} from '$lib/db';
-	import { pullJobsFromServer, pullUsersFromServer, pullInvoicesFromServer, pb } from '$lib/db/pb';
+	import {
+		pullJobsFromServer,
+		pullUsersFromServer,
+		pullInvoicesFromServer,
+		pb,
+		APP_DATA_SYNCED_EVENT
+	} from '$lib/db/pb';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto, replaceState } from '$app/navigation';
 	import { page as appPage } from '$app/state';
@@ -146,6 +152,16 @@
 				}
 			});
 		}
+	});
+
+	// Resume/session sync updates Dexie; refresh open jobs list so cross-device changes show up.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		const onSynced = () => {
+			void loadJobs();
+		};
+		window.addEventListener(APP_DATA_SYNCED_EVENT, onSynced);
+		return () => window.removeEventListener(APP_DATA_SYNCED_EVENT, onSynced);
 	});
 
 	// Persist "More Filters" open state (default closed everywhere, remember last user preference)

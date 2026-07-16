@@ -1270,6 +1270,20 @@ describe('pull functions (with mocked pb)', () => {
 	});
 });
 
+// App-state / resume sync: no-op when unauthenticated; exports the shared event name.
+describe('syncAppDataFromServer (auth + offline guards)', () => {
+	it('exports APP_DATA_SYNCED_EVENT and no-ops without valid PB auth', async () => {
+		const { syncAppDataFromServer, APP_DATA_SYNCED_EVENT, pb, scheduleAppDataSync } =
+			await import('$lib/db/pb');
+
+		expect(APP_DATA_SYNCED_EVENT).toBe('ccw:app-data-synced');
+		expect(typeof scheduleAppDataSync).toBe('function');
+		// authStore is empty in unit tests — unauthenticated path returns immediately.
+		expect(pb.authStore.isValid).toBeFalsy();
+		await expect(syncAppDataFromServer({ force: true, reason: 'test' })).resolves.toBeUndefined();
+	});
+});
+
 // )=- Phase 2 continued: Basic test for processSyncQueue with mocked pb.
 // processSyncQueue is the heart of optimistic sync (create/update/delete for jobs/clients/users/invoices, with file handling for invoices).
 // We mock the pb collection methods to test the local queue processing and pbId stamping without real network.

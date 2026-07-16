@@ -1,9 +1,9 @@
 <!-- src/lib/components/SyncStatus.svelte -->
 <script lang="ts">
-	import { pullJobsFromServer } from '$lib/db/pb';
+	import { pullJobsFromServer, syncAppDataFromServer, APP_DATA_SYNCED_EVENT } from '$lib/db/pb';
 	import { onJobsRealtime } from '$lib/db/realtime';
-	import { processSyncQueue } from '$lib/db';
 	import { pb } from '$lib/db/pb';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	let isOnline = $state(true);
 	let lastSynced = $state(new Date());
@@ -22,7 +22,16 @@
 			await pullJobsFromServer();
 		});
 
-		return off;
+		const onSynced = () => {
+			lastSynced = new Date();
+			isOnline = true;
+		};
+		window.addEventListener(APP_DATA_SYNCED_EVENT, onSynced);
+
+		return () => {
+			off();
+			window.removeEventListener(APP_DATA_SYNCED_EVENT, onSynced);
+		};
 	});
 
 	async function manualSync() {
@@ -32,8 +41,11 @@
 
 			console.log('🔄 Manual sync triggered');
 
-			await pullJobsFromServer();
-			await processSyncQueue();
+			await syncAppDataFromServer({
+				user: auth.currentUser,
+				force: true,
+				reason: 'manual'
+			});
 
 			lastSynced = new Date();
 		} catch (err) {

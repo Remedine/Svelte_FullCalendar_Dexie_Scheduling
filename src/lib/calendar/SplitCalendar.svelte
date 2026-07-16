@@ -986,12 +986,19 @@
 
 	// === Realtime push for cross-device appointment changes ===
 	// Uses shared jobs realtime (single SSE client) — see $lib/db/realtime.ts.
-	// If realtime fails (PB restart, Railway multi-instance, stale clientId), login pulls + manual
-	// sync + periodic fallback pull below still keep the calendar correct.
+	// If realtime fails (PB restart, Railway multi-instance, stale clientId), session-restore /
+	// app-visible pulls (scheduleAppDataSync) + periodic fallback below still keep the calendar correct.
 	$effect(() => {
 		if (!pb.authStore.isValid) return;
 
 		let pollTimer: ReturnType<typeof setInterval> | null = null;
+		let cancelled = false;
+
+		const refreshCalendarFromDexie = async () => {
+			if (cancelled) return;
+			await reloadJobsForCalendarRange();
+			dayApi?.refetchEvents();
+		};
 
 		const offRealtime = onJobsRealtime(async (e) => {
 			const rec = e.record as any;
@@ -1001,20 +1008,34 @@
 			const outcome = await applyServerJobRecord(rec);
 			if (outcome === 'skipped') return;
 
-			await reloadJobsForCalendarRange();
-			dayApi?.refetchEvents();
+			await refreshCalendarFromDexie();
 		});
 
+		// After app-state / resume sync lands in Dexie, refresh the open calendar UI.
+		const onAppDataSynced = () => {
+			void refreshCalendarFromDexie();
+		};
+		if (typeof window !== 'undefined') {
+			window.addEventListener('ccw:app-data-synced', onAppDataSynced);
+		}
+
 		// Fallback when realtime is down: light periodic pull while calendar is open.
+		// Also reload the FC snapshot — pull alone only updates IndexedDB.
 		pollTimer = setInterval(() => {
 			if (navigator.onLine && pb.authStore.isValid) {
-				pullJobsFromServer().catch(() => {});
+				pullJobsFromServer()
+					.then(() => refreshCalendarFromDexie())
+					.catch(() => {});
 			}
 		}, 120_000);
 
 		return () => {
+			cancelled = true;
 			offRealtime();
 			if (pollTimer) clearInterval(pollTimer);
+			if (typeof window !== 'undefined') {
+				window.removeEventListener('ccw:app-data-synced', onAppDataSynced);
+			}
 		};
 	});
 

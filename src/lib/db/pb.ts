@@ -35,7 +35,28 @@ const AUTH_TIMEOUT_MS = 30_000;
 const DEXIE_OP_TIMEOUT_MS = 8_000;
 
 let visibilityRefreshBound = false;
-let postLoginSyncInFlight: Promise<void> | null = null;
+let appDataSyncInFlight: Promise<void> | null = null;
+let lastAppDataSyncAt = 0;
+
+/** Min gap between resume/session-restore pulls (login always forces). */
+const APP_DATA_SYNC_MIN_INTERVAL_MS = 15_000;
+
+/** Dispatched on `window` after a successful Dexie ← PocketBase data pull. */
+export const APP_DATA_SYNCED_EVENT = 'ccw:app-data-synced';
+
+export type AppDataSyncOptions = {
+	/** Local user (role drives admin roster pull). */
+	user?: User | null;
+	/** Bypass the resume throttle (login / manual Sync Now). */
+	force?: boolean;
+	/** Log label: login | session-restore | app-visible | manual */
+	reason?: string;
+	/**
+	 * After pull, refresh auth.currentUser from Dexie.
+	 * Login only — do not use on resume or quick-unlock would unlock.
+	 */
+	updateCurrentUser?: boolean;
+};
 
 async function withTimeout<T>(
 	promise: Promise<T>,
@@ -69,38 +90,88 @@ async function safeLoginUserDedup(keepId: string, opts: { pbId?: string; email?:
 	}
 }
 
-async function runPostLoginSync(localUser: User): Promise<void> {
-	try {
-		const { repairJobDateFields } = await import('$lib/db');
-		await repairJobDateFields();
-		await pullJobsFromServer();
-		await pullClientsFromServer();
-		await pullInvoicesFromServer();
-		if (localUser.role === 'admin') {
-			await pullUsersFromServer();
-		}
-		if (navigator.onLine) {
-			await processSyncQueue();
-		}
+/**
+ * Pull jobs/clients/invoices (and admin users) from PocketBase into Dexie, flush the
+ * outbound queue, and re-open jobs realtime. Shared by login, session restore from
+ * appSession, and mobile/desktop foreground resume — without this, devices only
+ * converge on full re-login (SSE dies when the PWA is backgrounded).
+ */
+export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Promise<void> {
+	if (!pb.authStore.isValid) return;
+	if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
-		const fresh = (await db.users.get(localUser.id!)) || localUser;
-		setCurrentUser(fresh);
-		console.log('✅ Background login sync complete');
-
-		const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
-			'$lib/db/realtime'
-		);
-		disconnectJobsRealtime();
-		scheduleJobsRealtimeReconnect(400);
-	} catch (err) {
-		console.warn('[login] Background sync failed (will retry on next page load):', err);
+	const now = Date.now();
+	if (!opts.force && now - lastAppDataSyncAt < APP_DATA_SYNC_MIN_INTERVAL_MS) {
+		return;
 	}
+	if (appDataSyncInFlight) {
+		return appDataSyncInFlight;
+	}
+
+	const reason = opts.reason || 'background';
+	appDataSyncInFlight = (async () => {
+		try {
+			lastAppDataSyncAt = Date.now();
+
+			const { repairJobDateFields } = await import('$lib/db');
+			await repairJobDateFields();
+			await pullJobsFromServer();
+			await pullClientsFromServer();
+			await pullInvoicesFromServer();
+
+			const role = opts.user?.role || (pb.authStore.model as { role?: string } | null)?.role;
+			if (role === 'admin') {
+				await pullUsersFromServer();
+			}
+
+			if (typeof navigator === 'undefined' || navigator.onLine) {
+				await processSyncQueue();
+			}
+
+			const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
+				'$lib/db/realtime'
+			);
+			disconnectJobsRealtime();
+			scheduleJobsRealtimeReconnect(400);
+
+			if (opts.updateCurrentUser && opts.user?.id) {
+				const fresh = (await db.users.get(opts.user.id)) || opts.user;
+				setCurrentUser(fresh);
+			}
+
+			console.log(`✅ App data sync complete (${reason})`);
+
+			if (typeof window !== 'undefined') {
+				window.dispatchEvent(
+					new CustomEvent(APP_DATA_SYNCED_EVENT, { detail: { reason } })
+				);
+			}
+		} catch (err) {
+			console.warn(`[sync] App data sync failed (${reason}):`, err);
+		}
+	})().finally(() => {
+		appDataSyncInFlight = null;
+	});
+
+	return appDataSyncInFlight;
+}
+
+/** Fire-and-forget wrapper for resume / session restore (throttled unless force). */
+export function scheduleAppDataSync(
+	user?: User | null,
+	reason = 'background',
+	force = false
+): void {
+	void syncAppDataFromServer({ user, reason, force });
 }
 
 function schedulePostLoginSync(localUser: User): void {
-	if (postLoginSyncInFlight) return;
-	postLoginSyncInFlight = runPostLoginSync(localUser).finally(() => {
-		postLoginSyncInFlight = null;
+	// Login always forces a full pull so a fresh device is not stuck on empty Dexie.
+	void syncAppDataFromServer({
+		user: localUser,
+		force: true,
+		reason: 'login',
+		updateCurrentUser: true
 	});
 }
 

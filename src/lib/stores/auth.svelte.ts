@@ -104,7 +104,7 @@ async function resolveSessionUser(
 
 async function completeSessionRestore(user: any, appSessionEmail?: string): Promise<boolean> {
 	const { persistAppSession, syncAppSessionPbBackup } = await import('$lib/auth/sessionPersist');
-	const { refreshPbAuthIfNeeded } = await import('$lib/db/pb');
+	const { refreshPbAuthIfNeeded, scheduleAppDataSync } = await import('$lib/db/pb');
 
 	auth.currentUser = user;
 	auth.isAuthenticated = true;
@@ -125,6 +125,10 @@ async function completeSessionRestore(user: any, appSessionEmail?: string): Prom
 		const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
 		if (!auth.locked) markSessionActivity();
 	}
+
+	// Session restore from appSession only rehydrated auth — pull remote data so mobile/desktop
+	// converge without requiring a full re-login (local-first PWA gap).
+	scheduleAppDataSync(user, 'session-restore');
 
 	void import('$lib/pwa/warmOfflineRoutes').then(({ warmOfflineRouteCache }) =>
 		warmOfflineRouteCache()
@@ -365,6 +369,13 @@ async function handleAppVisible(): Promise<void> {
 	}
 
 	if (!auth.isAuthenticated) return;
+
+	// Foreground resume: re-pull from PocketBase + flush outbound queue + reconnect SSE.
+	// Mobile PWAs drop realtime while backgrounded; without this, desktop edits never arrive
+	// until the next full login. Pull into Dexie even if quick-unlock is showing so unlock is fresh.
+	const { scheduleAppDataSync, refreshPbAuthIfNeeded } = await import('$lib/db/pb');
+	void refreshPbAuthIfNeeded();
+	scheduleAppDataSync(auth.currentUser, 'app-visible');
 
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');
 	if (isQuickUnlockDevice()) {

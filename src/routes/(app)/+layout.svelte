@@ -3,7 +3,6 @@
 	import { page } from '$app/state';
 	import { auth, logout } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { processSyncQueue } from '$lib/db';
 	import { getUserPhotoSrc } from '$lib/db';
 	import JobDetailsModal from '$lib/components/JobDetailsModal.svelte';
 	import JobFormModal from '$lib/components/JobFormModal.svelte';
@@ -40,10 +39,13 @@
 
 	// )=- Converted from onMount to pure $effect for Svelte 5 runes compliance (per AGENTS.md).
 	// Sets up online listener reactively with proper cleanup.
+	// Full app data sync (pull + queue + realtime) — not just outbound queue flush.
 	$effect(() => {
 		const handleOnline = async () => {
-			console.log('🌐 Back online - processing sync queue');
-			await processSyncQueue();
+			console.log('🌐 Back online - syncing with PocketBase');
+			const { scheduleAppDataSync } = await import('$lib/db/pb');
+			// Force so reconnect after offline is not blocked by the 15s resume throttle.
+			scheduleAppDataSync(auth.currentUser, 'online', true);
 		};
 
 		window.addEventListener('online', handleOnline);
