@@ -37,6 +37,8 @@ const DEXIE_OP_TIMEOUT_MS = 8_000;
 let visibilityRefreshBound = false;
 let appDataSyncInFlight: Promise<void> | null = null;
 let lastAppDataSyncAt = 0;
+/** Bumped on logout so in-flight pulls stop before Dexie is deleted. */
+let appDataSyncEpoch = 0;
 
 /** Min gap between resume/session-restore pulls (login always forces). */
 const APP_DATA_SYNC_MIN_INTERVAL_MS = 15_000;
@@ -57,6 +59,36 @@ export type AppDataSyncOptions = {
 	 */
 	updateCurrentUser?: boolean;
 };
+
+/**
+ * Invalidate in-flight app data sync (call at start of logout, before db.delete).
+ * Resets throttle so the next login can pull immediately.
+ */
+export function invalidateAppDataSync(): void {
+	appDataSyncEpoch += 1;
+	lastAppDataSyncAt = 0;
+}
+
+/** Wait for the current pull/queue pass to finish (or time out) before wiping Dexie. */
+export async function drainAppDataSync(timeoutMs = 4_000): Promise<void> {
+	const pending = appDataSyncInFlight;
+	if (!pending) return;
+	await Promise.race([
+		pending.catch(() => undefined),
+		new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+	]);
+}
+
+function isDatabaseClosedError(err: unknown): boolean {
+	if (!err || typeof err !== 'object') return false;
+	const name = (err as { name?: string }).name || '';
+	const message = String((err as { message?: string }).message || '');
+	return (
+		name === 'DatabaseClosedError' ||
+		message.includes('DatabaseClosedError') ||
+		message.includes('Database has been closed')
+	);
+}
 
 async function withTimeout<T>(
 	promise: Promise<T>,
@@ -104,29 +136,61 @@ export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Prom
 	if (!opts.force && now - lastAppDataSyncAt < APP_DATA_SYNC_MIN_INTERVAL_MS) {
 		return;
 	}
+
+	// Non-forced callers share one in-flight pass. Forced (login / Sync Now) must not
+	// join a pass that logout already invalidated — wait for it, then start a fresh pull.
 	if (appDataSyncInFlight) {
-		return appDataSyncInFlight;
+		if (!opts.force) {
+			return appDataSyncInFlight;
+		}
+		await appDataSyncInFlight.catch(() => undefined);
+		if (!pb.authStore.isValid) return;
+		if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+		if (appDataSyncInFlight) {
+			return appDataSyncInFlight;
+		}
 	}
 
 	const reason = opts.reason || 'background';
+	const epochAtStart = appDataSyncEpoch;
+
+	const stillCurrent = () =>
+		epochAtStart === appDataSyncEpoch && pb.authStore.isValid;
+
 	appDataSyncInFlight = (async () => {
 		try {
+			if (!stillCurrent()) return;
+
+			// Wait out logout wipe; ensure Dexie is open before any table access.
+			const { ensureDbOpen } = await import('$lib/auth/sessionPersist');
+			await ensureDbOpen();
+			if (!stillCurrent()) return;
+
 			lastAppDataSyncAt = Date.now();
 
 			const { repairJobDateFields } = await import('$lib/db');
 			await repairJobDateFields();
+			if (!stillCurrent()) return;
+
 			await pullJobsFromServer();
+			if (!stillCurrent()) return;
+
 			await pullClientsFromServer();
+			if (!stillCurrent()) return;
+
 			await pullInvoicesFromServer();
+			if (!stillCurrent()) return;
 
 			const role = opts.user?.role || (pb.authStore.model as { role?: string } | null)?.role;
 			if (role === 'admin') {
 				await pullUsersFromServer();
+				if (!stillCurrent()) return;
 			}
 
 			if (typeof navigator === 'undefined' || navigator.onLine) {
 				await processSyncQueue();
 			}
+			if (!stillCurrent()) return;
 
 			const { disconnectJobsRealtime, scheduleJobsRealtimeReconnect } = await import(
 				'$lib/db/realtime'
@@ -136,6 +200,7 @@ export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Prom
 
 			if (opts.updateCurrentUser && opts.user?.id) {
 				const fresh = (await db.users.get(opts.user.id)) || opts.user;
+				if (!stillCurrent()) return;
 				setCurrentUser(fresh);
 			}
 
@@ -147,6 +212,12 @@ export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Prom
 				);
 			}
 		} catch (err) {
+			if (isDatabaseClosedError(err)) {
+				console.warn(
+					`[sync] App data sync aborted (database closed during logout) (${reason})`
+				);
+				return;
+			}
 			console.warn(`[sync] App data sync failed (${reason}):`, err);
 		}
 	})().finally(() => {
@@ -262,6 +333,10 @@ async function completeLoginFromPbRecord(
 		console.warn('[auth] post-login authRefresh failed', refreshErr);
 	}
 
+	// Logout may still be wiping IndexedDB — wait for reopen before any user table writes.
+	const { ensureDbOpen } = await import('$lib/auth/sessionPersist');
+	await ensureDbOpen();
+
 	let existing = await findLocalUserForPbRecord({ ...pbUser, email: normalizedEmail });
 	if (!existing) {
 		const guess = normalizedEmail.split('@')[0];
@@ -271,7 +346,16 @@ async function completeLoginFromPbRecord(
 	}
 
 	const localUser = mergeAuthUserIntoLocal(pbUser, normalizedEmail, existing);
-	await db.users.put(localUser);
+	try {
+		await db.users.put(localUser);
+	} catch (err) {
+		if (isDatabaseClosedError(err)) {
+			await ensureDbOpen();
+			await db.users.put(localUser);
+		} else {
+			throw err;
+		}
+	}
 	await safeLoginUserDedup(localUser.id!, {
 		pbId: localUser.pbId,
 		email: localUser.email

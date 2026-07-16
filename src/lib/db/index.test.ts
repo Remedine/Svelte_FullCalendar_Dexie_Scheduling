@@ -1273,14 +1273,23 @@ describe('pull functions (with mocked pb)', () => {
 // App-state / resume sync: no-op when unauthenticated; exports the shared event name.
 describe('syncAppDataFromServer (auth + offline guards)', () => {
 	it('exports APP_DATA_SYNCED_EVENT and no-ops without valid PB auth', async () => {
-		const { syncAppDataFromServer, APP_DATA_SYNCED_EVENT, pb, scheduleAppDataSync } =
-			await import('$lib/db/pb');
+		const {
+			syncAppDataFromServer,
+			APP_DATA_SYNCED_EVENT,
+			pb,
+			scheduleAppDataSync,
+			invalidateAppDataSync,
+			drainAppDataSync
+		} = await import('$lib/db/pb');
 
 		expect(APP_DATA_SYNCED_EVENT).toBe('ccw:app-data-synced');
 		expect(typeof scheduleAppDataSync).toBe('function');
+		expect(typeof invalidateAppDataSync).toBe('function');
 		// authStore is empty in unit tests — unauthenticated path returns immediately.
 		expect(pb.authStore.isValid).toBeFalsy();
 		await expect(syncAppDataFromServer({ force: true, reason: 'test' })).resolves.toBeUndefined();
+		invalidateAppDataSync();
+		await expect(drainAppDataSync(50)).resolves.toBeUndefined();
 	});
 });
 

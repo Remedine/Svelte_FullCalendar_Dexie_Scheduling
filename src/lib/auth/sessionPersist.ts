@@ -16,11 +16,56 @@ export function setLastLoginEmail(email: string | null | undefined): void {
 	}
 }
 
+/** Serializes logout wipe vs login/session Dexie access (avoids DatabaseClosedError). */
+let dbResetInFlight: Promise<void> | null = null;
+
 export async function ensureDbOpen(): Promise<void> {
+	if (dbResetInFlight) {
+		await dbResetInFlight;
+	}
 	const { db } = await import('$lib/db');
 	if (!db.isOpen()) {
 		await db.open();
 	}
+}
+
+/**
+ * Delete + reopen the CapitalCityWindows IndexedDB. Callers must stop background
+ * Dexie writers first (invalidate/drain app data sync). Login waits via ensureDbOpen.
+ */
+export async function resetAppDatabase(afterOpen?: () => Promise<void>): Promise<void> {
+	if (dbResetInFlight) {
+		await dbResetInFlight;
+		if (afterOpen) await afterOpen();
+		return;
+	}
+
+	dbResetInFlight = (async () => {
+		const { db } = await import('$lib/db');
+		try {
+			// Dexie closes all connections as part of delete; concurrent ops get DatabaseClosedError.
+			await db.delete();
+		} catch (err) {
+			console.warn('[db] Database delete during logout failed', err);
+			try {
+				if (db.isOpen()) db.close();
+			} catch {
+				// ignore
+			}
+		}
+		await db.open();
+		if (afterOpen) {
+			await afterOpen();
+		}
+	})().finally(() => {
+		dbResetInFlight = null;
+	});
+
+	return dbResetInFlight;
+}
+
+export function isDbResetInFlight(): boolean {
+	return dbResetInFlight != null;
 }
 
 export async function readAppSession(): Promise<AppSession | undefined> {
@@ -88,27 +133,51 @@ export async function persistAppSession(opts: {
 	setLastLoginEmail(email);
 	localStorage.setItem('currentUserId', userId);
 
-	await ensureDbOpen();
-	const { db } = await import('$lib/db');
-	const { pb } = await import('$lib/db/pb');
+	// localStorage is the fast path; Dexie backup is best-effort (may race logout wipe).
+	try {
+		if (isDbResetInFlight()) return;
+		await ensureDbOpen();
+		if (isDbResetInFlight()) return;
 
-	const row: AppSession = {
-		id: 'current',
-		currentUserId: userId,
-		email: email || undefined,
-		pbToken: pb.authStore.token || undefined,
-		pbModelJson: pb.authStore.model ? JSON.stringify(pb.authStore.model) : undefined
-	};
+		const { db } = await import('$lib/db');
+		const { pb } = await import('$lib/db/pb');
 
-	await db.appSession.put(row);
+		const row: AppSession = {
+			id: 'current',
+			currentUserId: userId,
+			email: email || undefined,
+			pbToken: pb.authStore.token || undefined,
+			pbModelJson: pb.authStore.model ? JSON.stringify(pb.authStore.model) : undefined
+		};
+
+		await db.appSession.put(row);
+	} catch (err) {
+		const name = err && typeof err === 'object' ? (err as { name?: string }).name : '';
+		const message = err && typeof err === 'object' ? String((err as { message?: string }).message || '') : '';
+		if (
+			name === 'DatabaseClosedError' ||
+			message.includes('DatabaseClosedError') ||
+			message.includes('Database has been closed')
+		) {
+			return;
+		}
+		console.warn('[session] persistAppSession failed', err);
+	}
 }
 
 /** Clears signed-in markers but keeps last login email for the login form / passkey. */
 export async function clearAppSession(): Promise<void> {
 	if (!browser) return;
 	localStorage.removeItem('currentUserId');
-	const { db } = await import('$lib/db');
-	await db.appSession.delete('current').catch(() => {});
+	try {
+		// Skip IndexedDB write while logout is wiping the DB — localStorage is enough.
+		if (isDbResetInFlight()) return;
+		const { db } = await import('$lib/db');
+		if (!db.isOpen()) return;
+		await db.appSession.delete('current');
+	} catch {
+		// Closed / deleting DB is expected during logout.
+	}
 }
 
 /**
@@ -142,14 +211,19 @@ export async function restorePbAuthFromAppSession(): Promise<boolean> {
 }
 
 export async function syncAppSessionPbBackup(): Promise<void> {
-	const row = await readAppSession();
-	if (!row?.currentUserId) return;
+	try {
+		if (isDbResetInFlight()) return;
+		const row = await readAppSession();
+		if (!row?.currentUserId) return;
 
-	const { pb } = await import('$lib/db/pb');
-	if (!pb.authStore.token) return;
+		const { pb } = await import('$lib/db/pb');
+		if (!pb.authStore.token) return;
 
-	await persistAppSession({
-		userId: row.currentUserId,
-		email: row.email || pb.authStore.model?.email
-	});
+		await persistAppSession({
+			userId: row.currentUserId,
+			email: row.email || pb.authStore.model?.email
+		});
+	} catch {
+		// Closed DB during logout is expected.
+	}
 }

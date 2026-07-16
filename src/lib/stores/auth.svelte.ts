@@ -292,48 +292,88 @@ export async function lockAppIfQuickUnlockEnabled(): Promise<void> {
 	await applyQuickUnlockIfNeeded(auth.currentUser.id);
 }
 
+let logoutInFlight: Promise<void> | null = null;
+
 export async function logout() {
-	const rememberedEmail = auth.currentUser?.email;
-	auth.currentUser = null;
-	auth.isAuthenticated = false;
-	auth.locked = false;
-	void import('$lib/auth/sessionSecurity').then(({ clearSessionActivity }) => clearSessionActivity());
-	void import('$lib/auth/sessionPersist').then(({ clearAppSession, setLastLoginEmail }) => {
-		void clearAppSession().then(() => {
+	if (logoutInFlight) return logoutInFlight;
+
+	logoutInFlight = (async () => {
+		const rememberedEmail = auth.currentUser?.email;
+		auth.currentUser = null;
+		auth.isAuthenticated = false;
+		auth.locked = false;
+
+		void import('$lib/auth/sessionSecurity').then(({ clearSessionActivity }) =>
+			clearSessionActivity()
+		);
+
+		// 1) Stop background writers before wiping IndexedDB (prevents DatabaseClosedError on re-login).
+		try {
+			const { invalidateAppDataSync, drainAppDataSync, pb } = await import('$lib/db/pb');
+			const { disconnectJobsRealtime } = await import('$lib/db/realtime');
+			invalidateAppDataSync();
+			disconnectJobsRealtime();
+			pb.authStore.clear();
+			await drainAppDataSync(4_000);
+		} catch {
+			// ignore
+		}
+
+		// 2) Clear session markers (localStorage first; Dexie row is optional and may race delete).
+		try {
+			const { clearAppSession, setLastLoginEmail } = await import('$lib/auth/sessionPersist');
+			await clearAppSession();
 			if (rememberedEmail) setLastLoginEmail(rememberedEmail);
-		});
-	});
+		} catch {
+			// ignore
+		}
 
-	try {
-		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
-		disconnectJobsRealtime();
-		const { pb } = await import('$lib/db/pb');
-		pb.authStore.clear();
-	} catch {}
+		// 3) Flush outbound queue (best-effort), then wipe + reopen Dexie under a reset lock.
+		try {
+			const { db, processSyncQueue } = await import('$lib/db');
+			const { snapshotDeviceAuth, restoreDeviceAuth } = await import('$lib/auth/deviceUnlock');
+			const { ensureDbOpen, resetAppDatabase } = await import('$lib/auth/sessionPersist');
 
-	try {
-		const { db, processSyncQueue, persistSessionUserId } = await import('$lib/db');
-		const { snapshotDeviceAuth, restoreDeviceAuth } = await import('$lib/auth/deviceUnlock');
-		const deviceAuthSnapshot = await snapshotDeviceAuth();
-		if (navigator.onLine) {
+			await ensureDbOpen();
+			const deviceAuthSnapshot = await snapshotDeviceAuth();
+
+			if (typeof navigator === 'undefined' || navigator.onLine) {
+				try {
+					await processSyncQueue();
+				} catch (syncErr) {
+					console.warn('[auth] Sync flush before logout failed', syncErr);
+				}
+			}
+
 			try {
-				await processSyncQueue();
-			} catch (syncErr) {
-				console.warn('[auth] Sync flush before logout failed', syncErr);
+				const pending = await db.syncQueue.count();
+				if (pending > 0) {
+					console.warn(
+						`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared`
+					);
+				}
+			} catch {
+				// DB may already be unstable; continue with wipe.
+			}
+
+			await resetAppDatabase(async () => {
+				await restoreDeviceAuth(deviceAuthSnapshot);
+			});
+		} catch (err) {
+			console.warn('[auth] Failed to clear local Dexie data on logout', err);
+			// Last resort: try reopen so the next login is not stuck on a closed DB.
+			try {
+				const { ensureDbOpen } = await import('$lib/auth/sessionPersist');
+				await ensureDbOpen();
+			} catch {
+				// ignore
 			}
 		}
-		const pending = await db.syncQueue.count();
-		if (pending > 0) {
-			console.warn(
-				`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared`
-			);
-		}
-		await db.delete();
-		await db.open();
-		await restoreDeviceAuth(deviceAuthSnapshot);
-	} catch (err) {
-		console.warn('[auth] Failed to clear local Dexie data on logout', err);
-	}
+	})().finally(() => {
+		logoutInFlight = null;
+	});
+
+	return logoutInFlight;
 }
 
 export function setCurrentUser(user: any | null) {
@@ -342,21 +382,29 @@ export function setCurrentUser(user: any | null) {
 	auth.locked = false;
 
 	if (user?.id) {
-		void import('$lib/auth/deviceUnlock').then(({ ensureDeviceAuthMatchesUser, markFreshLogin }) => {
-			markFreshLogin();
-			ensureDeviceAuthMatchesUser(String(user.id));
-		});
-		void import('$lib/auth/sessionSecurity').then(({ markSessionActivity }) => markSessionActivity());
-		void import('$lib/auth/sessionPersist').then(({ persistAppSession, syncAppSessionPbBackup }) => {
-			void persistAppSession({ userId: String(user.id), email: user.email }).then(() =>
-				syncAppSessionPbBackup()
-			);
-		});
-		void import('$lib/pwa/warmOfflineRoutes').then(({ warmOfflineRouteCache }) =>
-			warmOfflineRouteCache()
-		);
+		void import('$lib/auth/deviceUnlock')
+			.then(({ ensureDeviceAuthMatchesUser, markFreshLogin }) => {
+				markFreshLogin();
+				return ensureDeviceAuthMatchesUser(String(user.id));
+			})
+			.catch(() => undefined);
+		void import('$lib/auth/sessionSecurity')
+			.then(({ markSessionActivity }) => markSessionActivity())
+			.catch(() => undefined);
+		void import('$lib/auth/sessionPersist')
+			.then(({ persistAppSession, syncAppSessionPbBackup }) =>
+				persistAppSession({ userId: String(user.id), email: user.email }).then(() =>
+					syncAppSessionPbBackup()
+				)
+			)
+			.catch(() => undefined);
+		void import('$lib/pwa/warmOfflineRoutes')
+			.then(({ warmOfflineRouteCache }) => warmOfflineRouteCache())
+			.catch(() => undefined);
 	} else {
-		void import('$lib/auth/sessionPersist').then(({ clearAppSession }) => clearAppSession());
+		void import('$lib/auth/sessionPersist')
+			.then(({ clearAppSession }) => clearAppSession())
+			.catch(() => undefined);
 	}
 }
 
