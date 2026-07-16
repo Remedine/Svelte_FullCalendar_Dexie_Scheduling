@@ -83,6 +83,13 @@
 	] as const;
 
 	type BackupRow = { name: string; size: number; created: string };
+	type DriveBackupRow = {
+		id: string;
+		name: string;
+		size: number;
+		modifiedTime: string;
+		restorable: boolean;
+	};
 	let backupItems = $state<BackupRow[]>([]);
 	let backupRetention = $state<{ total: number; wouldKeep: number; wouldPrune: number } | null>(
 		null
@@ -90,7 +97,12 @@
 	let backupLoading = $state(false);
 	let backupRunning = $state(false);
 	let backupUploading = $state(false);
+	let driveBackupItems = $state<DriveBackupRow[]>([]);
+	let driveBackupLoading = $state(false);
+	let driveBackupError = $state('');
 	let restoreTarget = $state<string | null>(null);
+	let restoreSource = $state<'server' | 'drive'>('server');
+	let restoreDriveFileId = $state<string | null>(null);
 	let restoreConfirmText = $state('');
 	let restoreRestoring = $state(false);
 	let uploadFileInput = $state<HTMLInputElement | null>(null);
@@ -482,6 +494,11 @@
 				editingOptions.backupGoogleDriveFolderName = data.folderName || '';
 				if (data.destEnabled) editingOptions.backupDestGoogleDrive = true;
 			}
+			if (data.connected) {
+				void loadDriveBackupList();
+			} else {
+				driveBackupItems = [];
+			}
 		} catch (err: any) {
 			console.warn('[backups] drive status:', err?.message || err);
 		} finally {
@@ -580,6 +597,9 @@
 			editingOptions.lastBackupSizeBytes = data.size;
 			editingOptions.lastBackupError = '';
 			await loadBackupList();
+			if (Array.isArray(data.uploadedToDrive) && data.uploadedToDrive.length > 0) {
+				void loadDriveBackupList();
+			}
 			await optionsStore.pullFromPB();
 		} catch (err: any) {
 			toast.error(err?.message || 'Backup failed');
@@ -606,13 +626,20 @@
 			.catch(() => toast.error('Could not download backup'));
 	}
 
-	function openRestoreDialog(name: string) {
+	function openRestoreDialog(
+		name: string,
+		opts?: { source?: 'server' | 'drive'; fileId?: string }
+	) {
 		restoreTarget = name;
+		restoreSource = opts?.source ?? 'server';
+		restoreDriveFileId = opts?.fileId ?? null;
 		restoreConfirmText = '';
 	}
 
 	function closeRestoreDialog() {
 		restoreTarget = null;
+		restoreSource = 'server';
+		restoreDriveFileId = null;
 		restoreConfirmText = '';
 	}
 
@@ -623,24 +650,44 @@
 			toast.error('Type the exact backup filename to confirm');
 			return;
 		}
+		if (restoreSource === 'drive' && !restoreDriveFileId) {
+			toast.error('Missing Google Drive file id');
+			return;
+		}
 		restoreRestoring = true;
 		try {
-			const res = await fetch('/api/admin/backups/restore', {
+			const url =
+				restoreSource === 'drive'
+					? '/api/admin/backups/google-drive/restore'
+					: '/api/admin/backups/restore';
+			const body =
+				restoreSource === 'drive'
+					? {
+							fileId: restoreDriveFileId,
+							name: restoreTarget,
+							confirmName: restoreConfirmText.trim()
+						}
+					: {
+							name: restoreTarget,
+							confirmName: restoreConfirmText.trim()
+						};
+			const res = await fetch(url, {
 				method: 'POST',
 				headers: {
 					Authorization: pb.authStore.token,
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify({
-					name: restoreTarget,
-					confirmName: restoreConfirmText.trim()
-				})
+				body: JSON.stringify(body)
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(data.error || 'Restore failed');
 			closeRestoreDialog();
+			const fromDrive =
+				restoreSource === 'drive' || data.stagedFromDrive
+					? ' (downloaded from Google Drive first)'
+					: '';
 			toast.showCountdown(
-				'Restore started. PocketBase is restarting — all devices will sign out automatically',
+				`Restore started${fromDrive}. PocketBase is restarting — all devices will sign out automatically`,
 				90,
 				{
 					type: 'info',
@@ -650,9 +697,37 @@
 				}
 			);
 		} catch (err: any) {
-			toast.error(err?.message || 'Restore failed');
+			toast.error(err?.message || 'Restore failed', 20000);
 		} finally {
 			restoreRestoring = false;
+		}
+	}
+
+	async function loadDriveBackupList() {
+		if (!pb?.authStore?.token) return;
+		// Only when Drive is actually usable for listing
+		if (driveStatus && !driveStatus.connected && !driveStatus.hasOAuthToken) {
+			driveBackupItems = [];
+			driveBackupError = '';
+			return;
+		}
+		driveBackupLoading = true;
+		driveBackupError = '';
+		try {
+			await ensureFreshAdminSession();
+			const res = await fetch('/api/admin/backups/google-drive/files', {
+				headers: { Authorization: pb.authStore.token }
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(data.error || 'Failed to list Google Drive backups');
+			}
+			driveBackupItems = (data.items ?? []) as DriveBackupRow[];
+		} catch (err: any) {
+			driveBackupItems = [];
+			driveBackupError = err?.message || 'Could not list Google Drive backups';
+		} finally {
+			driveBackupLoading = false;
 		}
 	}
 
@@ -697,7 +772,7 @@
 		if (backupListPrimedForTab) return;
 		backupListPrimedForTab = true;
 		void loadBackupList();
-		void loadDriveStatus();
+		void loadDriveStatus().then(() => loadDriveBackupList());
 	});
 
 	// )=- Removed legacy onMount (duplicate of the $effect below, and onMount not imported — would throw ReferenceError on page load, potentially causing navigation/auth guard side-effects like redirect to login).
@@ -1400,14 +1475,17 @@
 					<strong>Destructive.</strong> Restore replaces all server data (database + uploaded files)
 					with the chosen backup. Only <strong>_full.zip</strong> and legacy <strong>_Backup.zip</strong>
 					archives can be restored — records/files/sync-queue artifacts are for download only.
-					PocketBase restarts and the app will be unavailable for about 1–2 minutes. All signed-in
-					devices are automatically signed out when restore finishes.
+					You can restore from the <strong>server list</strong>, from <strong>Google Drive</strong>
+					below, or by uploading a zip. PocketBase restarts and the app will be unavailable for
+					about 1–2 minutes. All signed-in devices are automatically signed out when restore
+					finishes.
 				</p>
 				<div class="backup-upload">
 					<label for="backup-upload-input" class="label">Upload a restorable .zip</label>
 					<p class="options-page__help">
 						Upload a <code>_full.zip</code> or legacy <code>_Backup.zip</code> from email or your
-						computer. It appears in the server list; then tap <strong>Restore</strong>.
+						computer. It appears in the server list; then tap <strong>Restore</strong>. Prefer
+						<strong>Restore from Google Drive</strong> below when the file is already in Drive.
 					</p>
 					<div class="backup-upload__row">
 						<input
@@ -1480,6 +1558,76 @@
 					</div>
 				{/if}
 			</div>
+
+			<div class="form-section">
+				<h3>Google Drive backups</h3>
+				<p class="options-page__help">
+					Files in your connected <strong>Capital City Windows Backups</strong> folder. Only
+					<strong>Full</strong> and legacy archives can be restored. Restore downloads the zip to
+					the server, then runs the same restore as above.
+				</p>
+				{#if !driveStatus?.connected && !driveStatusLoading}
+					<p class="options-page__help">Connect Google Drive above to list and restore from Drive.</p>
+				{:else if driveBackupLoading}
+					<p>Loading Drive backups…</p>
+				{:else if driveBackupError}
+					<p class="backup-gdrive__error-text">{driveBackupError}</p>
+					<button
+						type="button"
+						class="options-page__btn options-page__btn--add"
+						onclick={() => loadDriveBackupList()}
+					>
+						Retry
+					</button>
+				{:else if driveBackupItems.length === 0}
+					<p class="options-page__help">
+						No backup files in Drive yet. Run <strong>Backup now</strong> with Drive upload
+						enabled, or wait for the scheduled backup.
+					</p>
+				{:else}
+					<div class="backup-list">
+						{#each driveBackupItems as item (item.id)}
+							{@const kind = backupArtifactKindFromFilename(item.name)}
+							<div class="backup-list__row">
+								<div class="backup-list__meta">
+									<span class="backup-list__name">
+										<span class="backup-list__badge backup-list__badge--{kind}"
+											>{backupKindLabel(kind)}</span
+										>
+										{item.name}
+									</span>
+									<span class="backup-list__detail">
+										{formatBytes(item.size)} · {formatBackupDate(item.modifiedTime)} · Drive
+									</span>
+								</div>
+								<div class="backup-list__actions">
+									<button
+										type="button"
+										class="options-page__btn backup-list__restore"
+										onclick={() =>
+											openRestoreDialog(item.name, { source: 'drive', fileId: item.id })}
+										disabled={!item.restorable}
+										title={item.restorable
+											? 'Download from Drive and restore'
+											: 'Only full or legacy zips can be restored'}
+									>
+										Restore from Drive
+									</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+					<button
+						type="button"
+						class="options-page__btn options-page__btn--add"
+						style="margin-top: var(--space-3)"
+						onclick={() => loadDriveBackupList()}
+						disabled={driveBackupLoading}
+					>
+						Refresh Drive list
+					</button>
+				{/if}
+			</div>
 		{/if}
 	</div>
 
@@ -1496,6 +1644,12 @@
 					This will replace <strong>all</strong> server data with:
 				</p>
 				<p class="backup-restore-dialog__filename">{restoreTarget}</p>
+				{#if restoreSource === 'drive'}
+					<p class="options-page__help">
+						Source: <strong>Google Drive</strong> — the file is downloaded to the server, then
+						restored. Large archives may take a minute to transfer.
+					</p>
+				{/if}
 				<p class="options-page__help">
 					PocketBase will restart. Type the filename below to confirm.
 				</p>
@@ -1521,7 +1675,13 @@
 						onclick={confirmRestore}
 						disabled={restoreRestoring || restoreConfirmText.trim() !== restoreTarget}
 					>
-						{restoreRestoring ? 'Starting restore…' : 'Restore now'}
+						{restoreRestoring
+							? restoreSource === 'drive'
+								? 'Downloading & restoring…'
+								: 'Starting restore…'
+							: restoreSource === 'drive'
+								? 'Restore from Drive'
+								: 'Restore now'}
 					</button>
 				</div>
 			</div>

@@ -5,12 +5,17 @@ import { backupDateInAlaska, parseAlertEmails } from '$lib/backups/names';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 import { sendBackupFailureAlert, sendBackupSuccessEmail } from '$lib/server/brevo';
 import {
+	downloadGoogleDriveFileBuffer,
 	isGoogleDriveConfigured,
+	listGoogleDriveBackupFiles,
 	openDriveRefreshToken,
 	pruneGoogleDriveBackupsByRetention,
 	resolveGoogleDriveFolderId,
-	uploadBackupArtifactsToDrive
+	uploadBackupArtifactsToDrive,
+	type DriveBackupFile,
+	type GoogleDriveConnectionMeta
 } from '$lib/server/googleDrive';
+import { isRestorableBackupFilename } from '$lib/backups/names';
 
 const BREVO_MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
 const INTERNAL_BACKUP_FILES = new Set(['_backup_file_manifest.json']);
@@ -195,6 +200,103 @@ export async function restorePbBackup(name: string): Promise<RestoreBackupResult
 		throw new Error(`Restore failed (${res.status}): ${text}`);
 	}
 	return (await res.json()) as RestoreBackupResult;
+}
+
+export type DriveConnectionContext = {
+	ready: boolean;
+	folderId: string | null;
+	meta: GoogleDriveConnectionMeta;
+	error?: string;
+};
+
+/** Resolve OAuth/service-account Drive connection from the options record. */
+export async function getDriveConnectionFromOptions(): Promise<DriveConnectionContext> {
+	const options = await fetchOptionsRecord();
+	const refreshToken = openDriveRefreshToken(options?.backupGoogleDriveRefreshToken);
+	const folderId = resolveGoogleDriveFolderId(options?.backupGoogleDriveFolderId);
+	const meta: GoogleDriveConnectionMeta = {
+		refreshToken,
+		folderId,
+		folderName: options?.backupGoogleDriveFolderName,
+		email: options?.backupGoogleDriveEmail
+	};
+	const ready = isGoogleDriveConfigured(options?.backupGoogleDriveFolderId, refreshToken);
+	if (!ready) {
+		return {
+			ready: false,
+			folderId,
+			meta,
+			error:
+				'Google Drive is not connected. Open Options → Backups → Connect Google Drive first.'
+		};
+	}
+	if (!folderId) {
+		return {
+			ready: false,
+			folderId: null,
+			meta,
+			error: 'No Google Drive backup folder is configured. Reconnect Google Drive.'
+		};
+	}
+	return { ready: true, folderId, meta };
+}
+
+/** List restorable and other backup artifacts in the connected Drive folder. */
+export async function listDriveBackups(): Promise<DriveBackupFile[]> {
+	const conn = await getDriveConnectionFromOptions();
+	if (!conn.ready || !conn.folderId) {
+		throw new Error(conn.error || 'Google Drive is not connected');
+	}
+	return listGoogleDriveBackupFiles(conn.folderId, conn.meta);
+}
+
+/**
+ * Download a restorable archive from Google Drive, stage it on the PocketBase
+ * server backup store, then start a normal restore (PB restarts).
+ */
+export async function restoreBackupFromGoogleDrive(
+	fileId: string,
+	name: string
+): Promise<RestoreBackupResult & { stagedFromDrive: true }> {
+	const trimmedId = fileId?.trim();
+	const trimmedName = name?.trim();
+	if (!trimmedId || !trimmedName) {
+		throw new Error('Drive file id and name are required');
+	}
+	if (!isRestorableBackupFilename(trimmedName)) {
+		throw new Error('Only _full.zip or legacy _Backup.zip archives can be restored');
+	}
+
+	const conn = await getDriveConnectionFromOptions();
+	if (!conn.ready || !conn.folderId) {
+		throw new Error(conn.error || 'Google Drive is not connected');
+	}
+
+	const files = await listGoogleDriveBackupFiles(conn.folderId, conn.meta);
+	const match = files.find((f) => f.id === trimmedId);
+	if (!match) {
+		throw new Error('That file was not found in the connected Google Drive backup folder');
+	}
+	if (match.name !== trimmedName) {
+		throw new Error('Drive file name does not match the selected backup');
+	}
+	if (!match.restorable) {
+		throw new Error('Only _full.zip or legacy _Backup.zip archives can be restored');
+	}
+
+	console.log(`[backup] Downloading from Google Drive: ${trimmedName} (${match.size} bytes)`);
+	const buffer = await downloadGoogleDriveFileBuffer(trimmedId, conn.meta);
+	if (!buffer.length) {
+		throw new Error('Downloaded empty file from Google Drive');
+	}
+
+	// Stage onto the server backup store so PB restore can run as usual.
+	const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
+	const staged = await uploadPbBackup(blob, trimmedName);
+	console.log(`[backup] Staged Drive backup on server as ${staged.name}; starting restore`);
+
+	const result = await restorePbBackup(staged.name || trimmedName);
+	return { ...result, stagedFromDrive: true };
 }
 
 /** Poll PocketBase until it responds after a restore restart. */

@@ -10,6 +10,7 @@ import {
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
 import { INTERNAL_SECRET } from '$env/static/private';
+import { isRestorableBackupFilename } from '$lib/backups/names';
 import { dateFromBackupFilename, shouldKeepBackupDate } from '$lib/backups/retention';
 
 /** Prefix for AES-GCM sealed refresh tokens stored on options (readable by internal API). */
@@ -51,6 +52,14 @@ export function openDriveRefreshToken(stored?: string | null): string {
 }
 
 type DriveFile = { id: string; name: string };
+
+export type DriveBackupFile = {
+	id: string;
+	name: string;
+	size: number;
+	modifiedTime: string;
+	restorable: boolean;
+};
 
 export type GoogleDriveConnectionMeta = {
 	refreshToken?: string | null;
@@ -289,6 +298,68 @@ async function listAllFilesInFolder(
 		pageToken = res.data.nextPageToken ?? undefined;
 	} while (pageToken);
 	return files;
+}
+
+/** List backup artifacts in the connected Drive folder (with size / modified). */
+export async function listGoogleDriveBackupFiles(
+	folderId: string,
+	meta: GoogleDriveConnectionMeta = {}
+): Promise<DriveBackupFile[]> {
+	const drive = await getDriveClient(meta);
+	const files: DriveBackupFile[] = [];
+	let pageToken: string | undefined;
+	do {
+		const res = await drive.files.list({
+			q: `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
+			fields: 'nextPageToken, files(id, name, size, modifiedTime, createdTime)',
+			pageSize: 200,
+			pageToken,
+			orderBy: 'modifiedTime desc',
+			supportsAllDrives: true,
+			includeItemsFromAllDrives: true
+		});
+		for (const f of res.data.files ?? []) {
+			if (!f.id || !f.name) continue;
+			// Only show known backup-style artifacts
+			const lower = f.name.toLowerCase();
+			if (!lower.endsWith('.zip') && !lower.endsWith('.json')) continue;
+			files.push({
+				id: f.id,
+				name: f.name,
+				size: Number(f.size ?? 0),
+				modifiedTime: f.modifiedTime || f.createdTime || '',
+				restorable: isRestorableBackupFilename(f.name)
+			});
+		}
+		pageToken = res.data.nextPageToken ?? undefined;
+	} while (pageToken);
+
+	files.sort((a, b) => {
+		const ta = a.modifiedTime ? Date.parse(a.modifiedTime) : 0;
+		const tb = b.modifiedTime ? Date.parse(b.modifiedTime) : 0;
+		return tb - ta;
+	});
+	return files;
+}
+
+/** Download a file from the connected Google Drive account into a Buffer. */
+export async function downloadGoogleDriveFileBuffer(
+	fileId: string,
+	meta: GoogleDriveConnectionMeta = {}
+): Promise<Buffer> {
+	const drive = await getDriveClient(meta);
+	const res = await drive.files.get(
+		{
+			fileId,
+			alt: 'media',
+			supportsAllDrives: true
+		},
+		{ responseType: 'arraybuffer' }
+	);
+	const data = res.data as ArrayBuffer | Buffer | string;
+	if (Buffer.isBuffer(data)) return data;
+	if (typeof data === 'string') return Buffer.from(data);
+	return Buffer.from(data);
 }
 
 /** Upload backup artifacts from buffers to the connected Google Drive folder. */
