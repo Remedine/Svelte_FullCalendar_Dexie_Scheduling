@@ -2179,7 +2179,7 @@
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
 				height: isMobile ? '100%' : 'auto',
-				allDaySlot: true,
+				allDaySlot: false,
 				slotMinTime: calendarSlotBounds.slotMinTime,
 				slotMaxTime: calendarSlotBounds.slotMaxTime,
 				nowIndicator: true,
