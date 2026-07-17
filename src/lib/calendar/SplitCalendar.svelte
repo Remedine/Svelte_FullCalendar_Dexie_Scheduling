@@ -3656,7 +3656,7 @@
 	   - Long-press any movable card = drag (Google Calendar style)
 	   - Drag edge pills = resize with live HUD
 	   - Second clean tap = open
-	   - Swipe empty day grid left/right = next/prev day
+	   - Swipe day grid left/right (incl. unselected cards) = next/prev day
 	   Class-based so phone landscape keeps gesture chrome when width > 768.
 	*/
 	.split-calendar-container--mobile :global(.fc-event__drag-handle) {
