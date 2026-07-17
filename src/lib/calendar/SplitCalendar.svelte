@@ -300,16 +300,11 @@
 	} | null = null;
 
 	function getMobileScrollEl(): HTMLElement | null {
-		// Prefer the time-grid body scroller (height:100% mobile keeps the date header fixed).
-		// Header scroller is overflow:hidden and not tall — skip non-scrolling FC scrollers.
-		const scrollers = dayEl?.querySelectorAll('.fc-scroller') ?? [];
-		for (const node of scrollers) {
-			const el = node as HTMLElement;
-			if (el.scrollHeight > el.clientHeight + 1) return el;
+		const fcScroller = dayEl?.querySelector('.fc-scroller') as HTMLElement | null;
+		if (fcScroller && fcScroller.scrollHeight > fcScroller.clientHeight) {
+			return fcScroller;
 		}
-		const wrapper = dayWrapperEl ?? (document.querySelector('.split-calendar__day-wrapper') as HTMLElement | null);
-		if (wrapper && wrapper.scrollHeight > wrapper.clientHeight + 1) return wrapper;
-		return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+		return document.querySelector('.split-calendar__day-wrapper');
 	}
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
@@ -1624,9 +1619,6 @@
 					'longPressDelay',
 					isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280
 				);
-				// Keep mobile on liquid 100% height (pinned day header); desktop auto expands.
-				dayApi.setOption('height', isMobile ? '100%' : 'auto');
-				dayApi.setOption('stickyHeaderDates', true);
 				requestAnimationFrame(() => dayApi?.updateSize());
 			}
 		};
@@ -2186,12 +2178,14 @@
 					: currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
-				// Mobile: fixed parent height keeps the day/date header section pinned while
-				// the time-grid body scroller moves. height:'auto' expands the full day into
-				// page scroll and the date row scrolls away (sticky fails across overflow traps).
+				// === AI / AGENTS: DO NOT CHANGE CALENDAR HEIGHT ===
+				// Initial mobile '100%' is only a bootstrap value. After render we ALWAYS
+				// setOption('height', 'auto') so the full day timegrid can size to content.
+				// Keeping height at '100%', switching to parent-locked 100dvh shells, or
+				// "pin the header with a fixed-height FC" has made the calendar DISAPPEAR
+				// multiple times. Do not "fix" sticky day headers by rewriting height.
+				// Sticky/pin UX must not depend on height:100% or max-height viewport locks.
 				height: isMobile ? '100%' : 'auto',
-				// Desktop height:auto — pin col headers while the window/page scrolls.
-				stickyHeaderDates: true,
 				allDaySlot: false,
 				slotMinTime: calendarSlotBounds.slotMinTime,
 				slotMaxTime: calendarSlotBounds.slotMaxTime,
@@ -2638,14 +2632,11 @@
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
-				// Desktop: auto height so the full week/month can page-scroll.
-				// Mobile: keep 100% so FC's header section stays fixed above the body scroller
-				// (day/date row does not scroll away). Do not flip mobile to auto.
-				if (!isMobile) {
-					api?.setOption('height', 'auto');
-				} else {
-					api?.setOption('height', '100%');
-				}
+				// === AI / AGENTS: DO NOT CHANGE — always 'auto' after init (mobile + desktop). ===
+				// only once, during initial creation. Repeated setOption height / updateSize from
+				// observers caused idle "refreshing". Never keep mobile on height:'100%' here —
+				// that + a constrained parent collapses the calendar to nothing.
+				api?.setOption('height', 'auto');
 				ensureMobileCalendarView();
 				api?.gotoDate(parseLocalDate(selectedDate));
 				if (highlightJobId) {
@@ -3050,34 +3041,24 @@
 	}
 
 	.split-calendar-container--mobile .split-calendar__day-wrapper {
-		/* Must shrink below content height so FC (height:100%) fills this box and its
-		   internal body scroller handles hours — keeping the day/date header pinned. */
-		flex: 1 1 0;
+		flex: 1;
 		min-height: 0;
-		overflow: hidden; /* FC body scroller, not this wrapper */
+		overflow-y: auto; /* internal scroll for the day's time slots */
+		-webkit-overflow-scrolling: touch;
 		/* Vertical scroll only — horizontal gestures stay available for day swipe nav. */
 		touch-action: pan-y;
 		overscroll-behavior-x: contain;
 		margin-bottom: 0;
 		border-radius: var(--radius-md);
-		display: flex;
-		flex-direction: column;
 	}
 
-	/* Make the FC container fill remaining height so height:100% resolves to a real box. */
+	/* Make the FC container inside fill remaining height (sibling gesture hint can sit above).
+	   AI / AGENTS: keep height:auto here. Do not force height:100% on .day / .fc to "pin" headers. */
 	.split-calendar-container--mobile .split-calendar__day {
-		flex: 1 1 0;
+		flex: 1 1 auto;
 		min-height: 0;
-		height: 100%;
-		overflow: hidden;
+		height: auto;
 		touch-action: pan-y;
-	}
-
-	.split-calendar-container--mobile :global(.fc),
-	.split-calendar-container--mobile :global(.fc-view-harness),
-	.split-calendar-container--mobile :global(.fc-view-harness-active) {
-		height: 100%;
-		min-height: 0;
 	}
 
 	/* FullCalendar's internal scroller also claims touches by default; lock it to pan-y
@@ -3092,14 +3073,30 @@
 		touch-action: pan-y;
 	}
 
-	/* Pinned day/date header chrome (FC keeps this section above the body scroller). */
+	/* Day/date header sticks to the top of the day-wrapper scroller while slots scroll under it.
+	   Intermediate overflow:hidden on .split-calendar__day / .fc would trap sticky, so open those. */
+	.split-calendar-container--mobile .split-calendar__day,
+	.split-calendar-container--mobile :global(.fc) {
+		overflow: visible;
+	}
+
+	.split-calendar-container--mobile :global(.fc-scrollgrid > thead),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header) {
+		position: sticky;
+		top: 0;
+		z-index: 6;
+	}
+
+	.split-calendar-container--mobile :global(.fc-scrollgrid > thead),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header > th),
 	.split-calendar-container--mobile :global(.fc-col-header),
 	.split-calendar-container--mobile :global(.fc-col-header-cell),
-	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header > *),
 	.split-calendar-container--mobile :global(.fc-timegrid-axis) {
 		background: var(--color-surface);
 	}
 
+	/* Keep today header tint above the solid sticky fill. */
 	.split-calendar-container--mobile :global(.fc-col-header-cell.fc-day-today) {
 		background: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface)) !important;
 	}
@@ -3183,22 +3180,20 @@
 		}
 
 		.split-calendar__day-wrapper {
-			flex: 1 1 0;
+			flex: 1;
 			min-height: 0;
-			overflow: hidden;
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
 			touch-action: pan-y;
 			overscroll-behavior-x: contain;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
-			display: flex;
-			flex-direction: column;
 		}
 
 		.split-calendar__day {
-			flex: 1 1 0;
+			flex: 1 1 auto;
 			min-height: 0;
-			height: 100%;
-			overflow: hidden;
+			height: auto;
 			touch-action: pan-y;
 		}
 
