@@ -21,10 +21,13 @@ export {
 	type BulkRowResult,
 	type BulkRowAction,
 	type BulkEntitySummary,
-	type BulkDryRunOptions
+	type BulkDryRunOptions,
+	type BulkCommitSupport
 } from './dryRun';
 export { BULK_TEMPLATES, type BulkTemplateId } from './templates';
 export { bulkClientToPbPayload, normalizeEmail } from './clientMap';
+export { bulkJobToPbPayload } from './jobMap';
+export { bulkInvoiceToPbPayload } from './invoiceMap';
 export {
 	loadClientLookupIndex,
 	matchExistingClient,
@@ -34,4 +37,25 @@ export {
 	type ExistingClient,
 	type ClientMatch
 } from './pbClients';
-export { commitBulkClients, type BulkCommitResult } from './applyClients';
+export {
+	loadJobLookupIndex,
+	matchExistingJob,
+	resolveJobClientPbId,
+	createPbJob,
+	updatePbJob,
+	type JobLookupIndex,
+	type ExistingJob,
+	type JobMatch
+} from './pbJobs';
+export {
+	loadInvoiceLookupIndex,
+	matchExistingInvoice,
+	resolveInvoiceJobPbId,
+	resolveInvoiceClientPbId,
+	createPbInvoice,
+	updatePbInvoice,
+	type InvoiceLookupIndex,
+	type ExistingInvoice,
+	type InvoiceMatch
+} from './pbInvoices';
+export { commitBulk, commitBulkClients, type BulkCommitResult } from './commit';

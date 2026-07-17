@@ -88,7 +88,8 @@ describe('runBulkDryRun', () => {
 		const result = runBulkDryRun(parsed.payload);
 		expect(result.dryRun).toBe(true);
 		expect(result.commitSupported.clients).toBe(true);
-		expect(result.commitSupported.jobs).toBe(false);
+		expect(result.commitSupported.jobs).toBe(true);
+		expect(result.commitSupported.invoices).toBe(true);
 		expect(result.summary.totalValid).toBe(3);
 		expect(result.summary.totalError).toBe(0);
 		expect(result.rows.every((r) => r.action === 'would_create')).toBe(true);

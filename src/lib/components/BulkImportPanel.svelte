@@ -36,17 +36,19 @@
 		return result.rows;
 	});
 
-	const canCommitClients = $derived.by(() => {
-		if (!result || !lastPayload?.clients?.length) return false;
-		if (result.summary.clients.error > 0) return false;
-		if (result.summary.clients.total === 0) return false;
-		// Allow commit after dry-run preview (not after a successful commit with only created/updated)
-		const hasPreviewActions = result.rows.some(
-			(r) =>
-				r.entity === 'clients' &&
-				(r.action === 'would_create' || r.action === 'would_update')
+	const canCommit = $derived.by(() => {
+		if (!result || !lastPayload) return false;
+		if (result.dryRun === false) return false;
+		const total =
+			(lastPayload.clients?.length ?? 0) +
+			(lastPayload.jobs?.length ?? 0) +
+			(lastPayload.invoices?.length ?? 0);
+		if (total === 0) return false;
+		// Block commit if any entity has validation errors
+		if (result.summary.totalError > 0) return false;
+		return result.rows.some(
+			(r) => r.action === 'would_create' || r.action === 'would_update'
 		);
-		return hasPreviewActions && result.dryRun !== false;
 	});
 
 	function downloadTemplate(id: BulkTemplateId) {
@@ -168,9 +170,9 @@
 			} else if (result.summary.totalError > 0) {
 				toast.error(`${result.summary.totalError} row(s) with errors`);
 			} else {
-				const c = result.summary.clients;
+				const { clients: c, jobs: j, invoices: inv } = result.summary;
 				toast.success(
-					`Server preview — clients: ${c.wouldCreate} create, ${c.wouldUpdate} update`
+					`Preview — C ${c.wouldCreate}/${c.wouldUpdate}, J ${j.wouldCreate}/${j.wouldUpdate}, I ${inv.wouldCreate}/${inv.wouldUpdate} (create/update)`
 				);
 			}
 		} catch (err) {
@@ -181,23 +183,25 @@
 		}
 	}
 
-	/** Write clients to PocketBase (jobs/invoices deferred). */
-	async function commitClients() {
+	/** Write clients → jobs → invoices to PocketBase. */
+	async function commitAll() {
 		apiError = '';
-		if (!lastPayload?.clients?.length) {
-			toast.error('No clients in payload to commit');
+		if (!lastPayload) {
+			toast.error('Nothing to commit');
 			return;
 		}
-		if (!canCommitClients) {
-			toast.error('Run a successful preview first (fix any client errors)');
+		if (!canCommit) {
+			toast.error('Run a successful API preview first and fix any errors');
 			return;
 		}
 
-		const n = lastPayload.clients.length;
+		const nc = lastPayload.clients?.length ?? 0;
+		const nj = lastPayload.jobs?.length ?? 0;
+		const ni = lastPayload.invoices?.length ?? 0;
 		const ok = confirm(
-			`Commit ${n} client row(s) to the live database?\n\n` +
-				`Matching externalId/email will update existing clients; others will be created.\n` +
-				`Jobs and invoices in this package are not written yet.`
+			`Commit to the live database?\n\n` +
+				`• Clients: ${nc}\n• Jobs: ${nj}\n• Invoices: ${ni}\n\n` +
+				`Matching externalId / email / invoiceNumber will update existing records.`
 		);
 		if (!ok) return;
 
@@ -227,12 +231,13 @@
 			}
 
 			result = data as BulkDryRunResult;
-			const c = result.summary.clients;
-			if (c.error > 0) {
-				toast.error(`Commit finished with ${c.error} client error(s); ${c.created} created, ${c.updated} updated`);
-			} else {
-				toast.success(`Clients committed — ${c.created} created, ${c.updated} updated`);
-			}
+			const { clients: c, jobs: j, invoices: inv } = result.summary;
+			const errTotal = c.error + j.error + inv.error;
+			const msg =
+				`Committed — clients ${c.created}/${c.updated}, ` +
+				`jobs ${j.created}/${j.updated}, invoices ${inv.created}/${inv.updated} (created/updated)`;
+			if (errTotal > 0) toast.error(`${msg}; ${errTotal} error(s)`);
+			else toast.success(msg);
 		} catch (err) {
 			apiError = err instanceof Error ? err.message : 'Commit failed';
 			toast.error(apiError);
@@ -265,8 +270,9 @@
 		<header class="bulk-import__header">
 			<h2 class="bulk-import__title">Bulk import</h2>
 			<p class="bulk-import__lede">
-				Upload CSV or JSON, preview validation, then <strong>commit clients</strong> to the live
-				database. Job and invoice writes are not available yet (preview only).
+				Upload CSV or JSON, preview against the database, then <strong>commit</strong> clients,
+				jobs, and invoices (in that order). Re-uploads with the same
+				<code>externalId</code> / invoice number update existing rows.
 			</p>
 		</header>
 
@@ -373,13 +379,13 @@
 				<button
 					type="button"
 					class="bulk-import__btn bulk-import__btn--primary"
-					onclick={commitClients}
-					disabled={!canCommitClients || loading || committing}
-					title={canCommitClients
-						? 'Write clients to PocketBase'
-						: 'Run Preview via API first (clients only)'}
+					onclick={commitAll}
+					disabled={!canCommit || loading || committing}
+					title={canCommit
+						? 'Write clients, jobs, and invoices to PocketBase'
+						: 'Run Preview via API first and fix errors'}
 				>
-					{committing ? 'Committing…' : 'Commit clients'}
+					{committing ? 'Committing…' : 'Commit'}
 				</button>
 			</div>
 
@@ -435,12 +441,11 @@
 
 				<p class="bulk-import__commit-note">
 					{#if result.dryRun === false}
-						Commit complete for clients. Pull or refresh the app to see new clients on other
-						devices. Jobs/invoices remain deferred until a later release.
+						Commit finished. Refresh or wait for sync to see new data on other devices.
 					{:else}
-						Use <strong>Commit clients</strong> after a clean API preview. Matching
-						<code>externalId</code> (importKey) or email updates an existing client; otherwise a
-						new one is created. Jobs/invoices are not written yet.
+						Use <strong>Commit</strong> after a clean API preview. Writes clients, then jobs, then
+						invoices. Matching <code>externalId</code>, email, or invoice number updates existing
+						records.
 					{/if}
 				</p>
 

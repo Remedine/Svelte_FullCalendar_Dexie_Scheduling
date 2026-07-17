@@ -468,6 +468,7 @@ export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipp
 		cancelledAt: rec.cancelledAt ? new Date(rec.cancelledAt) : undefined,
 		cancelledBy: rec.cancelledBy,
 		importSource: rec.importSource || undefined,
+		importKey: rec.importKey || undefined,
 		// Jobs collection uses custom createdAt/updatedAt autodate fields (not system created/updated).
 		createdAt: new Date(rec.createdAt || rec.created),
 		updatedAt: new Date(rec.updatedAt || rec.updated)
@@ -677,6 +678,7 @@ export async function pullInvoicesFromServer() {
 					notes: rec.notes || '',
 					invoiceNumber: rec.invoiceNumber || undefined,
 					importSource: rec.importSource || undefined,
+					importKey: rec.importKey || undefined,
 					primaryInvoiceFile: rec.primaryInvoiceFile
 						? { filename: rec.primaryInvoiceFile }
 						: undefined,

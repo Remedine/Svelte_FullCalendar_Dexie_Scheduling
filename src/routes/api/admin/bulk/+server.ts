@@ -1,9 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { assertAdminFromAuthHeader } from '$lib/server/pbAdmin';
 import {
-	commitBulkClients,
+	commitBulk,
 	csvToBulkPayload,
 	loadClientLookupIndex,
+	loadInvoiceLookupIndex,
+	loadJobLookupIndex,
 	MAX_BULK_JSON_BYTES,
 	parseJsonToBulkPayload,
 	runBulkDryRun,
@@ -115,8 +117,8 @@ async function parseRequestBody(
 /**
  * POST /api/admin/bulk
  *
- * dryRun true (default): validate + optional PB match for clients (create vs update).
- * dryRun false: commit clients to PocketBase; jobs/invoices deferred.
+ * dryRun true: validate + match existing clients/jobs/invoices.
+ * dryRun false: commit clients → jobs → invoices to PocketBase.
  */
 export async function POST({ request }: { request: Request }) {
 	const token = authHeader(request);
@@ -135,34 +137,52 @@ export async function POST({ request }: { request: Request }) {
 
 		if (dryRun) {
 			let clientIndex;
+			let jobIndex;
+			let invoiceIndex;
+			const loadErrors: string[] = [];
 			try {
 				clientIndex = await loadClientLookupIndex(auth);
 			} catch (err) {
-				// Still allow schema-only dry-run if list fails
-				const message = err instanceof Error ? err.message : 'Could not load clients';
-				const result = runBulkDryRun(payload);
-				return json({
-					...result,
-					payloadErrors: [...result.payloadErrors, `Client match skipped: ${message}`]
-				});
+				loadErrors.push(
+					`Client match skipped: ${err instanceof Error ? err.message : 'list failed'}`
+				);
 			}
-			const result = runBulkDryRun(payload, { clientIndex });
-			return json(result);
+			try {
+				jobIndex = await loadJobLookupIndex(auth);
+			} catch (err) {
+				loadErrors.push(
+					`Job match skipped: ${err instanceof Error ? err.message : 'list failed'}`
+				);
+			}
+			try {
+				invoiceIndex = await loadInvoiceLookupIndex(auth);
+			} catch (err) {
+				loadErrors.push(
+					`Invoice match skipped: ${err instanceof Error ? err.message : 'list failed'}`
+				);
+			}
+
+			const result = runBulkDryRun(payload, {
+				clientIndex,
+				jobIndex,
+				invoiceIndex
+			});
+			return json({
+				...result,
+				payloadErrors: [...result.payloadErrors, ...loadErrors]
+			});
 		}
 
-		// Commit: clients only
-		if (!payload.clients?.length) {
-			return json(
-				{
-					error:
-						'Commit currently supports clients only. Include a clients array (jobs/invoices commit comes later).',
-					commitSupported: { clients: true, jobs: false, invoices: false }
-				},
-				{ status: 400 }
-			);
+		const hasAny =
+			(payload.clients?.length ?? 0) +
+				(payload.jobs?.length ?? 0) +
+				(payload.invoices?.length ?? 0) >
+			0;
+		if (!hasAny) {
+			return json({ error: 'Nothing to commit' }, { status: 400 });
 		}
 
-		const result = await commitBulkClients(auth, payload);
+		const result = await commitBulk(auth, payload);
 		return json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Bulk request failed';

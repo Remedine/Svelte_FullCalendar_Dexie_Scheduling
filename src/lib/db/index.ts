@@ -223,6 +223,8 @@ export interface Job {
 	// )=- Added for legacy invoice imports (handwritten OCR / Asana CSV). Allows imperfect imported jobs
 	// to still be searchable and linkable while we tolerate missing fields. See JOBS_AND_INVOICES_SPEC.md.
 	importSource?: string;
+	/** Stable external id from bulk import (idempotent re-runs). */
+	importKey?: string;
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -354,6 +356,8 @@ export interface Invoice {
 	notes?: string;
 	// )=- 'asana-export', 'handwritten-ocr', 'manual', etc. Must allow imperfect data for imports.
 	importSource?: string;
+	/** Stable external id from bulk import (idempotent re-runs). */
+	importKey?: string;
 	// The one editable .docx the user reviews, manually edits in Word, then re-uploads.
 	primaryInvoiceFile?: {
 		filename: string;
@@ -476,6 +480,20 @@ db.version(26).stores({
 	syncQueue: '++id, type, collection, recordId, createdAt',
 	options: 'id',
 	invoices: 'id, jobId, clientId, status, dueDate, importSource, pbId',
+	crewNotifications: 'id, jobId, scheduledFor, crewName',
+	appSession: 'id',
+	deviceAuth: 'id'
+});
+
+// v27: bulk importKey on jobs + invoices
+db.version(27).stores({
+	clients: 'id, name, areaOfTown, email, pbId, importKey',
+	jobs: 'id, clientId, start, end, status, areaOfTown, importSource, importKey, pbId, *assignedCrew',
+	users:
+		'id, firstName, lastName, name, email, role, active, forcePhotoUpdate, forcePinUpdate, pbId, verified',
+	syncQueue: '++id, type, collection, recordId, createdAt',
+	options: 'id',
+	invoices: 'id, jobId, clientId, status, dueDate, importSource, importKey, pbId',
 	crewNotifications: 'id, jobId, scheduledFor, crewName',
 	appSession: 'id',
 	deviceAuth: 'id'
@@ -1831,7 +1849,8 @@ async function jobDataToPbPayload(data: any): Promise<Record<string, unknown>> {
 						: data.cancelledAt
 					: undefined,
 		cancelledBy: data.cancelledBy === null ? null : data.cancelledBy || undefined,
-		importSource: data.importSource || undefined
+		importSource: data.importSource || undefined,
+		importKey: data.importKey || undefined
 	};
 
 	return Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));

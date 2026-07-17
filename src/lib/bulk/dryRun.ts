@@ -1,6 +1,6 @@
 /**
  * Validate a bulk payload and produce a dry-run / apply report.
- * Client rows can resolve create vs update when a ClientLookupIndex is provided.
+ * When lookup indexes are provided, rows resolve create vs update and relation checks.
  */
 import {
 	bulkClientSchema,
@@ -14,6 +14,17 @@ import {
 	type BulkPayload
 } from './schema';
 import { matchExistingClient, type ClientLookupIndex } from './pbClients';
+import {
+	matchExistingJob,
+	resolveJobClientPbId,
+	type JobLookupIndex
+} from './pbJobs';
+import {
+	matchExistingInvoice,
+	resolveInvoiceClientPbId,
+	resolveInvoiceJobPbId,
+	type InvoiceLookupIndex
+} from './pbInvoices';
 
 export type BulkRowAction =
 	| 'would_create'
@@ -27,13 +38,10 @@ export type BulkRowResult = {
 	entity: BulkEntity;
 	index: number;
 	action: BulkRowAction;
-	/** externalId or natural key for display */
 	key: string;
 	summary: string;
 	errors?: string[];
-	/** Validated data when not error */
 	data?: BulkClient | BulkJob | BulkInvoice;
-	/** Matched PocketBase id when updating */
 	pbId?: string;
 };
 
@@ -55,9 +63,7 @@ export type BulkCommitSupport = {
 };
 
 export type BulkDryRunResult = {
-	/** true = preview only; false = commit result */
 	dryRun: boolean;
-	/** Slice 2: clients can be committed; jobs/invoices still deferred */
 	commitSupported: BulkCommitSupport;
 	summary: {
 		clients: BulkEntitySummary;
@@ -72,10 +78,9 @@ export type BulkDryRunResult = {
 };
 
 export type BulkDryRunOptions = {
-	/** When set, client rows resolve would_create vs would_update */
 	clientIndex?: ClientLookupIndex;
-	/** When true, jobs/invoices that validate are still marked deferred (commit not ready) */
-	markJobsInvoicesDeferred?: boolean;
+	jobIndex?: JobLookupIndex;
+	invoiceIndex?: InvoiceLookupIndex;
 };
 
 function emptySummary(): BulkEntitySummary {
@@ -129,6 +134,31 @@ function tallyValid(summary: BulkEntitySummary, action: BulkRowAction) {
 	if (action === 'deferred') summary.deferred++;
 }
 
+/** Augment client index with valid externalIds from this payload (as pending keys). */
+function payloadClientKeys(payload: BulkPayload): Set<string> {
+	const keys = new Set<string>();
+	if (!payload.clients) return keys;
+	for (const raw of payload.clients) {
+		if (raw && typeof raw === 'object' && 'externalId' in raw) {
+			const id = String((raw as { externalId?: string }).externalId || '');
+			if (id) keys.add(id);
+		}
+	}
+	return keys;
+}
+
+function payloadJobKeys(payload: BulkPayload): Set<string> {
+	const keys = new Set<string>();
+	if (!payload.jobs) return keys;
+	for (const raw of payload.jobs) {
+		if (raw && typeof raw === 'object' && 'externalId' in raw) {
+			const id = String((raw as { externalId?: string }).externalId || '');
+			if (id) keys.add(id);
+		}
+	}
+	return keys;
+}
+
 export function runBulkDryRun(
 	payload: BulkPayload,
 	options: BulkDryRunOptions = {}
@@ -144,10 +174,10 @@ export function runBulkDryRun(
 		totalRows: 0
 	};
 
-	const clientCount = payload.clients?.length ?? 0;
-	const jobCount = payload.jobs?.length ?? 0;
-	const invoiceCount = payload.invoices?.length ?? 0;
-	const total = clientCount + jobCount + invoiceCount;
+	const total =
+		(payload.clients?.length ?? 0) +
+		(payload.jobs?.length ?? 0) +
+		(payload.invoices?.length ?? 0);
 
 	if (total === 0) {
 		payloadErrors.push('Payload must include at least one of clients, jobs, or invoices');
@@ -162,6 +192,8 @@ export function runBulkDryRun(
 	const seenJobExt = new Map<string, number>();
 	const seenInvoiceExt = new Map<string, number>();
 	const seenInvoiceNumbers = new Map<string, number>();
+	const pendingClientKeys = payloadClientKeys(payload);
+	const pendingJobKeys = payloadJobKeys(payload);
 
 	// --- Clients ---
 	if (payload.clients) {
@@ -201,13 +233,10 @@ export function runBulkDryRun(
 
 			if (!errors.length && options.clientIndex) {
 				const match = matchExistingClient(data, options.clientIndex);
-				if (match.kind === 'error') {
-					errors.push(match.message);
-				} else if (match.kind === 'update') {
+				if (match.kind === 'error') errors.push(match.message);
+				else if (match.kind === 'update') {
 					action = 'would_update';
 					pbId = match.existing.id;
-				} else {
-					action = 'would_create';
 				}
 			}
 
@@ -225,14 +254,14 @@ export function runBulkDryRun(
 			} else {
 				tallyValid(summary.clients, action);
 				summary.totalValid++;
-				const matchNote =
-					action === 'would_update' ? ` · update ${pbId}` : ' · create';
 				rows.push({
 					entity: 'clients',
 					index: i,
 					action,
 					key,
-					summary: `${data.name} · ${data.serviceAddressCity}${matchNote}`,
+					summary: `${data.name} · ${data.serviceAddressCity}${
+						action === 'would_update' ? ` · update ${pbId}` : ' · create'
+					}`,
 					data,
 					pbId
 				});
@@ -273,23 +302,49 @@ export function runBulkDryRun(
 				}
 			}
 
-			if (data.clientExternalId && payload.clients?.length) {
-				if (!clientExternalIds.has(data.clientExternalId)) {
-					const anyClientExt = (payload.clients as unknown[]).some((c) => {
-						if (c && typeof c === 'object' && 'externalId' in c) {
-							return String((c as { externalId?: string }).externalId) === data.clientExternalId;
-						}
-						return false;
-					});
-					if (!anyClientExt) {
-						errors.push(
-							`clientExternalId "${data.clientExternalId}" not found in this payload's clients`
-						);
-					} else if (!clientExternalIds.has(data.clientExternalId)) {
+			// Client relation: payload clients, or server client index
+			if (data.clientExternalId) {
+				const inPayload = clientExternalIds.has(data.clientExternalId);
+				const onServer = options.clientIndex?.byImportKey.has(data.clientExternalId);
+				if (!inPayload && !onServer) {
+					// Invalid client row in payload with same key?
+					if (pendingClientKeys.has(data.clientExternalId) && !inPayload) {
 						errors.push(
 							`clientExternalId "${data.clientExternalId}" refers to an invalid client row`
 						);
+					} else if (!pendingClientKeys.has(data.clientExternalId)) {
+						errors.push(
+							`clientExternalId "${data.clientExternalId}" not found in payload clients or database`
+						);
 					}
+				}
+			} else if (data.clientEmail && options.clientIndex) {
+				const resolved = resolveJobClientPbId(data, options.clientIndex);
+				if (!resolved.ok) errors.push(resolved.message);
+			} else if (data.clientEmail && payload.clients?.length) {
+				// Local-only preview: allow if any client row has matching email
+				const em = data.clientEmail.trim().toLowerCase();
+				const found = (payload.clients as unknown[]).some((c) => {
+					if (c && typeof c === 'object' && 'email' in c) {
+						return String((c as { email?: string }).email || '')
+							.trim()
+							.toLowerCase() === em;
+					}
+					return false;
+				});
+				if (!found) {
+					errors.push(`clientEmail "${data.clientEmail}" not found in this payload's clients`);
+				}
+			}
+
+			let action: BulkRowAction = 'would_create';
+			let pbId: string | undefined;
+
+			if (!errors.length && options.jobIndex) {
+				const match = matchExistingJob(data, options.jobIndex);
+				if (match.kind === 'update') {
+					action = 'would_update';
+					pbId = match.existing.id;
 				}
 			}
 
@@ -305,9 +360,6 @@ export function runBulkDryRun(
 					errors
 				});
 			} else {
-				const action: BulkRowAction = options.markJobsInvoicesDeferred
-					? 'deferred'
-					: 'would_create';
 				tallyValid(summary.jobs, action);
 				summary.totalValid++;
 				const clientRef = data.clientExternalId || data.clientEmail || data.clientPbId || '';
@@ -316,15 +368,11 @@ export function runBulkDryRun(
 					index: i,
 					action,
 					key,
-					summary:
-						action === 'deferred'
-							? `${data.title} → ${clientRef} (job commit not available yet)`
-							: `${data.title} → ${clientRef}`,
+					summary: `${data.title} → ${clientRef}${
+						action === 'would_update' ? ` · update ${pbId}` : ' · create'
+					}`,
 					data,
-					errors:
-						action === 'deferred'
-							? ['Job commit not implemented yet — clients only in this release']
-							: undefined
+					pbId
 				});
 			}
 		}
@@ -371,21 +419,55 @@ export function runBulkDryRun(
 				}
 			}
 
-			if (data.jobExternalId && payload.jobs?.length) {
-				if (!jobExternalIds.has(data.jobExternalId)) {
-					const anyJobExt = (payload.jobs as unknown[]).some((j) => {
-						if (j && typeof j === 'object' && 'externalId' in j) {
-							return String((j as { externalId?: string }).externalId) === data.jobExternalId;
-						}
-						return false;
-					});
-					if (!anyJobExt) {
-						errors.push(
-							`jobExternalId "${data.jobExternalId}" not found in this payload's jobs`
-						);
-					} else if (!jobExternalIds.has(data.jobExternalId)) {
+			if (data.jobExternalId) {
+				const inPayload = jobExternalIds.has(data.jobExternalId);
+				const onServer = options.jobIndex?.byImportKey.has(data.jobExternalId);
+				if (!inPayload && !onServer) {
+					if (pendingJobKeys.has(data.jobExternalId) && !inPayload) {
 						errors.push(`jobExternalId "${data.jobExternalId}" refers to an invalid job row`);
+					} else if (!pendingJobKeys.has(data.jobExternalId)) {
+						errors.push(
+							`jobExternalId "${data.jobExternalId}" not found in payload jobs or database`
+						);
 					}
+				}
+			} else if (data.jobPbId && options.jobIndex) {
+				if (!options.jobIndex.byId.has(data.jobPbId)) {
+					// Allow unknown jobPbId only when index not fully trusted — still flag
+					errors.push(`jobPbId "${data.jobPbId}" not found in jobs`);
+				}
+			}
+
+			if (options.jobIndex && options.clientIndex && !errors.length) {
+				const jobRes = resolveInvoiceJobPbId(data, options.jobIndex);
+				// Only hard-check when job is already on server (not only in payload)
+				if (data.jobPbId || (data.jobExternalId && options.jobIndex.byImportKey.has(data.jobExternalId))) {
+					if (!jobRes.ok) errors.push(jobRes.message);
+					else {
+						const clientRes = resolveInvoiceClientPbId(
+							data,
+							options.clientIndex,
+							jobRes.clientPbId
+						);
+						if (!clientRes.ok && !data.clientExternalId && !data.clientEmail && !data.clientPbId) {
+							// client comes from job — ok if job has client
+							if (!jobRes.clientPbId) errors.push(clientRes.message);
+						} else if (!clientRes.ok && (data.clientExternalId || data.clientEmail || data.clientPbId)) {
+							errors.push(clientRes.message);
+						}
+					}
+				}
+			}
+
+			let action: BulkRowAction = 'would_create';
+			let pbId: string | undefined;
+
+			if (!errors.length && options.invoiceIndex) {
+				const match = matchExistingInvoice(data, options.invoiceIndex);
+				if (match.kind === 'error') errors.push(match.message);
+				else if (match.kind === 'update') {
+					action = 'would_update';
+					pbId = match.existing.id;
 				}
 			}
 
@@ -401,9 +483,6 @@ export function runBulkDryRun(
 					errors
 				});
 			} else {
-				const action: BulkRowAction = options.markJobsInvoicesDeferred
-					? 'deferred'
-					: 'would_create';
 				tallyValid(summary.invoices, action);
 				summary.totalValid++;
 				const jobRef = data.jobExternalId || data.jobPbId || '';
@@ -412,15 +491,11 @@ export function runBulkDryRun(
 					index: i,
 					action,
 					key,
-					summary:
-						action === 'deferred'
-							? `${data.invoiceNumber || key} (invoice commit not available yet)`
-							: `${data.invoiceNumber || key} · ${data.status} · job ${jobRef}`,
+					summary: `${data.invoiceNumber || key} · ${data.status} · job ${jobRef}${
+						action === 'would_update' ? ` · update ${pbId}` : ' · create'
+					}`,
 					data,
-					errors:
-						action === 'deferred'
-							? ['Invoice commit not implemented yet — clients only in this release']
-							: undefined
+					pbId
 				});
 			}
 		}
@@ -428,7 +503,7 @@ export function runBulkDryRun(
 
 	return {
 		dryRun: true,
-		commitSupported: { clients: true, jobs: false, invoices: false },
+		commitSupported: { clients: true, jobs: true, invoices: true },
 		summary,
 		rows,
 		payloadErrors
