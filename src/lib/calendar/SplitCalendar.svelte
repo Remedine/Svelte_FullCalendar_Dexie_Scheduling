@@ -24,17 +24,41 @@
 	// This removes duplication with JobInvoicePanel and enables strong unit testing of the local-date logic
 	// that was the source of multiple due-date / calendar jump bugs.
 	// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + TESTING_PLAN.md
-	import { getLocalDateString, parseLocalDate, toDateString } from '$lib/utils/dates';
+	import { getLocalDateString, parseLocalDate } from '$lib/utils/dates';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
-	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
+	import {
+		isMobileViewport,
+		isMobileLandscapeViewport,
+		mobileViewportMediaQuery
+	} from '$lib/utils/device';
 	import {
 		formatMobileAppointmentHud,
 		formatMobileTimeRange,
 		MOBILE_GESTURE_DEFAULTS
 	} from '$lib/utils/mobileCalendarGestures';
+
+	/** Mobile portrait = single day; mobile landscape = 3-day time grid. Desktop uses Day/Week/Month switcher. */
+	const MOBILE_VIEW_DAY = 'timeGridDay';
+	const MOBILE_VIEW_THREE_DAY = 'timeGridThreeDay';
+
+	function getMobileCalendarView(landscape: boolean): string {
+		return landscape ? MOBILE_VIEW_THREE_DAY : MOBILE_VIEW_DAY;
+	}
+
+	function isTimeGridViewType(viewType: string): boolean {
+		return (
+			viewType === 'timeGridDay' ||
+			viewType === 'timeGridWeek' ||
+			viewType === MOBILE_VIEW_THREE_DAY
+		);
+	}
+
+	function isMobileStyleViewType(viewType: string): boolean {
+		return viewType === MOBILE_VIEW_DAY || viewType === MOBILE_VIEW_THREE_DAY;
+	}
 
 	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
 	// and $effects (which do refetch/update) on every pointer event during drag.
@@ -239,8 +263,9 @@
 	// 2) Long-press any movable card → drag to new time (no pre-select required)
 	// 3) Drag top/bottom pills on selected card → resize duration
 	// 4) Second clean tap on selected body → open job
-	// 5) Horizontal swipe on empty day grid → previous / next day
-	// 6) Live time HUD + light haptics on select / grab / snap / drop
+	// 5) Horizontal swipe on empty day grid → previous / next day (or shift 3-day window)
+	// 6) Landscape rotate → timeGridThreeDay (3 columns); portrait → timeGridDay
+	// 7) Live time HUD + light haptics on select / grab / snap / drop
 	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
 	// Edge auto-scroll while dragging/resizing near top/bottom of the day grid.
 	// Larger zone + higher velocity so late/early slots are reachable without overshooting into the bottom nav.
@@ -1357,19 +1382,31 @@
 	let dayApi: Calendar | null = null;
 	let isSyncing = $state(false);
 	const initialIsMobile = isMobileViewport();
-	let currentView = $state(initialIsMobile ? 'timeGridDay' : 'timeGridWeek');
+	const initialIsMobileLandscape = isMobileLandscapeViewport();
+	let currentView = $state(
+		initialIsMobile ? getMobileCalendarView(initialIsMobileLandscape) : 'timeGridWeek'
+	);
 	let crewOptions = $state<string[]>([]);
 
-	// Mobile detection for day-only view, compact MonthPicker, reclaimed space, anchored top month picker,
-	// and mobile footer behaviors in the parent layout.
+	// Mobile detection for day/3-day view, compact MonthPicker, reclaimed space, anchored top month picker,
+	// and mobile footer behaviors in the parent layout. Landscape keeps mobile gestures + DnD.
 	let isMobile = $state(initialIsMobile);
+	let isMobileLandscape = $state(initialIsMobileLandscape);
 
-	function ensureMobileDayView() {
+	/** Portrait = 1 day, landscape = 3 days. Skips while a drag/resize is active. */
+	function ensureMobileCalendarView() {
 		if (!isMobile) return;
-		if (currentView !== 'timeGridDay') currentView = 'timeGridDay';
-		if (dayApi && dayApi.view.type !== 'timeGridDay') {
-			dayApi.changeView('timeGridDay');
+		if (isCalendarInteracting() || appointmentDragActive || activeMobileResize) return;
+
+		const nextView = getMobileCalendarView(isMobileLandscape);
+		if (currentView !== nextView) currentView = nextView;
+		if (dayApi && dayApi.view.type !== nextView) {
+			dayApi.changeView(nextView);
+			dayApi.gotoDate(parseLocalDate(selectedDate));
 			dayApi.refetchEvents();
+			requestAnimationFrame(() => {
+				dayApi?.updateSize();
+			});
 		}
 	}
 
@@ -1385,12 +1422,12 @@
 		);
 	}
 
-	/** Mobile day view: scroll the time grid to the job slot (not page scrollIntoView). */
+	/** Mobile day / 3-day view: scroll the time grid to the job slot (not page scrollIntoView). */
 	function scrollToHighlightedJob(start: Date): boolean {
 		if (!dayApi || isNaN(start.getTime())) return false;
 
 		const viewType = dayApi.view.type;
-		if (isMobile || viewType === 'timeGridDay') {
+		if (isMobile || isMobileStyleViewType(viewType)) {
 			try {
 				dayApi.scrollToTime(formatFcScrollTime(start));
 				return true;
@@ -1424,7 +1461,7 @@
 		if (!highlightJobId || hasScrolledToHighlight) return;
 		if (!jobMatchesHighlight(info.event.id, info.event.extendedProps)) return;
 
-		const isDayish = isMobile || info.view.type === 'timeGridDay';
+		const isDayish = isMobile || isMobileStyleViewType(info.view.type);
 
 		if (isDayish && info.event.start) {
 			const start = info.event.start;
@@ -1476,21 +1513,39 @@
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		const mql = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`);
-		isMobile = mql.matches;
-		ensureMobileDayView();
+		const mqlMobile = window.matchMedia(mobileViewportMediaQuery());
+		const mqlLandscape = window.matchMedia('(orientation: landscape)');
 
-		const listener = (e: MediaQueryListEvent) => {
-			isMobile = e.matches;
+		const applyViewportMode = () => {
+			const nextMobile = mqlMobile.matches;
+			const nextLandscape = nextMobile && mqlLandscape.matches;
+			const mobileChanged = nextMobile !== isMobile;
+			const landscapeChanged = nextLandscape !== isMobileLandscape;
+
+			isMobile = nextMobile;
+			isMobileLandscape = nextLandscape;
+
 			if (isMobile) {
-				ensureMobileDayView();
+				ensureMobileCalendarView();
 				ensureMobileBackgroundDeselectListener();
-			} else {
+			} else if (mobileChanged) {
 				clearMobileEventSelection();
 				teardownMobileBackgroundListeners();
+				// Leaving mobile shell: restore desktop default week view if we were on a mobile-only view.
+				if (isMobileStyleViewType(currentView)) {
+					currentView = 'timeGridWeek';
+					if (dayApi && dayApi.view.type !== 'timeGridWeek') {
+						dayApi.changeView('timeGridWeek');
+						dayApi.refetchEvents();
+					}
+				}
+			} else if (landscapeChanged) {
+				// Desktop orientation change: still reflow height.
 			}
+
 			if (dayApi) {
 				// Mobile: long-press move stays on (Google-style). Resize stays custom edge-pills only.
+				// Landscape 3-day keeps the same touch model as portrait day.
 				dayApi.setOption('eventStartEditable', true);
 				dayApi.setOption('eventDurationEditable', !isMobile);
 				dayApi.setOption('eventResizableFromStart', false);
@@ -1507,11 +1562,18 @@
 					'longPressDelay',
 					isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280
 				);
+				requestAnimationFrame(() => dayApi?.updateSize());
 			}
 		};
-		mql.addEventListener('change', listener);
 
-		return () => mql.removeEventListener('change', listener);
+		applyViewportMode();
+		mqlMobile.addEventListener('change', applyViewportMode);
+		mqlLandscape.addEventListener('change', applyViewportMode);
+
+		return () => {
+			mqlMobile.removeEventListener('change', applyViewportMode);
+			mqlLandscape.removeEventListener('change', applyViewportMode);
+		};
 	});
 
 	// )=- Map of crew name to photo URL for rendering circular avatars on event cards.
@@ -1943,9 +2005,9 @@
 	}
 
 	function changeView(newView: string) {
-		// On mobile we only support Day view (time slots under anchored MonthPicker).
+		// On mobile we only support Day (portrait) / 3-day (landscape) under anchored MonthPicker.
 		// Week/Month are desktop only.
-		if (isMobile && newView !== 'timeGridDay') {
+		if (isMobile && !isMobileStyleViewType(newView)) {
 			return;
 		}
 		currentView = newView;
@@ -2054,7 +2116,9 @@
 
 			api = new Calendar(container, {
 				plugins: [timeGridPlugin, dayGridPlugin, interactionPlugin],
-				initialView: isMobile ? 'timeGridDay' : currentView,
+				initialView: isMobile
+					? getMobileCalendarView(isMobileLandscape)
+					: currentView,
 				initialDate: parseLocalDate(selectedDate),
 				headerToolbar: false,
 				height: isMobile ? '100%' : 'auto',
@@ -2064,6 +2128,20 @@
 				nowIndicator: true,
 				expandRows: false,
 				editable: true,
+				// Mobile portrait: 1 day. Mobile landscape: 3-day time grid (same touch DnD/resize model).
+				views: {
+					[MOBILE_VIEW_THREE_DAY]: {
+						type: 'timeGrid',
+						duration: { days: 3 },
+						buttonText: '3 day',
+						dayHeaderFormat: {
+							weekday: 'short',
+							month: 'numeric',
+							day: 'numeric',
+							omitCommas: true
+						}
+					}
+				},
 				// Mobile: long-press any movable card to drag (Google Calendar style).
 				// Duration resize uses custom edge pills only — FC duration edit stays off on touch.
 				eventStartEditable: true,
@@ -2104,11 +2182,11 @@
 
 					// Only create the drag handle once per event element (idempotent).
 					// Previously this + avatars were recreated on every refetch, contributing to "refreshing" feel and memory churn.
-					const isTimeGrid =
-						info.view.type === 'timeGridDay' || info.view.type === 'timeGridWeek';
+					const isTimeGrid = isTimeGridViewType(info.view.type);
 
 					clearMobileResizePreviewStyles(info.el);
 
+					// Mobile day + landscape 3-day: same select / long-press move / edge-resize chrome.
 					if (isMobile && isTimeGrid) {
 						setupMobileEventTouchZones(info);
 						if (selectedMobileEventId === info.event.id) {
@@ -2417,13 +2495,19 @@
 				events: (fetchInfo, successCallback) => {
 					let visibleJobs = filteredJobs;
 
-					// Mobile is always day view; keep currentView in sync so jump-to-job loads that day's events.
-					if (isMobile || currentView === 'timeGridDay') {
-						const selectedStr = selectedDate;
+					// Day / mobile 3-day: feed only jobs overlapping the visible FC range
+					// (portrait = 1 day, landscape = 3 days). Week/month desktop get full filtered set.
+					const activeView = dayApi?.view?.type ?? currentView;
+					if (isMobile || isMobileStyleViewType(activeView) || activeView === 'timeGridDay') {
+						const rangeStartMs = fetchInfo.start.getTime();
+						const rangeEndMs = fetchInfo.end.getTime();
 						visibleJobs = filteredJobs.filter((job: any) => {
-							const jobStartStr = toDateString(job.start);
-							const jobEndStr = job.end ? toDateString(job.end) : jobStartStr;
-							return selectedStr >= jobStartStr && selectedStr <= jobEndStr;
+							const jobStart = new Date(job.start).getTime();
+							if (Number.isNaN(jobStart)) return false;
+							const jobEndRaw = job.end ? new Date(job.end).getTime() : jobStart;
+							const jobEnd = Number.isNaN(jobEndRaw) ? jobStart : jobEndRaw;
+							// Interval overlap with FullCalendar's [start, end) visible range.
+							return jobStart < rangeEndMs && jobEnd >= rangeStartMs;
 						});
 					}
 
@@ -2443,14 +2527,14 @@
 
 			dayApi = api; // expose the local instance to other effects (refetch, etc.)
 			ensureMobileBackgroundDeselectListener();
-			ensureMobileDayView();
+			ensureMobileCalendarView();
 
 			api.render();
 
 			requestAnimationFrame(() => {
 				api?.updateSize();
 				api?.setOption('height', 'auto'); // only once, during initial creation. Repeated calls from observers were a major source of idle "refreshing" and layout churn.
-				ensureMobileDayView();
+				ensureMobileCalendarView();
 				api?.gotoDate(parseLocalDate(selectedDate));
 				if (highlightJobId) {
 					api?.refetchEvents();
@@ -2542,7 +2626,11 @@
 	}
 </script>
 
-<div class="split-calendar-container">
+<div
+	class="split-calendar-container"
+	class:split-calendar-container--mobile={isMobile}
+	class:split-calendar-container--three-day={isMobile && isMobileLandscape}
+>
 	<div class="split-calendar">
 		<!-- Sidebar -->
 		<div class="split-calendar__sidebar">
@@ -2700,7 +2788,13 @@
 		height: auto;
 	}
 
-	@media (max-width: 768px) {
+	/* Class-based mobile (includes phone landscape when width > 768). */
+	.split-calendar-container--mobile {
+		height: 100%;
+		min-height: 0;
+	}
+
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.split-calendar-container {
 			height: 100%;
 			min-height: 0;
@@ -2765,7 +2859,7 @@
 		}
 	}
 
-	/* Completely hide the (now mostly empty) view switcher on mobile since we force Day only */
+	/* Completely hide the (now mostly empty) view switcher on mobile — Day / 3-day is orientation-driven */
 	.split-calendar__view-switcher--mobile-hidden {
 		display: none;
 	}
@@ -2804,15 +2898,108 @@
 		margin-bottom: var(--space-4); /* extra gap below the calendar box itself so it doesn't hit page bottom */
 	}
 
-	/* === Mobile day-focused layout (anchored top MonthPicker + scrolling time slots) === */
-	/* The split-page and __content in the page get flex:1 from the main-content remaining space (after layout chrome/footer).
-	   Here, the sidebar (MonthPicker compact) is flex-shrink:0, the main and day-wrapper flex:1 to take the remaining height.
-	   The day-wrapper has overflow auto for the time grid slots (FC height 100% makes the calendar fill it, body scrolls if more slots than height).
-	   This gives the calendar the full available height on the page for many hours visible + scroll.
-	   The .month-picker is sticky (see below) to stay visible above the scrolling slots.
-	   Reclaims gutters; relies on the full stack flex chain (layout main-content, page, this component).
+	/* === Mobile day / landscape 3-day layout (anchored top MonthPicker + scrolling time slots) === */
+	/* Class-based so phone landscape (width often > 768) keeps the same mobile shell as portrait.
+	   Portrait: 1 day. Landscape: 3-day time grid. Touch DnD / edge resize / day swipe unchanged.
 	   BEM + tokens. */
-	@media (max-width: 768px) {
+	.split-calendar-container--mobile .split-calendar {
+		gap: var(--space-2);
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.split-calendar-container--mobile .split-calendar__sidebar {
+		/* Only the compact MonthPicker is shown at top; filters moved out of way */
+		margin-bottom: 0;
+		flex-shrink: 0;
+	}
+
+	/* Hide the big filters panel on mobile day view (user can still use on desktop) */
+	.split-calendar-container--mobile .split-calendar__filters {
+		display: none;
+	}
+
+	.split-calendar-container--mobile .split-calendar__main {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.split-calendar-container--mobile .split-calendar__day-wrapper {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto; /* internal scroll for the day's time slots */
+		-webkit-overflow-scrolling: touch;
+		/* Vertical scroll only — horizontal gestures stay available for day swipe nav. */
+		touch-action: pan-y;
+		overscroll-behavior-x: contain;
+		margin-bottom: 0;
+		border-radius: var(--radius-md);
+	}
+
+	/* Make the FC container inside fill remaining height (sibling gesture hint can sit above). */
+	.split-calendar-container--mobile .split-calendar__day {
+		flex: 1 1 auto;
+		min-height: 0;
+		height: auto;
+		touch-action: pan-y;
+	}
+
+	/* FullCalendar's internal scroller also claims touches by default; lock it to pan-y
+	   so left/right swipes are not cancelled mid-gesture by the browser scroll takeover. */
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-scroller),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-body),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-cols),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-col-frame),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-col-bg),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-col-events),
+	.split-calendar-container--mobile :global(.split-calendar__day .fc-timegrid-slot) {
+		touch-action: pan-y;
+	}
+
+	/* Landscape 3-day: denser columns so three days fit without crushing touch targets too hard. */
+	.split-calendar-container--three-day :global(.fc-col-header-cell-cushion) {
+		font-size: 0.68rem;
+		padding: 2px 1px;
+		white-space: nowrap;
+	}
+
+	.split-calendar-container--three-day :global(.fc-timegrid-axis-cushion),
+	.split-calendar-container--three-day :global(.fc-timegrid-slot-label-cushion) {
+		font-size: 0.65rem;
+		padding: 0 2px;
+	}
+
+	.split-calendar-container--three-day :global(.fc-timegrid-event) {
+		font-size: 0.65rem;
+	}
+
+	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event-title) {
+		padding-bottom: 16px;
+	}
+
+	.split-calendar-container--three-day :global(.fc-event__crew-avatar) {
+		width: 16px;
+		height: 16px;
+		font-size: 8px;
+	}
+
+	.split-calendar-container--three-day :global(.fc-event__crew-avatars) {
+		gap: 2px;
+		right: 2px;
+		bottom: 2px;
+	}
+
+	/* Extra vertical room for the time grid when the phone is sideways (short height). */
+	.split-calendar-container--three-day :global(.month-picker) {
+		--month-picker-grid-height: 96px;
+		--month-picker-nav-height: 40px;
+	}
+
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.split-calendar {
 			gap: var(--space-2);
 			flex: 1;
@@ -2822,12 +3009,10 @@
 		}
 
 		.split-calendar__sidebar {
-			/* Only the compact MonthPicker is shown at top; filters moved out of way */
 			margin-bottom: 0;
 			flex-shrink: 0;
 		}
 
-		/* Hide the big filters panel on mobile day view (user can still use on desktop) */
 		.split-calendar__filters {
 			display: none;
 		}
@@ -2842,16 +3027,14 @@
 		.split-calendar__day-wrapper {
 			flex: 1;
 			min-height: 0;
-			overflow-y: auto; /* internal scroll for the day's time slots */
+			overflow-y: auto;
 			-webkit-overflow-scrolling: touch;
-			/* Vertical scroll only — horizontal gestures stay available for day swipe nav. */
 			touch-action: pan-y;
 			overscroll-behavior-x: contain;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
 		}
 
-		/* Make the FC container inside fill remaining height (sibling gesture hint can sit above). */
 		.split-calendar__day {
 			flex: 1 1 auto;
 			min-height: 0;
@@ -2859,8 +3042,6 @@
 			touch-action: pan-y;
 		}
 
-		/* FullCalendar's internal scroller also claims touches by default; lock it to pan-y
-		   so left/right swipes are not cancelled mid-gesture by the browser scroll takeover. */
 		:global(.split-calendar__day .fc-scroller),
 		:global(.split-calendar__day .fc-timegrid-body),
 		:global(.split-calendar__day .fc-timegrid-cols),
@@ -3359,14 +3540,38 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 	}
 
-	/* Mobile / touch:
+	/* Mobile / touch (portrait day + landscape 3-day):
 	   - Tap = select (move grip + resize pills + coaching hint)
 	   - Long-press any movable card = drag (Google Calendar style)
 	   - Drag edge pills = resize with live HUD
 	   - Second clean tap = open
 	   - Swipe empty day grid left/right = next/prev day
+	   Class-based so phone landscape keeps gesture chrome when width > 768.
 	*/
-	@media (max-width: 768px) {
+	.split-calendar-container--mobile :global(.fc-event__drag-handle) {
+		display: none !important;
+	}
+
+	.split-calendar-container--mobile :global(.fc-event--draggable) {
+		/* Vertical scroll through cards; long-press claims the pointer for drag. */
+		touch-action: pan-y;
+	}
+
+	.split-calendar-container--mobile :global(.fc-event--mobile-selected) {
+		box-shadow:
+			0 0 0 2px var(--color-primary),
+			0 6px 16px rgb(0 0 0 / 0.2);
+		z-index: 12;
+		/* Selected: free pointer for hold-to-drag + edge resize. */
+		touch-action: none;
+		transform: scale(1.01);
+	}
+
+	.split-calendar-container--mobile :global(.fc-event--draggable:active:not(.fc-event-dragging)) {
+		transform: scale(0.99);
+	}
+
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		:global(.fc-event__drag-handle) {
 			display: none !important;
 		}
@@ -3673,8 +3878,32 @@
 	/* === Compact + anchored MonthPicker on mobile ===
 	   ~half the normal height. Sticky to top so it is "always visible" above the scrolling day calendar.
 	   Reclaims vertical space and supports the "monthly at top, day slots scroll below" mobile pattern.
+	   Class-based + media query so phone landscape (width often > 768) still anchors the picker.
 	   BEM rules + tokens. */
-	@media (max-width: 768px) {
+	.split-calendar-container--mobile :global(.month-picker) {
+		border-radius: var(--radius-sm);
+		position: sticky;
+		top: 0;
+		z-index: 20;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		background: var(--color-surface);
+		max-height: 58dvh;
+	}
+
+	.split-calendar-container--mobile :global(.month-picker__header) {
+		padding: 0 2px;
+	}
+
+	.split-calendar-container--mobile :global(.month-picker__title) {
+		font-size: var(--font-size-xs);
+	}
+
+	/* Landscape 3-day: keep month picker shorter so three day columns get more vertical room. */
+	.split-calendar-container--three-day :global(.month-picker) {
+		max-height: 42dvh;
+	}
+
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		:global(.month-picker) {
 			border-radius: var(--radius-sm);
 			/* Anchor to top of the mobile viewport / scroll container */

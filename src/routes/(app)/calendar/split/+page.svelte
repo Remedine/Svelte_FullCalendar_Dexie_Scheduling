@@ -30,7 +30,8 @@
 	   Looks at full stack: layout (main-content flex + in-flow footer + fixed tabs + 100dvh root),
 	   this page, SplitCalendar + MonthPicker components.
 	*/
-	@media (max-width: 768px) {
+	/* Include phone landscape (width often > 768) so rotate keeps mobile calendar layout. */
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.split-page {
 			flex: 1;
 			min-height: 0;
