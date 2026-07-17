@@ -370,6 +370,33 @@
 		mobileDragMeta = null;
 		mobileGestureHudEl?.classList.remove('split-calendar__gesture-hud--visible');
 		document.documentElement.classList.remove('calendar-appointment-dragging');
+		document.documentElement.style.removeProperty('--mobile-drag-mirror-height');
+	}
+
+	/**
+	 * FullCalendar sizes timegrid events with absolute harness top/bottom (duration height).
+	 * A floating ElementMirror clone uses the source rect height; if CSS overrides position
+	 * or the clone loses height, multi-hour cards look like ~1h until drop. Re-assert height.
+	 */
+	function preserveMobileDragMirrorHeight(heightPx: number) {
+		if (!heightPx || heightPx < 8) return;
+		const h = `${Math.round(heightPx)}px`;
+		document.querySelectorAll('.fc-event-mirror').forEach((node) => {
+			if (!(node instanceof HTMLElement)) return;
+			const pos = getComputedStyle(node).position;
+			// Floating clone from ElementMirror — force the pre-drag visual duration height.
+			if (pos === 'fixed') {
+				node.style.height = h;
+				node.style.minHeight = h;
+				node.style.boxSizing = 'border-box';
+			}
+			// In-grid harness mirrors must stay absolutely positioned (top/bottom encode duration).
+			if (node.classList.contains('fc-timegrid-event-harness')) {
+				if (node.style.position === 'relative') {
+					node.style.position = 'absolute';
+				}
+			}
+		});
 	}
 
 	/** Map a vertical screen position onto the day time-grid (snapped to slot). */
@@ -522,6 +549,12 @@
 			}
 			// Prefer mirror geometry; fall back to last meta.
 			updateMobileDragHudFromPointer();
+			// Keep multi-hour cards full height for the whole drag (floating mirror can lose it).
+			const hCss = getComputedStyle(document.documentElement)
+				.getPropertyValue('--mobile-drag-mirror-height')
+				.trim();
+			const hPx = hCss.endsWith('px') ? parseFloat(hCss) : originalEventRect?.height ?? 0;
+			if (hPx > 0) preserveMobileDragMirrorHeight(hPx);
 			mobileDragHudRaf = requestAnimationFrame(tick);
 		};
 		mobileDragHudRaf = requestAnimationFrame(tick);
@@ -2288,20 +2321,42 @@
 					suppressNextEventClick = true;
 					beginCalendarInteraction();
 					draggedJobId = info.event.id!;
-					originalEventRect = info.el.getBoundingClientRect();
 					// Must be true before HUD loop / pointer tracking so live updates run.
 					appointmentDragActive = true;
 					startAppointmentDragToMonthTracking();
+
+					// Capture pre-drag geometry for floating-mirror height (duration visual).
+					// Prefer duration × slot height over getBoundingClientRect when the card is
+					// partially clipped by the scroller — clipped rects look like ~1h.
+					originalEventRect = info.el.getBoundingClientRect();
+					const startForHeight = info.event.start ? new Date(info.event.start) : new Date();
+					const endForHeight = info.event.end
+						? new Date(info.event.end)
+						: new Date(startForHeight.getTime() + 60 * 60 * 1000);
+					const harnessForMetrics = info.el.closest(
+						'.fc-timegrid-event-harness'
+					) as HTMLElement | null;
+					const { slotHeight, slotMs } = getMobileSlotMetrics(harnessForMetrics);
+					const durationMs = Math.max(
+						endForHeight.getTime() - startForHeight.getTime(),
+						slotMs
+					);
+					const durationHeightPx = (durationMs / slotMs) * slotHeight;
+					const dragHeightPx = Math.max(
+						originalEventRect.height,
+						durationHeightPx,
+						24
+					);
+					document.documentElement.style.setProperty(
+						'--mobile-drag-mirror-height',
+						`${dragHeightPx}px`
+					);
 
 					// Mobile: long-press grab selects the card + live time HUD (range + duration).
 					if (isMobile && info.event.id) {
 						selectMobileEvent(info.event.id, info.el, { haptic: false });
 						mobileHaptic(16);
-						const start = info.event.start ? new Date(info.event.start) : new Date();
-						const end = info.event.end
-							? new Date(info.event.end)
-							: new Date(start.getTime() + 60 * 60 * 1000);
-						startMobileDragHudLoop(info.event.id, start, end);
+						startMobileDragHudLoop(info.event.id, startForHeight, endForHeight);
 						const { y } = getEventClientCoords(info.jsEvent);
 						if (y) {
 							ensureMobileEdgeAutoScrollRunning(y);
@@ -2309,8 +2364,9 @@
 						}
 						// Raise the dragged source + mirror above stacked neighbors.
 						info.el.style.zIndex = '1000';
-						const harness = info.el.closest('.fc-timegrid-event-harness') as HTMLElement | null;
-						if (harness) harness.style.zIndex = '1000';
+						if (harnessForMetrics) harnessForMetrics.style.zIndex = '1000';
+						// Keep duration height on any floating mirror clone FC may show.
+						requestAnimationFrame(() => preserveMobileDragMirrorHeight(dragHeightPx));
 					}
 				},
 
@@ -2512,15 +2568,27 @@
 					}
 
 					successCallback(
-						visibleJobs.map((job: any) => ({
-							id: job.id,
-							// )=- Title is now just the job title; crew members are shown as circular avatars on the right (see eventDidMount).
-							title: job.title,
-							start: job.start,
-							end: job.end,
-							backgroundColor: getJobColor(job),
-							extendedProps: job
-						}))
+						visibleJobs.map((job: any) => {
+							// Always supply an end so FC never falls back to defaultTimedEventDuration (1h)
+							// during drag mirror mutations for jobs that only have a start.
+							const start = job.start;
+							let end = job.end;
+							if (!end && start) {
+								const s = new Date(start);
+								if (!Number.isNaN(s.getTime())) {
+									end = new Date(s.getTime() + 60 * 60 * 1000).toISOString();
+								}
+							}
+							return {
+								id: job.id,
+								// )=- Title is now just the job title; crew members are shown as circular avatars on the right (see eventDidMount).
+								title: job.title,
+								start,
+								end,
+								backgroundColor: getJobColor(job),
+								extendedProps: job
+							};
+						})
 					);
 				}
 			});
@@ -3797,16 +3865,16 @@
 		}
 
 		/* Elevated “picked up” ghost while dragging (Material-style lift).
-		   Must beat neighboring event harness z-index or the mirror slides under them. */
+		   Must beat neighboring event harness z-index or the mirror slides under them.
+		   IMPORTANT: never set position:relative on timegrid harness mirrors — FC sizes
+		   duration via position:absolute + top/bottom; relative collapses them to ~1h content. */
 		:global(.fc-event.fc-event-dragging) {
 			opacity: 0.2 !important;
+			transform: none !important;
 		}
 
 		:global(.fc-event-mirror),
-		:global(.fc-timegrid-event.fc-event-mirror),
-		:global(.fc-timegrid-event-harness.fc-event-mirror),
-		:global(.fc-timegrid-event-harness:has(> .fc-event-mirror)),
-		:global(.fc-timegrid-event-harness:has(.fc-event-mirror)) {
+		:global(.fc-timegrid-event.fc-event-mirror) {
 			opacity: 0.96 !important;
 			z-index: 2000 !important;
 			box-shadow:
@@ -3816,12 +3884,23 @@
 			border-radius: 8px;
 		}
 
-		/* While any appointment is mid-drag, force mirror above the entire time-grid stack. */
-		:global(html.calendar-appointment-dragging .fc-event-mirror),
-		:global(html.calendar-appointment-dragging .fc-timegrid-event-harness.fc-event-mirror),
-		:global(html.calendar-appointment-dragging .fc-timegrid-event-harness:has(.fc-event-mirror)) {
+		/* In-grid harness mirror — keep absolute positioning so top/bottom duration height holds. */
+		:global(.fc-timegrid-event-harness.fc-event-mirror),
+		:global(html.calendar-appointment-dragging .fc-timegrid-event-harness.fc-event-mirror) {
+			opacity: 1 !important;
 			z-index: 5000 !important;
-			position: relative;
+			/* position must remain absolute (FC default); do not override */
+		}
+
+		:global(html.calendar-appointment-dragging .fc-event-mirror) {
+			z-index: 5000 !important;
+		}
+
+		/* Floating ElementMirror clone (position:fixed) — duration height is set inline from
+		   source rect; reinforce so CSS never shrinks a multi-hour card to one slot. */
+		:global(html.calendar-appointment-dragging .fc-event-mirror.fc-event-dragging) {
+			/* height is applied inline by FC from source getBoundingClientRect */
+			min-height: var(--mobile-drag-mirror-height, 0px);
 		}
 
 		:global(html.calendar-appointment-dragging .fc-timegrid-col-events) {
