@@ -19,6 +19,18 @@ export function formatMobileDuration(start: Date, end: Date): string {
 	return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** Live drag/resize chip: "2:30 PM – 3:30 PM · 1h" */
+export function formatMobileAppointmentHud(
+	start: Date,
+	end: Date,
+	opts?: { locale?: string; verb?: string }
+): string {
+	const range = formatMobileTimeRange(start, end, opts?.locale);
+	const duration = formatMobileDuration(start, end);
+	const verb = opts?.verb?.trim();
+	return verb ? `${verb} · ${range} · ${duration}` : `${range} · ${duration}`;
+}
+
 /** Thresholds used by SplitCalendar mobile gestures — documented for review vs prior values. */
 export const MOBILE_GESTURE_DEFAULTS = {
 	/** Prior: 450ms. Material / Google Calendar press-and-drag is typically ~300–400ms. */

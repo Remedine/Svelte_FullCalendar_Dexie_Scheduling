@@ -31,7 +31,7 @@
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
 	import {
-		formatMobileDuration,
+		formatMobileAppointmentHud,
 		formatMobileTimeRange,
 		MOBILE_GESTURE_DEFAULTS
 	} from '$lib/utils/mobileCalendarGestures';
@@ -168,14 +168,20 @@
 
 	function onAppointmentDragPointerMove(e: PointerEvent) {
 		handleAppointmentDragPointerMove(e.clientX, e.clientY);
-		if (isMobile) ensureMobileEdgeAutoScrollRunning(e.clientY);
+		if (isMobile) {
+			ensureMobileEdgeAutoScrollRunning(e.clientY);
+			updateMobileDragHudFromPointer(e.clientY);
+		}
 	}
 
 	function onAppointmentDragTouchMove(e: TouchEvent) {
 		const touch = e.touches[0];
 		if (!touch) return;
 		handleAppointmentDragPointerMove(touch.clientX, touch.clientY);
-		if (isMobile) ensureMobileEdgeAutoScrollRunning(touch.clientY);
+		if (isMobile) {
+			ensureMobileEdgeAutoScrollRunning(touch.clientY);
+			updateMobileDragHudFromPointer(touch.clientY);
+		}
 	}
 
 	function startAppointmentDragToMonthTracking() {
@@ -297,16 +303,23 @@
 	let mobileGestureHudEl: HTMLElement | null = null;
 	let mobileDragHudRaf: number | null = null;
 	let mobileResizeLastSnapKey = '';
+	/** Duration + last preview times while long-press moving (HUD independent of FC event mutation). */
+	let mobileDragMeta: {
+		eventId: string;
+		durationMs: number;
+		start: Date;
+		end: Date;
+	} | null = null;
 
 	function ensureMobileGestureHud(): HTMLElement | null {
 		if (mobileGestureHudEl?.isConnected) return mobileGestureHudEl;
-		const host = getDayWrapperEl();
-		if (!host) return null;
+		if (typeof document === 'undefined') return null;
+		// Mount on body with position:fixed so overflow/stacking inside the day grid cannot hide it.
 		const el = document.createElement('div');
 		el.className = 'split-calendar__gesture-hud';
 		el.setAttribute('role', 'status');
 		el.setAttribute('aria-live', 'polite');
-		host.appendChild(el);
+		document.body.appendChild(el);
 		mobileGestureHudEl = el;
 		return el;
 	}
@@ -324,7 +337,127 @@
 			cancelAnimationFrame(mobileDragHudRaf);
 			mobileDragHudRaf = null;
 		}
+		mobileDragMeta = null;
 		mobileGestureHudEl?.classList.remove('split-calendar__gesture-hud--visible');
+		document.documentElement.classList.remove('calendar-appointment-dragging');
+	}
+
+	/** Map a vertical screen position onto the day time-grid (snapped to slot). */
+	function estimateStartFromClientY(clientY: number): Date | null {
+		const slotTable =
+			(dayEl?.querySelector('.fc-timegrid-slots table') as HTMLElement | null) ||
+			(dayEl?.querySelector('.fc-timegrid-slots') as HTMLElement | null) ||
+			(dayEl?.querySelector('.fc-timegrid-body') as HTMLElement | null);
+		if (!slotTable) return null;
+
+		const rect = slotTable.getBoundingClientRect();
+		if (rect.height <= 0) return null;
+
+		const { slotMinMs, slotMaxMs } = getSlotRangeMs();
+		const rangeMs = Math.max(slotMaxMs - slotMinMs, 1);
+		const { slotMs } = getMobileSlotMetrics();
+		const fraction = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+		let msOfDay = slotMinMs + fraction * rangeMs;
+		msOfDay = Math.round(msOfDay / slotMs) * slotMs;
+		// Keep at least one slot of room for the event start within the grid.
+		const maxStart = Math.max(slotMinMs, slotMaxMs - slotMs);
+		msOfDay = Math.max(slotMinMs, Math.min(maxStart, msOfDay));
+
+		const day = parseLocalDate(selectedDate);
+		day.setHours(0, 0, 0, 0);
+		return new Date(day.getTime() + msOfDay);
+	}
+
+	function resolveMobileDragPreviewTimes(
+		fallbackStart: Date,
+		durationMs: number
+	): { start: Date; end: Date } {
+		const mirror =
+			document.querySelector('.fc-event-mirror') ||
+			document.querySelector('.fc-timegrid-event-harness.fc-event-mirror') ||
+			document.querySelector('.fc-event.fc-event-mirror');
+
+		if (mirror instanceof HTMLElement) {
+			const top = mirror.getBoundingClientRect().top;
+			const estimated = estimateStartFromClientY(top + 1);
+			if (estimated) {
+				return { start: estimated, end: new Date(estimated.getTime() + durationMs) };
+			}
+			// FC often paints the time range into the mirror; parse "1:30pm - 2:30pm" loosely.
+			const timeText = mirror.querySelector('.fc-event-time')?.textContent?.trim();
+			if (timeText) {
+				const parsed = parseMirrorTimeText(timeText, fallbackStart, durationMs);
+				if (parsed) return parsed;
+			}
+		}
+
+		const evId = mobileDragMeta?.eventId;
+		const ev = evId ? dayApi?.getEventById(evId) : null;
+		if (ev?.start) {
+			const start = new Date(ev.start);
+			const end = ev.end ? new Date(ev.end) : new Date(start.getTime() + durationMs);
+			return { start, end };
+		}
+
+		return {
+			start: fallbackStart,
+			end: new Date(fallbackStart.getTime() + durationMs)
+		};
+	}
+
+	/** Best-effort parse of FullCalendar mirror time label. */
+	function parseMirrorTimeText(
+		text: string,
+		fallbackStart: Date,
+		durationMs: number
+	): { start: Date; end: Date } | null {
+		// Examples: "1:30pm - 2:30pm", "13:30 - 14:30", "1:30 PM"
+		const parts = text.split(/\s*[-–—]\s*/);
+		const parseOne = (raw: string, base: Date): Date | null => {
+			const m = raw
+				.trim()
+				.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+			if (!m) return null;
+			let h = Number(m[1]);
+			const min = m[2] != null ? Number(m[2]) : 0;
+			const ap = m[3]?.toLowerCase();
+			if (ap === 'pm' && h < 12) h += 12;
+			if (ap === 'am' && h === 12) h = 0;
+			const d = new Date(base);
+			d.setHours(h, min, 0, 0);
+			return d;
+		};
+
+		const start = parseOne(parts[0] || '', fallbackStart);
+		if (!start) return null;
+		if (parts[1]) {
+			const end = parseOne(parts[1], fallbackStart);
+			if (end && end.getTime() > start.getTime()) {
+				return { start, end };
+			}
+		}
+		return { start, end: new Date(start.getTime() + durationMs) };
+	}
+
+	function updateMobileDragHudFromPointer(clientY?: number) {
+		if (!mobileDragMeta) return;
+		let start = mobileDragMeta.start;
+		let end = mobileDragMeta.end;
+
+		if (typeof clientY === 'number') {
+			const estimated = estimateStartFromClientY(clientY);
+			if (estimated) {
+				start = estimated;
+				end = new Date(estimated.getTime() + mobileDragMeta.durationMs);
+			} else {
+				({ start, end } = resolveMobileDragPreviewTimes(start, mobileDragMeta.durationMs));
+			}
+		} else {
+			({ start, end } = resolveMobileDragPreviewTimes(start, mobileDragMeta.durationMs));
+		}
+
+		mobileDragMeta = { ...mobileDragMeta, start, end };
+		showMobileGestureHud(formatMobileAppointmentHud(start, end, { verb: 'Moving' }), 'move');
 	}
 
 	function startMobileDragHudLoop(eventId: string, fallbackStart: Date, fallbackEnd: Date) {
@@ -332,31 +465,33 @@
 			cancelAnimationFrame(mobileDragHudRaf);
 			mobileDragHudRaf = null;
 		}
-		const durationMs = Math.max(fallbackEnd.getTime() - fallbackStart.getTime(), 30 * 60 * 1000);
+		const durationMs = Math.max(
+			fallbackEnd.getTime() - fallbackStart.getTime(),
+			30 * 60 * 1000
+		);
+		mobileDragMeta = {
+			eventId,
+			durationMs,
+			start: fallbackStart,
+			end: fallbackEnd
+		};
+		document.documentElement.classList.add('calendar-appointment-dragging');
+
+		// Show immediately — do not wait for rAF / appointmentDragActive.
+		showMobileGestureHud(
+			formatMobileAppointmentHud(fallbackStart, fallbackEnd, { verb: 'Moving' }),
+			'move'
+		);
+
 		const tick = () => {
-			if (!appointmentDragActive) {
+			if (!mobileDragMeta) {
 				mobileDragHudRaf = null;
 				return;
 			}
-			const mirror = document.querySelector('.fc-event-mirror');
-			const mirrorTime = mirror?.querySelector('.fc-event-time')?.textContent?.trim();
-			if (mirrorTime) {
-				showMobileGestureHud(`Moving · ${mirrorTime}`, 'move');
-			} else {
-				const ev = dayApi?.getEventById(eventId);
-				if (ev?.start) {
-					const end = ev.end ?? new Date(ev.start.getTime() + durationMs);
-					showMobileGestureHud(`Moving · ${formatMobileTimeRange(ev.start, end)}`, 'move');
-				} else {
-					showMobileGestureHud(
-						`Moving · ${formatMobileTimeRange(fallbackStart, fallbackEnd)}`,
-						'move'
-					);
-				}
-			}
+			// Prefer mirror geometry; fall back to last meta.
+			updateMobileDragHudFromPointer();
 			mobileDragHudRaf = requestAnimationFrame(tick);
 		};
-		showMobileGestureHud(`Moving · ${formatMobileTimeRange(fallbackStart, fallbackEnd)}`, 'move');
 		mobileDragHudRaf = requestAnimationFrame(tick);
 	}
 
@@ -720,7 +855,7 @@
 		activeMobileResize.previewEnd = snapped.end;
 		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end);
 		showMobileGestureHud(
-			`Resize · ${formatMobileTimeRange(snapped.start, snapped.end)} · ${formatMobileDuration(snapped.start, snapped.end)}`,
+			formatMobileAppointmentHud(snapped.start, snapped.end, { verb: 'Resize' }),
 			'resize'
 		);
 	}
@@ -1967,7 +2102,15 @@
 						return;
 					}
 
-					// Mobile: long-press grab selects the card (shows resize chrome after drop).
+					suppressNextEventClick = true;
+					beginCalendarInteraction();
+					draggedJobId = info.event.id!;
+					originalEventRect = info.el.getBoundingClientRect();
+					// Must be true before HUD loop / pointer tracking so live updates run.
+					appointmentDragActive = true;
+					startAppointmentDragToMonthTracking();
+
+					// Mobile: long-press grab selects the card + live time HUD (range + duration).
 					if (isMobile && info.event.id) {
 						selectMobileEvent(info.event.id, info.el, { haptic: false });
 						mobileHaptic(16);
@@ -1977,21 +2120,24 @@
 							: new Date(start.getTime() + 60 * 60 * 1000);
 						startMobileDragHudLoop(info.event.id, start, end);
 						const { y } = getEventClientCoords(info.jsEvent);
-						if (y) ensureMobileEdgeAutoScrollRunning(y);
+						if (y) {
+							ensureMobileEdgeAutoScrollRunning(y);
+							updateMobileDragHudFromPointer(y);
+						}
+						// Raise the dragged source + mirror above stacked neighbors.
+						info.el.style.zIndex = '1000';
+						const harness = info.el.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+						if (harness) harness.style.zIndex = '1000';
 					}
-
-					suppressNextEventClick = true;
-					beginCalendarInteraction();
-					draggedJobId = info.event.id!;
-					originalEventRect = info.el.getBoundingClientRect();
-					appointmentDragActive = true;
-					startAppointmentDragToMonthTracking();
 				},
 
 				eventDragStop: (info) => {
 					stopAppointmentDragToMonthTracking();
 					appointmentDragActive = false;
 					hideMobileGestureHud();
+					info.el.style.removeProperty('z-index');
+					const harness = info.el.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+					harness?.style.removeProperty('z-index');
 					endCalendarInteraction();
 					originalEventRect = null;
 					// Avoid opening the job modal from the pointerup that ends a drag.
@@ -3133,27 +3279,27 @@
 			z-index: 5;
 		}
 
-		/* Live time chip while moving / resizing (imperatively mounted). */
+		/* Live time chip — mounted on document.body (fixed) so grid stacking never hides it. */
 		:global(.split-calendar__gesture-hud) {
-			position: absolute;
+			position: fixed;
 			left: 50%;
-			top: 10px;
-			transform: translateX(-50%) translateY(-8px);
-			z-index: 40;
+			top: max(10px, env(safe-area-inset-top, 0px));
+			transform: translateX(-50%) translateY(-6px);
+			z-index: 10050;
 			pointer-events: none;
 			opacity: 0;
-			padding: 8px 14px;
+			padding: 10px 16px;
 			border-radius: 999px;
-			font-size: 0.8rem;
+			font-size: 0.8125rem;
 			font-weight: 700;
 			letter-spacing: 0.01em;
 			white-space: nowrap;
-			max-width: calc(100% - 24px);
+			max-width: min(420px, 94vw);
 			overflow: hidden;
 			text-overflow: ellipsis;
 			color: #fff;
-			background: rgba(20, 24, 32, 0.92);
-			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+			background: rgba(20, 24, 32, 0.94);
+			box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
 			transition:
 				opacity 0.12s ease,
 				transform 0.12s ease;
@@ -3166,6 +3312,10 @@
 
 		:global(.split-calendar__gesture-hud[data-mode='resize']) {
 			background: color-mix(in srgb, var(--color-primary) 88%, #111);
+		}
+
+		:global(.split-calendar__gesture-hud[data-mode='move']) {
+			background: rgba(15, 18, 28, 0.95);
 		}
 
 		/* Move grip + resize handles only after selection (large fat-finger targets). */
@@ -3315,18 +3465,37 @@
 			overflow: visible !important;
 		}
 
-		/* Elevated “picked up” ghost while dragging (Material-style lift). */
+		/* Elevated “picked up” ghost while dragging (Material-style lift).
+		   Must beat neighboring event harness z-index or the mirror slides under them. */
 		:global(.fc-event.fc-event-dragging) {
-			opacity: 0.22 !important;
+			opacity: 0.2 !important;
 		}
 
-		:global(.fc-event-mirror) {
-			opacity: 0.92 !important;
+		:global(.fc-event-mirror),
+		:global(.fc-timegrid-event.fc-event-mirror),
+		:global(.fc-timegrid-event-harness.fc-event-mirror),
+		:global(.fc-timegrid-event-harness:has(> .fc-event-mirror)),
+		:global(.fc-timegrid-event-harness:has(.fc-event-mirror)) {
+			opacity: 0.96 !important;
+			z-index: 2000 !important;
 			box-shadow:
-				0 12px 28px rgba(0, 0, 0, 0.28),
-				0 0 0 2px color-mix(in srgb, var(--color-primary) 70%, #fff) !important;
+				0 14px 32px rgba(0, 0, 0, 0.32),
+				0 0 0 2px color-mix(in srgb, var(--color-primary) 75%, #fff) !important;
 			outline: none !important;
 			border-radius: 8px;
+		}
+
+		/* While any appointment is mid-drag, force mirror above the entire time-grid stack. */
+		:global(html.calendar-appointment-dragging .fc-event-mirror),
+		:global(html.calendar-appointment-dragging .fc-timegrid-event-harness.fc-event-mirror),
+		:global(html.calendar-appointment-dragging .fc-timegrid-event-harness:has(.fc-event-mirror)) {
+			z-index: 5000 !important;
+			position: relative;
+		}
+
+		:global(html.calendar-appointment-dragging .fc-timegrid-col-events) {
+			/* Keep event layer from trapping the mirror under later siblings. */
+			z-index: 5;
 		}
 
 		:global(.fc-event-resizing) {
