@@ -75,6 +75,15 @@ export type BulkDryRunResult = {
 	};
 	rows: BulkRowResult[];
 	payloadErrors: string[];
+	/** Present on commit responses when the invoice counter was evaluated */
+	invoiceCounter?: {
+		nextInvoiceNumber: number;
+		invoiceNumberYear: number;
+		bumped: boolean;
+		maxSeqSeen: number;
+		applied: boolean;
+		error?: string;
+	};
 };
 
 export type BulkDryRunOptions = {

@@ -7,10 +7,14 @@
 		csvToBulkPayload,
 		parseJsonToBulkPayload,
 		runBulkDryRun,
+		type BulkCommitResult,
 		type BulkDryRunResult,
 		type BulkEntity,
 		type BulkTemplateId
 	} from '$lib/bulk';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { scheduleAppDataSync } from '$lib/db/pb';
+	import { optionsStore } from '$lib/stores/options.svelte';
 
 	type InputMode = 'paste' | 'file';
 	type PackageMode = 'full' | BulkEntity;
@@ -231,13 +235,25 @@
 			}
 
 			result = data as BulkDryRunResult;
+			const commit = data as BulkCommitResult;
 			const { clients: c, jobs: j, invoices: inv } = result.summary;
 			const errTotal = c.error + j.error + inv.error;
-			const msg =
+			let msg =
 				`Committed — clients ${c.created}/${c.updated}, ` +
 				`jobs ${j.created}/${j.updated}, invoices ${inv.created}/${inv.updated} (created/updated)`;
+			if (commit.invoiceCounter?.applied) {
+				msg += ` · next invoice # set to ${commit.invoiceCounter.nextInvoiceNumber}`;
+			}
 			if (errTotal > 0) toast.error(`${msg}; ${errTotal} error(s)`);
 			else toast.success(msg);
+
+			// Refresh local Dexie + options so imported rows appear without a full reload
+			try {
+				scheduleAppDataSync(auth.currentUser, 'bulk-import', true);
+				void optionsStore.pullFromPB();
+			} catch {
+				/* non-fatal */
+			}
 		} catch (err) {
 			apiError = err instanceof Error ? err.message : 'Commit failed';
 			toast.error(apiError);
@@ -441,11 +457,17 @@
 
 				<p class="bulk-import__commit-note">
 					{#if result.dryRun === false}
-						Commit finished. Refresh or wait for sync to see new data on other devices.
+						Commit finished. This device is refreshing data from the server; other devices will
+						pick up changes on their next sync.
+						{#if 'invoiceCounter' in result && result.invoiceCounter?.applied}
+							Invoice counter advanced to
+							<strong>{result.invoiceCounter.nextInvoiceNumber}</strong>
+							for {result.invoiceCounter.invoiceNumberYear}.
+						{/if}
 					{:else}
 						Use <strong>Commit</strong> after a clean API preview. Writes clients, then jobs, then
 						invoices. Matching <code>externalId</code>, email, or invoice number updates existing
-						records.
+						records. Imported <code>PREFIX-YEAR-####</code> numbers bump the next-invoice counter.
 					{/if}
 				</p>
 

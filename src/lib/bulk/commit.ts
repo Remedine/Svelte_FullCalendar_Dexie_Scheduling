@@ -29,9 +29,12 @@ import {
 	updatePbInvoice,
 	type InvoiceLookupIndex
 } from './pbInvoices';
+import { bumpNextInvoiceNumberAfterImport, type OptionsBumpResult } from './optionsBump';
 
 export type BulkCommitResult = Omit<BulkDryRunResult, 'dryRun'> & {
 	dryRun: false;
+	/** Invoice number counter adjustment after import (if any) */
+	invoiceCounter?: OptionsBumpResult;
 };
 
 function registerClient(index: ClientLookupIndex, id: string, client: BulkClient) {
@@ -324,9 +327,23 @@ export async function commitBulk(
 	const totalValid = cStats.valid + jStats.valid + iStats.valid;
 	const totalError = cStats.error + jStats.error + iStats.error;
 
+	// Keep nextInvoiceNumber past any PREFIX-YEAR-SEQ numbers now in the system
+	const allInvoiceNumbers = [
+		...liveInvoices.byInvoiceNumber.keys(),
+		...rows
+			.filter((r) => r.entity === 'invoices' && r.data && 'invoiceNumber' in r.data)
+			.map((r) => String((r.data as BulkInvoice).invoiceNumber || ''))
+			.filter(Boolean)
+	];
+	let invoiceCounter: OptionsBumpResult | undefined;
+	if (allInvoiceNumbers.length > 0 || iStats.created + iStats.updated > 0) {
+		invoiceCounter = await bumpNextInvoiceNumberAfterImport(authHeader, allInvoiceNumbers);
+	}
+
 	return {
 		dryRun: false,
 		commitSupported: { clients: true, jobs: true, invoices: true },
+		invoiceCounter,
 		summary: {
 			clients: {
 				total: preview.summary.clients.total,

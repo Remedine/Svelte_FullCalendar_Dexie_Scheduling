@@ -59,3 +59,9 @@ export {
 	type InvoiceMatch
 } from './pbInvoices';
 export { commitBulk, commitBulkClients, type BulkCommitResult } from './commit';
+export {
+	computeInvoiceCounterBump,
+	extractSeqFromInvoiceNumber,
+	type InvoiceCounterBump
+} from './invoiceCounter';
+export { bumpNextInvoiceNumberAfterImport, type OptionsBumpResult } from './optionsBump';
