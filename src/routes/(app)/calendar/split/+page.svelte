@@ -23,30 +23,28 @@
 		padding: var(--space-4);
 	}
 
-	/* Mobile: normal flow + padding. The calendar component now uses auto heights so the
-	   full day timegrid (all slots) is rendered in the DOM. Scrolling happens at page level
-	   (main-content / viewport) to see later hours. The sticky MonthPicker (via global styles)
-	   stays visible while scrolling the tall day content. No more 100% clipping the calendar short.
-	   Looks at full stack: layout (main-content flex + in-flow footer + fixed tabs + 100dvh root),
-	   this page, SplitCalendar + MonthPicker components.
-	*/
-	/* Include phone landscape (width often > 768) so rotate keeps mobile calendar layout. */
+	/* Mobile: lock to viewport above bottom nav so FC height:100% pins the day/date header
+	   while only the time-grid body scrolls. */
 	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.split-page {
 			flex: 1;
 			min-height: 0;
+			height: calc(100dvh - 62px);
+			max-height: calc(100dvh - 62px);
 			display: flex;
 			flex-direction: column;
 			padding: var(--space-2);
+			overflow: hidden;
 		}
 
 		.split-page__content {
-			flex: 1;
+			flex: 1 1 0;
 			min-height: 0;
+			height: 100%;
 			display: flex;
 			flex-direction: column;
 			padding: var(--space-2);
-			/* background/rounded frame the calendar area; the flex gives the calendar the remaining space after layout chrome */
+			overflow: hidden;
 		}
 	}
 </style>
