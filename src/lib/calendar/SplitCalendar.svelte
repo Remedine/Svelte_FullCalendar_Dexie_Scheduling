@@ -242,8 +242,11 @@
 	// 5) Horizontal swipe on empty day grid → previous / next day
 	// 6) Live time HUD + light haptics on select / grab / snap / drop
 	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
-	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 72;
-	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 390;
+	// Edge auto-scroll while dragging/resizing near top/bottom of the day grid.
+	// Larger zone + higher velocity so late/early slots are reachable without overshooting into the bottom nav.
+	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 120;
+	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 1600;
+	const MOBILE_EDGE_SCROLL_MIN_VELOCITY = 320;
 	// Fat-finger horizontal day change: modest distance, allow some vertical drift.
 	const MOBILE_SWIPE_MIN_DX_PX = 48;
 	const MOBILE_SWIPE_MAX_SLOPE = 0.9;
@@ -309,6 +312,8 @@
 		durationMs: number;
 		start: Date;
 		end: Date;
+		originalStart: Date;
+		originalEnd: Date;
 	} | null = null;
 
 	function ensureMobileGestureHud(): HTMLElement | null {
@@ -473,7 +478,9 @@
 			eventId,
 			durationMs,
 			start: fallbackStart,
-			end: fallbackEnd
+			end: fallbackEnd,
+			originalStart: new Date(fallbackStart),
+			originalEnd: new Date(fallbackEnd)
 		};
 		document.documentElement.classList.add('calendar-appointment-dragging');
 
@@ -869,6 +876,17 @@
 		mobileEdgeScrollLastTs = null;
 	}
 
+	/** Ease edge proximity (0–1) into a snappy scroll velocity (px/sec). */
+	function edgeScrollVelocityFromProximity(proximity01: number, direction: 1 | -1): number {
+		const t = Math.max(0, Math.min(1, proximity01));
+		// Quadratic ease-in: gentle near center of zone, aggressive at the rim / past the rim.
+		const eased = t * t;
+		const speed =
+			MOBILE_EDGE_SCROLL_MIN_VELOCITY +
+			eased * (MOBILE_EDGE_SCROLL_MAX_VELOCITY - MOBILE_EDGE_SCROLL_MIN_VELOCITY);
+		return direction * speed;
+	}
+
 	function runMobileEdgeAutoScrollFrame(ts: number) {
 		if (!activeMobileResize && !appointmentDragActive) {
 			stopMobileEdgeAutoScroll();
@@ -884,18 +902,26 @@
 			const fromTop = pointerY - rect.top;
 			const fromBottom = rect.bottom - pointerY;
 
-			if (fromTop >= 0 && fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+			if (fromTop < 0) {
+				// Finger above the scroller (status bar / month picker gap) — full-speed scroll up.
+				velocity = -MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			} else if (fromBottom < 0) {
+				// Finger below the scroller (bottom tab bar) — full-speed scroll down so late
+				// slots stay reachable without needing a precise drop on the grid edge.
+				velocity = MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+			} else if (fromTop < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
 				const proximity =
 					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromTop) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = -proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
-			} else if (fromBottom >= 0 && fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
+				velocity = edgeScrollVelocityFromProximity(proximity, -1);
+			} else if (fromBottom < MOBILE_EDGE_SCROLL_THRESHOLD_PX) {
 				const proximity =
 					(MOBILE_EDGE_SCROLL_THRESHOLD_PX - fromBottom) / MOBILE_EDGE_SCROLL_THRESHOLD_PX;
-				velocity = proximity * MOBILE_EDGE_SCROLL_MAX_VELOCITY;
+				velocity = edgeScrollVelocityFromProximity(proximity, 1);
 			}
 
 			if (velocity !== 0 && mobileEdgeScrollLastTs != null) {
-				const dt = Math.min(0.05, (ts - mobileEdgeScrollLastTs) / 1000);
+				// Allow larger frame steps on janky mobile browsers so scroll doesn't feel capped.
+				const dt = Math.min(0.064, (ts - mobileEdgeScrollLastTs) / 1000);
 				const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
 				scrollEl.scrollTop = Math.min(
 					maxScroll,
@@ -904,12 +930,91 @@
 			}
 
 			if (activeMobileResize) {
-				updateMobileResizeFromClientY(pointerY);
+				// Use clamped Y so resize preview stays mapped to the grid when over the nav.
+				const clampedY = Math.max(rect.top + 1, Math.min(rect.bottom - 1, pointerY));
+				updateMobileResizeFromClientY(clampedY);
+			} else if (appointmentDragActive && mobileDragMeta) {
+				const clampedY = Math.max(rect.top + 1, Math.min(rect.bottom - 1, pointerY));
+				updateMobileDragHudFromPointer(clampedY);
 			}
 		}
 
 		mobileEdgeScrollLastTs = ts;
 		mobileEdgeScrollRaf = requestAnimationFrame(runMobileEdgeAutoScrollFrame);
+	}
+
+	function isPointOverBottomNav(clientX: number, clientY: number): boolean {
+		const nav = document.querySelector('.bottom-nav');
+		if (!(nav instanceof HTMLElement)) return false;
+		const r = nav.getBoundingClientRect();
+		// display:none / not painted → zero box
+		if (r.height <= 0 || r.width <= 0) return false;
+		return (
+			clientX >= r.left &&
+			clientX <= r.right &&
+			clientY >= r.top &&
+			clientY <= r.bottom
+		);
+	}
+
+	function isPointOutsideCalendarTimeGrid(clientX: number, clientY: number): boolean {
+		if (isPointOverBottomNav(clientX, clientY)) return true;
+
+		const grid =
+			(dayEl?.querySelector('.fc-timegrid-body') as HTMLElement | null) ||
+			dayEl ||
+			getDayWrapperEl();
+		if (!grid) return true;
+		const r = grid.getBoundingClientRect();
+		const overGrid =
+			clientX >= r.left &&
+			clientX <= r.right &&
+			clientY >= r.top &&
+			clientY <= r.bottom;
+		return !overGrid;
+	}
+
+	/**
+	 * When the user drops on the bottom nav (or elsewhere outside the time grid),
+	 * FullCalendar reverts. Re-apply the last HUD preview times so the move still sticks.
+	 */
+	async function commitMobileDragPreview(
+		meta: {
+			eventId: string;
+			start: Date;
+			end: Date;
+			originalStart: Date;
+			originalEnd: Date;
+		},
+		eventApi: { setDates: (start: Date, end: Date) => void }
+	) {
+		const changed =
+			meta.start.getTime() !== meta.originalStart.getTime() ||
+			meta.end.getTime() !== meta.originalEnd.getTime();
+		if (!changed) return;
+
+		try {
+			// Apply after FC's invalid-drop revert paints, then persist.
+			await new Promise<void>((resolve) => {
+				requestAnimationFrame(() => {
+					try {
+						eventApi.setDates(meta.start, meta.end);
+					} catch {
+						// ignore setDates failures; still try to persist + refetch
+					}
+					resolve();
+				});
+			});
+			await updateJobDates(meta.eventId, meta.start, meta.end);
+			applyOptimisticDatePatch(meta.eventId, meta.start, meta.end);
+			mobileHaptic([10, 40, 14]);
+			toast.success(`Moved · ${formatMobileTimeRange(meta.start, meta.end)}`);
+			// Ensure harness positions match after a possible FC revert animation.
+			dayApi?.refetchEvents();
+		} catch {
+			toast.error('Could not move appointment');
+			dayApi?.refetchEvents();
+		}
 	}
 
 	function ensureMobileEdgeAutoScrollRunning(clientY: number) {
@@ -2132,6 +2237,17 @@
 				},
 
 				eventDragStop: (info) => {
+					// Snapshot before hideMobileGestureHud() clears live preview meta.
+					const pendingDrag = mobileDragMeta
+						? {
+								eventId: mobileDragMeta.eventId,
+								start: new Date(mobileDragMeta.start),
+								end: new Date(mobileDragMeta.end),
+								originalStart: new Date(mobileDragMeta.originalStart),
+								originalEnd: new Date(mobileDragMeta.originalEnd)
+							}
+						: null;
+
 					stopAppointmentDragToMonthTracking();
 					appointmentDragActive = false;
 					hideMobileGestureHud();
@@ -2148,36 +2264,38 @@
 
 					if (!draggedJobId) return;
 
-					const monthPickerEl = document.querySelector('.month-picker');
-					if (!monthPickerEl) {
-						// Keep selection after an internal time-slot drag so resize handles remain available.
-						if (isMobile && info.event.id) {
-							selectMobileEvent(info.event.id, info.el, { haptic: false });
-						}
-						draggedJobId = null;
-						return;
-					}
-
 					// Use robust extractor so external drop (to MonthPicker) and cross-view move works on touch devices.
 					// Without this, mobile hold-to-drag to the monthly picker always "snaps back" because hit-test fails.
 					const { x: clientX, y: clientY } = getEventClientCoords(info.jsEvent);
 
-					let dropTarget = document.elementFromPoint(clientX, clientY);
-					let monthPickerDay = dropTarget?.closest('.month-picker__day');
+					const monthPickerEl = document.querySelector('.month-picker');
+					let monthPickerDay: Element | null | undefined = null;
 
-					if (!monthPickerDay) {
-						const rect = monthPickerEl.getBoundingClientRect();
-						const isOverContainer =
-							clientX >= rect.left && clientX <= rect.right &&
-							clientY >= rect.top && clientY <= rect.bottom;
+					if (monthPickerEl) {
+						let dropTarget = document.elementFromPoint(clientX, clientY);
+						monthPickerDay = dropTarget?.closest('.month-picker__day');
 
-						if (isOverContainer) {
-							const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
-							for (const el of dayElements) {
-								const r = el.getBoundingClientRect();
-								if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
-									monthPickerDay = el;
-									break;
+						if (!monthPickerDay) {
+							const rect = monthPickerEl.getBoundingClientRect();
+							const isOverContainer =
+								clientX >= rect.left &&
+								clientX <= rect.right &&
+								clientY >= rect.top &&
+								clientY <= rect.bottom;
+
+							if (isOverContainer) {
+								const dayElements = monthPickerEl.querySelectorAll('.month-picker__day');
+								for (const el of dayElements) {
+									const r = el.getBoundingClientRect();
+									if (
+										clientX >= r.left &&
+										clientX <= r.right &&
+										clientY >= r.top &&
+										clientY <= r.bottom
+									) {
+										monthPickerDay = el;
+										break;
+									}
 								}
 							}
 						}
@@ -2186,8 +2304,16 @@
 					if (monthPickerDay) {
 						isExternalDrop = true;
 						handleExternalDrop(draggedJobId, clientX, clientY);
+					} else if (isMobile && pendingDrag && info.event) {
+						// Drop on bottom nav / outside the time grid: FC reverts — commit HUD times instead.
+						if (isPointOutsideCalendarTimeGrid(clientX, clientY)) {
+							void commitMobileDragPreview(pendingDrag, info.event);
+						}
+						// Stay selected so resize handles remain available.
+						if (info.event.id) {
+							selectMobileEvent(info.event.id, info.el, { haptic: false });
+						}
 					} else if (isMobile && info.event.id) {
-						// Stay selected after internal move so user can adjust edges without re-tapping.
 						selectMobileEvent(info.event.id, info.el, { haptic: false });
 					}
 
