@@ -30,6 +30,11 @@
 	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
+	import {
+		formatMobileDuration,
+		formatMobileTimeRange,
+		MOBILE_GESTURE_DEFAULTS
+	} from '$lib/utils/mobileCalendarGestures';
 
 	// )=- Drag state kept as plain `let` (not $state) to avoid triggering reactivity, deriveds,
 	// and $effects (which do refetch/update) on every pointer event during drag.
@@ -163,11 +168,14 @@
 
 	function onAppointmentDragPointerMove(e: PointerEvent) {
 		handleAppointmentDragPointerMove(e.clientX, e.clientY);
+		if (isMobile) ensureMobileEdgeAutoScrollRunning(e.clientY);
 	}
 
 	function onAppointmentDragTouchMove(e: TouchEvent) {
 		const touch = e.touches[0];
-		if (touch) handleAppointmentDragPointerMove(touch.clientX, touch.clientY);
+		if (!touch) return;
+		handleAppointmentDragPointerMove(touch.clientX, touch.clientY);
+		if (isMobile) ensureMobileEdgeAutoScrollRunning(touch.clientY);
 	}
 
 	function startAppointmentDragToMonthTracking() {
@@ -220,12 +228,13 @@
 		return { x: 0, y: 0 };
 	}
 
-	// Mobile touch model (select-first, fat-finger safe):
-	// 1) Tap appointment → select (shows move grip + resize pills)
-	// 2) Hold/drag selected card → move time or drop on month picker
-	// 3) Drag top/bottom pills → resize duration only
-	// 4) Second tap on selected body → open job
+	// Mobile touch model (Google Calendar–style + select for edit chrome):
+	// 1) Tap appointment → select (shows move grip + resize pills + coaching hint)
+	// 2) Long-press any movable card → drag to new time (no pre-select required)
+	// 3) Drag top/bottom pills on selected card → resize duration
+	// 4) Second clean tap on selected body → open job
 	// 5) Horizontal swipe on empty day grid → previous / next day
+	// 6) Live time HUD + light haptics on select / grab / snap / drop
 	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
 	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 72;
 	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 390;
@@ -234,6 +243,9 @@
 	const MOBILE_SWIPE_MAX_SLOPE = 0.9;
 	const MOBILE_SWIPE_CLAIM_DX_PX = 18;
 	const MOBILE_TAP_MOVE_SLOP_PX = 14;
+	// Long-press in the 300–400ms band matches Google Calendar / Material “press and drag”.
+	const MOBILE_EVENT_LONG_PRESS_MS = MOBILE_GESTURE_DEFAULTS.longPressMs;
+	const MOBILE_EVENT_DRAG_MIN_DISTANCE_PX = MOBILE_GESTURE_DEFAULTS.dragMinDistancePx;
 
 	let mobileEdgeScrollPointerY: number | null = null;
 	let mobileEdgeScrollRaf: number | null = null;
@@ -263,6 +275,87 @@
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
 		if (!(target instanceof Element)) return false;
 		return !!target.closest('.fc-event-resizer, .fc-event__move-handle');
+	}
+
+	function isMobileEventMovable(status?: string | null): boolean {
+		return status !== 'completed' && status !== 'cancelled';
+	}
+
+	/** Light tactile feedback; no-ops when the platform blocks vibration. */
+	function mobileHaptic(pattern: number | number[] = 10) {
+		try {
+			if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+				navigator.vibrate(pattern);
+			}
+		} catch {
+			// Ignore — haptics are progressive enhancement only.
+		}
+	}
+
+	let mobileGestureHudEl: HTMLElement | null = null;
+	let mobileDragHudRaf: number | null = null;
+	let mobileResizeLastSnapKey = '';
+
+	function ensureMobileGestureHud(): HTMLElement | null {
+		if (mobileGestureHudEl?.isConnected) return mobileGestureHudEl;
+		const host = getDayWrapperEl();
+		if (!host) return null;
+		const el = document.createElement('div');
+		el.className = 'split-calendar__gesture-hud';
+		el.setAttribute('role', 'status');
+		el.setAttribute('aria-live', 'polite');
+		host.appendChild(el);
+		mobileGestureHudEl = el;
+		return el;
+	}
+
+	function showMobileGestureHud(text: string, mode: 'move' | 'resize' | 'info' = 'move') {
+		const el = ensureMobileGestureHud();
+		if (!el) return;
+		el.dataset.mode = mode;
+		el.textContent = text;
+		el.classList.add('split-calendar__gesture-hud--visible');
+	}
+
+	function hideMobileGestureHud() {
+		if (mobileDragHudRaf != null) {
+			cancelAnimationFrame(mobileDragHudRaf);
+			mobileDragHudRaf = null;
+		}
+		mobileGestureHudEl?.classList.remove('split-calendar__gesture-hud--visible');
+	}
+
+	function startMobileDragHudLoop(eventId: string, fallbackStart: Date, fallbackEnd: Date) {
+		if (mobileDragHudRaf != null) {
+			cancelAnimationFrame(mobileDragHudRaf);
+			mobileDragHudRaf = null;
+		}
+		const durationMs = Math.max(fallbackEnd.getTime() - fallbackStart.getTime(), 30 * 60 * 1000);
+		const tick = () => {
+			if (!appointmentDragActive) {
+				mobileDragHudRaf = null;
+				return;
+			}
+			const mirror = document.querySelector('.fc-event-mirror');
+			const mirrorTime = mirror?.querySelector('.fc-event-time')?.textContent?.trim();
+			if (mirrorTime) {
+				showMobileGestureHud(`Moving · ${mirrorTime}`, 'move');
+			} else {
+				const ev = dayApi?.getEventById(eventId);
+				if (ev?.start) {
+					const end = ev.end ?? new Date(ev.start.getTime() + durationMs);
+					showMobileGestureHud(`Moving · ${formatMobileTimeRange(ev.start, end)}`, 'move');
+				} else {
+					showMobileGestureHud(
+						`Moving · ${formatMobileTimeRange(fallbackStart, fallbackEnd)}`,
+						'move'
+					);
+				}
+			}
+			mobileDragHudRaf = requestAnimationFrame(tick);
+		};
+		showMobileGestureHud(`Moving · ${formatMobileTimeRange(fallbackStart, fallbackEnd)}`, 'move');
+		mobileDragHudRaf = requestAnimationFrame(tick);
 	}
 
 	let selectedMobileEventId = $state<string | null>(null);
@@ -296,7 +389,7 @@
 
 	function clearMobileEventSelection() {
 		if (!selectedMobileEventId) return;
-		setMobileEventStartEditable(selectedMobileEventId, false);
+		// Keep startEditable true on mobile so the next long-press can grab without re-selecting.
 		document.querySelectorAll('.fc-event--mobile-selected').forEach((el) => {
 			el.classList.remove('fc-event--mobile-selected');
 		});
@@ -304,16 +397,23 @@
 		mobileEventPointer = null;
 	}
 
-	function selectMobileEvent(eventId: string, eventEl: HTMLElement) {
+	function selectMobileEvent(eventId: string, eventEl: HTMLElement, opts?: { haptic?: boolean }) {
+		const isNew = selectedMobileEventId !== eventId;
 		if (selectedMobileEventId && selectedMobileEventId !== eventId) {
-			setMobileEventStartEditable(selectedMobileEventId, false);
 			document.querySelectorAll('.fc-event--mobile-selected').forEach((el) => {
 				el.classList.remove('fc-event--mobile-selected');
 			});
 		}
 		selectedMobileEventId = eventId;
 		eventEl.classList.add('fc-event--mobile-selected');
-		setMobileEventStartEditable(eventId, true);
+		// Movable jobs stay start-editable on mobile (Google-style long-press drag).
+		const status = dayApi?.getEventById(eventId)?.extendedProps?.status as string | undefined;
+		if (isMobileEventMovable(status)) {
+			setMobileEventStartEditable(eventId, true);
+		}
+		if (opts?.haptic !== false && isNew && isMobile) {
+			mobileHaptic(12);
+		}
 	}
 
 	function handleMobileCalendarBackgroundPointerDown(e: PointerEvent) {
@@ -606,9 +706,21 @@
 			slotDelta,
 			slotMs
 		);
+		const snapKey = `${snapped.start.getTime()}-${snapped.end.getTime()}`;
+		if (snapKey !== mobileResizeLastSnapKey) {
+			if (mobileResizeLastSnapKey) {
+				// Tick only when crossing a slot boundary, not on first sample.
+				mobileHaptic(8);
+			}
+			mobileResizeLastSnapKey = snapKey;
+		}
 		activeMobileResize.previewStart = snapped.start;
 		activeMobileResize.previewEnd = snapped.end;
 		applyMobileResizePreview(activeMobileResize, snapped.start, snapped.end);
+		showMobileGestureHud(
+			`Resize · ${formatMobileTimeRange(snapped.start, snapped.end)} · ${formatMobileDuration(snapped.start, snapped.end)}`,
+			'resize'
+		);
 	}
 
 	function stopMobileEdgeAutoScroll() {
@@ -691,7 +803,9 @@
 	async function handleMobileResizeEnd() {
 		const gesture = activeMobileResize;
 		activeMobileResize = null;
+		mobileResizeLastSnapKey = '';
 		clearMobileResizeListeners();
+		hideMobileGestureHud();
 
 		if (!gesture) {
 			endCalendarInteraction();
@@ -714,6 +828,10 @@
 			await updateJobDates(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyOptimisticDatePatch(gesture.eventId, gesture.previewStart, gesture.previewEnd);
 			applyMobileResizePreview(gesture, gesture.previewStart, gesture.previewEnd);
+			mobileHaptic([10, 30, 12]);
+			toast.success(
+				`Resized · ${formatMobileTimeRange(gesture.previewStart, gesture.previewEnd)}`
+			);
 			dayApi?.refetchEvents();
 			requestAnimationFrame(() => endCalendarInteraction());
 		} catch {
@@ -730,14 +848,39 @@
 		handle.type = 'button';
 		handle.className = 'fc-event__move-handle';
 		handle.setAttribute('aria-label', 'Hold and drag to move appointment');
+		handle.title = 'Hold, then drag to a new time';
 		handle.tabIndex = -1;
 		handle.innerHTML =
-			'<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5 3.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm7-9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>';
+			'<span class="fc-event__move-handle-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path fill="currentColor" d="M5 3.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm7-9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg></span><span class="fc-event__move-handle-label">Move</span>';
 		// Prevent button click from opening the job modal; drag is handled by FullCalendar long-press.
 		handle.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
 		});
+		// Priming haptic while the user holds the grip (before FC drag engages).
+		let armTimer: ReturnType<typeof setTimeout> | null = null;
+		const clearArm = () => {
+			if (armTimer != null) {
+				clearTimeout(armTimer);
+				armTimer = null;
+			}
+			handle.classList.remove('fc-event__move-handle--armed');
+		};
+		handle.addEventListener(
+			'pointerdown',
+			(e) => {
+				if (!isMobile || (e.pointerType === 'mouse' && e.button !== 0)) return;
+				clearArm();
+				armTimer = setTimeout(() => {
+					handle.classList.add('fc-event__move-handle--armed');
+					mobileHaptic(10);
+				}, Math.max(0, MOBILE_EVENT_LONG_PRESS_MS - 40));
+			},
+			{ passive: true }
+		);
+		handle.addEventListener('pointerup', clearArm, { passive: true });
+		handle.addEventListener('pointercancel', clearArm, { passive: true });
+		handle.addEventListener('pointerleave', clearArm, { passive: true });
 		eventEl.appendChild(handle);
 	}
 
@@ -755,12 +898,11 @@
 		eventEl.classList.add('fc-event-draggable');
 		ensureMobileMoveHandle(eventEl);
 
-		// Re-apply selection + drag permission after FC rebuilds event DOM.
+		// Google-style: any movable job is long-press draggable. Selection only unlocks resize chrome.
+		const movable = isMobileEventMovable(info.event.extendedProps?.status);
+		setMobileEventStartEditable(info.event.id, movable);
 		if (selectedMobileEventId === info.event.id) {
 			eventEl.classList.add('fc-event--mobile-selected');
-			setMobileEventStartEditable(info.event.id, true);
-		} else {
-			setMobileEventStartEditable(info.event.id, false);
 		}
 
 		if (eventEl.dataset.mobileTouchZones === '1') {
@@ -845,6 +987,7 @@
 					: originalEnd;
 
 				beginCalendarInteraction();
+				mobileResizeLastSnapKey = '';
 				activeMobileResize = {
 					eventId,
 					eventEl,
@@ -859,6 +1002,7 @@
 				};
 
 				eventEl.classList.add('fc-event-resizing');
+				mobileHaptic(10);
 				updateMobileResizeFromClientY(touch.clientY);
 				ensureMobileEdgeAutoScrollRunning(touch.clientY);
 				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
@@ -1024,13 +1168,23 @@
 				teardownMobileBackgroundListeners();
 			}
 			if (dayApi) {
-				dayApi.setOption('eventStartEditable', !isMobile);
+				// Mobile: long-press move stays on (Google-style). Resize stays custom edge-pills only.
+				dayApi.setOption('eventStartEditable', true);
 				dayApi.setOption('eventDurationEditable', !isMobile);
 				dayApi.setOption('eventResizableFromStart', false);
 				dayApi.setOption('selectable', !isMobile);
-				dayApi.setOption('eventDragMinDistance', isMobile ? 18 : 10);
-				dayApi.setOption('eventLongPressDelay', isMobile ? 450 : 280);
-				dayApi.setOption('longPressDelay', isMobile ? 450 : 280);
+				dayApi.setOption(
+					'eventDragMinDistance',
+					isMobile ? MOBILE_EVENT_DRAG_MIN_DISTANCE_PX : 10
+				);
+				dayApi.setOption(
+					'eventLongPressDelay',
+					isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280
+				);
+				dayApi.setOption(
+					'longPressDelay',
+					isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280
+				);
 			}
 		};
 		mql.addEventListener('change', listener);
@@ -1588,9 +1742,9 @@
 				nowIndicator: true,
 				expandRows: false,
 				editable: true,
-				// Mobile: select-first model. Events are not start-editable until selected (see setMobileEventStartEditable).
-				// Duration resize uses custom edge pills, not FullCalendar's built-in touch resize.
-				eventStartEditable: !isMobile,
+				// Mobile: long-press any movable card to drag (Google Calendar style).
+				// Duration resize uses custom edge pills only — FC duration edit stays off on touch.
+				eventStartEditable: true,
 				eventDurationEditable: !isMobile,
 				// Mobile uses custom edge pills; keep false so FC resize never fights custom gesture.
 				eventResizableFromStart: false,
@@ -1598,12 +1752,12 @@
 				selectable: !isMobile,
 				dragScroll: true,
 				snapDuration: '00:30:00',
-				// Higher min distance reduces accidental moves from fat-finger jitter.
-				eventDragMinDistance: isMobile ? 18 : 10,
-				// Mobile: hold on a *selected* card to move. Unselected cards only select on tap.
-				eventLongPressDelay: isMobile ? 450 : 280,
+				// Modest min distance after long-press: enough to ignore jitter, not fight the drag.
+				eventDragMinDistance: isMobile ? MOBILE_EVENT_DRAG_MIN_DISTANCE_PX : 10,
+				// ~320ms long-press matches Material / Google Calendar "press then drag".
+				eventLongPressDelay: isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280,
 				selectLongPressDelay: isMobile ? 1000 : 280,
-				longPressDelay: isMobile ? 450 : 280,
+				longPressDelay: isMobile ? MOBILE_EVENT_LONG_PRESS_MS : 280,
 
 				dateClick: (info) => {
 					if (isMobile && suppressNextDateClick) {
@@ -1731,11 +1885,17 @@
 						return;
 					}
 
-					// Mobile: only the currently selected appointment can enter drag mode.
-					// Prevents "stuck moving" when a long-press hits an unselected neighbor.
-					if (isMobile && selectedMobileEventId !== info.event.id) {
-						info.event.setProp('startEditable', false);
-						return;
+					// Mobile: long-press grab selects the card (shows resize chrome after drop).
+					if (isMobile && info.event.id) {
+						selectMobileEvent(info.event.id, info.el, { haptic: false });
+						mobileHaptic(16);
+						const start = info.event.start ? new Date(info.event.start) : new Date();
+						const end = info.event.end
+							? new Date(info.event.end)
+							: new Date(start.getTime() + 60 * 60 * 1000);
+						startMobileDragHudLoop(info.event.id, start, end);
+						const { y } = getEventClientCoords(info.jsEvent);
+						if (y) ensureMobileEdgeAutoScrollRunning(y);
 					}
 
 					suppressNextEventClick = true;
@@ -1749,6 +1909,7 @@
 				eventDragStop: (info) => {
 					stopAppointmentDragToMonthTracking();
 					appointmentDragActive = false;
+					hideMobileGestureHud();
 					endCalendarInteraction();
 					originalEventRect = null;
 					// Avoid opening the job modal from the pointerup that ends a drag.
@@ -1763,7 +1924,7 @@
 					if (!monthPickerEl) {
 						// Keep selection after an internal time-slot drag so resize handles remain available.
 						if (isMobile && info.event.id) {
-							selectMobileEvent(info.event.id, info.el);
+							selectMobileEvent(info.event.id, info.el, { haptic: false });
 						}
 						draggedJobId = null;
 						return;
@@ -1799,7 +1960,7 @@
 						handleExternalDrop(draggedJobId, clientX, clientY);
 					} else if (isMobile && info.event.id) {
 						// Stay selected after internal move so user can adjust edges without re-tapping.
-						selectMobileEvent(info.event.id, info.el);
+						selectMobileEvent(info.event.id, info.el, { haptic: false });
 					}
 
 					draggedJobId = null;
@@ -1869,8 +2030,15 @@
 						// due to timing with $derived + provider. We rely on the source update + FC's own handling.
 						// This eliminates the constant refresh feel on drag and reduces eventDidMount churn + memory.
 						applyOptimisticDatePatch(info.event.id!, info.event.start!, info.event.end!);
-						// If you ever need to force a provider sync for this event (rare), use a deferred refetch:
-						// queueMicrotask(() => dayApi?.refetchEvents());
+						if (isMobile && info.event.start) {
+							const end =
+								info.event.end ??
+								new Date(info.event.start.getTime() + 60 * 60 * 1000);
+							mobileHaptic([10, 40, 14]);
+							toast.success(
+								`Moved · ${formatMobileTimeRange(info.event.start, end)}`
+							);
+						}
 					} catch (e) {
 						info.revert();
 						toast.error('Could not move appointment');
@@ -1943,6 +2111,9 @@
 			teardownMobileBackgroundListeners();
 			stopAppointmentDragToMonthTracking();
 			clearMobileResizeListeners();
+			hideMobileGestureHud();
+			mobileGestureHudEl?.remove();
+			mobileGestureHudEl = null;
 			activeMobileResize = null;
 			appointmentDragActive = false;
 			calendarInteractionDepth = 0;
@@ -2156,6 +2327,11 @@
 			</div>
 
 			<div class="split-calendar__day-wrapper" class:refreshing={isSyncing} bind:this={dayWrapperEl}>
+				{#if isMobile && selectedMobileEventId && !appointmentDragActive}
+					<div class="split-calendar__gesture-hint" role="status">
+						Hold card to move · Drag edges to resize · Tap again to open
+					</div>
+				{/if}
 				<div class="split-calendar__day" bind:this={dayEl}></div>
 			</div>
 		</div>
@@ -2321,9 +2497,11 @@
 			border-radius: var(--radius-md);
 		}
 
-		/* Make the FC container inside fill the remaining height */
+		/* Make the FC container inside fill remaining height (sibling gesture hint can sit above). */
 		.split-calendar__day {
-			height: 100%;
+			flex: 1 1 auto;
+			min-height: 0;
+			height: auto;
 			touch-action: pan-y;
 		}
 
@@ -2828,9 +3006,9 @@
 	}
 
 	/* Mobile / touch:
-	   - Tap = select (move grip + resize pills)
-	   - Hold selected card = move
-	   - Drag edge pills = resize
+	   - Tap = select (move grip + resize pills + coaching hint)
+	   - Long-press any movable card = drag (Google Calendar style)
+	   - Drag edge pills = resize with live HUD
 	   - Second clean tap = open
 	   - Swipe empty day grid left/right = next/prev day
 	*/
@@ -2840,21 +3018,72 @@
 		}
 
 		:global(.fc-event--draggable) {
-			/* Allow vertical scroll through unselected cards; selected cards opt into pan-x via FC drag. */
+			/* Vertical scroll through cards; long-press claims the pointer for drag. */
 			touch-action: pan-y;
 		}
 
 		:global(.fc-event--mobile-selected) {
 			box-shadow:
 				0 0 0 2px var(--color-primary),
-				0 4px 12px rgb(0 0 0 / 0.18);
+				0 6px 16px rgb(0 0 0 / 0.2);
 			z-index: 12;
-			/* Selected card: FC long-press drag needs free pointer movement. */
+			/* Selected: free pointer for hold-to-drag + edge resize. */
 			touch-action: none;
+			transform: scale(1.01);
 		}
 
 		:global(.fc-event--draggable:active:not(.fc-event-dragging)) {
-			transform: scale(0.995);
+			transform: scale(0.99);
+		}
+
+		/* Coaching strip above the day grid while a card is selected. */
+		.split-calendar__gesture-hint {
+			flex: 0 0 auto;
+			margin: 0;
+			padding: 6px 10px;
+			font-size: 0.72rem;
+			font-weight: 600;
+			letter-spacing: 0.01em;
+			text-align: center;
+			color: var(--color-primary);
+			background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+			border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+			z-index: 5;
+		}
+
+		/* Live time chip while moving / resizing (imperatively mounted). */
+		:global(.split-calendar__gesture-hud) {
+			position: absolute;
+			left: 50%;
+			top: 10px;
+			transform: translateX(-50%) translateY(-8px);
+			z-index: 40;
+			pointer-events: none;
+			opacity: 0;
+			padding: 8px 14px;
+			border-radius: 999px;
+			font-size: 0.8rem;
+			font-weight: 700;
+			letter-spacing: 0.01em;
+			white-space: nowrap;
+			max-width: calc(100% - 24px);
+			overflow: hidden;
+			text-overflow: ellipsis;
+			color: #fff;
+			background: rgba(20, 24, 32, 0.92);
+			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+			transition:
+				opacity 0.12s ease,
+				transform 0.12s ease;
+		}
+
+		:global(.split-calendar__gesture-hud--visible) {
+			opacity: 1;
+			transform: translateX(-50%) translateY(0);
+		}
+
+		:global(.split-calendar__gesture-hud[data-mode='resize']) {
+			background: color-mix(in srgb, var(--color-primary) 88%, #111);
 		}
 
 		/* Move grip + resize handles only after selection (large fat-finger targets). */
@@ -2863,21 +3092,35 @@
 			position: absolute;
 			top: 4px;
 			right: 4px;
-			width: 36px;
+			min-width: 44px;
 			height: 36px;
 			margin: 0;
-			padding: 0;
+			padding: 0 8px;
 			border: 0;
-			border-radius: 8px;
-			background: rgba(0, 0, 0, 0.28);
+			border-radius: 10px;
+			background: rgba(0, 0, 0, 0.38);
 			color: #fff;
 			align-items: center;
 			justify-content: center;
+			gap: 4px;
 			z-index: 24;
 			touch-action: none;
 			cursor: grab;
-			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
 			-webkit-tap-highlight-color: transparent;
+			font-size: 0.65rem;
+			font-weight: 700;
+			letter-spacing: 0.02em;
+			text-transform: uppercase;
+		}
+
+		:global(.fc-event__move-handle-label) {
+			line-height: 1;
+		}
+
+		:global(.fc-event__move-handle--armed) {
+			background: var(--color-primary);
+			transform: scale(1.05);
 		}
 
 		:global(.fc-event--mobile-selected .fc-event__move-handle) {
@@ -2920,7 +3163,7 @@
 		}
 
 		:global(.fc-timegrid-event .fc-event-time) {
-			padding-right: 40px;
+			padding-right: 52px;
 		}
 
 		:global(.fc-timegrid-event .fc-event-title) {
@@ -2977,15 +3220,35 @@
 			pointer-events: none;
 		}
 
+		/* Elevated “picked up” ghost while dragging (Material-style lift). */
+		:global(.fc-event.fc-event-dragging) {
+			opacity: 0.22 !important;
+		}
+
+		:global(.fc-event-mirror) {
+			opacity: 0.92 !important;
+			box-shadow:
+				0 12px 28px rgba(0, 0, 0, 0.28),
+				0 0 0 2px color-mix(in srgb, var(--color-primary) 70%, #fff) !important;
+			outline: none !important;
+			border-radius: 8px;
+		}
+
+		:global(.fc-event-resizing) {
+			box-shadow:
+				0 0 0 2px var(--color-primary),
+				0 8px 20px rgba(0, 0, 0, 0.2);
+			z-index: 14;
+		}
+
+		.split-calendar__day-wrapper {
+			position: relative;
+		}
 	}
 
-	/* Ghost / drag visual feedback.
-	   - The source event (left in place) fades to show it's being moved.
-	   - The mirror (the thing that follows the finger) is now semi-transparent (the "ghost")
-	     so the user can see through it to the underlying dates/numbers/dots — especially important
-	     when dragging over the compact MonthPicker on mobile to choose the exact drop day.
-	   - Lower mirror opacity + subtle outline + softer shadow = clear ghost without completely
-	     obscuring the target (month day numbers, dots, etc.).
+	/* Ghost / drag visual feedback (desktop + base).
+	   Mobile overrides above raise mirror elevation so the finger-follower reads as “picked up”.
+	   Month-picker drops still need a readable ghost over day numbers.
 	   Reference: mobile-specific-tweaks
 	*/
 	:global(.fc-event.fc-event-dragging) {
@@ -2994,7 +3257,7 @@
 	}
 
 	:global(.fc-event-mirror) {
-		opacity: 0.65;
+		opacity: 0.72;
 		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 		outline: 1px dashed var(--color-border);
 		outline-offset: 1px;
