@@ -274,7 +274,9 @@
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
 		if (!(target instanceof Element)) return false;
-		return !!target.closest('.fc-event-resizer, .fc-event__move-handle');
+		return !!target.closest(
+			'.fc-event-resizer, .fc-event__edge-pill, .fc-event__move-handle'
+		);
 	}
 
 	function isMobileEventMovable(status?: string | null): boolean {
@@ -787,6 +789,9 @@
 		document.removeEventListener('touchmove', handleMobileResizeMove);
 		document.removeEventListener('touchend', handleMobileResizeEnd);
 		document.removeEventListener('touchcancel', handleMobileResizeEnd);
+		document.removeEventListener('pointermove', handleMobileResizePointerMove);
+		document.removeEventListener('pointerup', handleMobileResizePointerEnd);
+		document.removeEventListener('pointercancel', handleMobileResizePointerEnd);
 		stopMobileEdgeAutoScroll();
 	}
 
@@ -800,17 +805,31 @@
 		e.preventDefault();
 	}
 
+	function handleMobileResizePointerMove(e: PointerEvent) {
+		if (!activeMobileResize) return;
+		// Prefer touch path when both fire to avoid double-processing.
+		if (e.pointerType === 'touch' && e.buttons === 0) return;
+		updateMobileResizeFromClientY(e.clientY);
+		ensureMobileEdgeAutoScrollRunning(e.clientY);
+		if (e.cancelable) e.preventDefault();
+	}
+
+	function handleMobileResizePointerEnd() {
+		// Touch end may also fire; handleMobileResizeEnd is idempotent once activeMobileResize is cleared.
+		void handleMobileResizeEnd();
+	}
+
 	async function handleMobileResizeEnd() {
 		const gesture = activeMobileResize;
+		// Idempotent: pointer + touch end can both fire for one gesture.
+		if (!gesture) {
+			clearMobileResizeListeners();
+			return;
+		}
 		activeMobileResize = null;
 		mobileResizeLastSnapKey = '';
 		clearMobileResizeListeners();
 		hideMobileGestureHud();
-
-		if (!gesture) {
-			endCalendarInteraction();
-			return;
-		}
 
 		const changed =
 			gesture.previewStart.getTime() !== gesture.originalStart.getTime() ||
@@ -884,6 +903,40 @@
 		eventEl.appendChild(handle);
 	}
 
+	/**
+	 * FullCalendar only injects `.fc-event-resizer` when `eventDurationEditable` is true.
+	 * We keep duration edit OFF on mobile (so FC native resize never fights our gesture) and
+	 * inject our own edge pills instead — they reuse the same class names our handlers already expect.
+	 */
+	function ensureMobileResizeHandles(eventEl: HTMLElement, status?: string | null) {
+		if (!isMobileEventMovable(status)) {
+			eventEl.querySelectorAll('.fc-event__edge-pill').forEach((el) => el.remove());
+			return;
+		}
+		if (eventEl.querySelector('.fc-event__edge-pill')) return;
+
+		const makePill = (edge: 'start' | 'end') => {
+			const pill = document.createElement('div');
+			// Keep FC class names so existing resize gesture + CSS continue to work.
+			pill.className = `fc-event-resizer fc-event-resizer-${edge} fc-event__edge-pill fc-event__edge-pill--${edge}`;
+			pill.setAttribute('role', 'slider');
+			pill.setAttribute(
+				'aria-label',
+				edge === 'start' ? 'Drag to change start time' : 'Drag to change end time'
+			);
+			pill.dataset.edge = edge;
+			// Visible grab bar (CSS ::after is decorative; this is the real hit target chrome).
+			const bar = document.createElement('span');
+			bar.className = 'fc-event__edge-pill-bar';
+			bar.setAttribute('aria-hidden', 'true');
+			pill.appendChild(bar);
+			return pill;
+		};
+
+		eventEl.appendChild(makePill('start'));
+		eventEl.appendChild(makePill('end'));
+	}
+
 	function setupMobileEventTouchZones(info: {
 		el: HTMLElement;
 		event: {
@@ -897,6 +950,7 @@
 		eventEl.dataset.mobileEventId = info.event.id;
 		eventEl.classList.add('fc-event-draggable');
 		ensureMobileMoveHandle(eventEl);
+		ensureMobileResizeHandles(eventEl, info.event.extendedProps?.status);
 
 		// Google-style: any movable job is long-press draggable. Selection only unlocks resize chrome.
 		const movable = isMobileEventMovable(info.event.extendedProps?.status);
@@ -950,64 +1004,92 @@
 			{ capture: true, passive: true }
 		);
 
+		const beginResizeFromPointer = (clientY: number, resizer: Element) => {
+			if (selectedMobileEventId !== eventId) {
+				selectMobileEvent(eventId, eventEl);
+				return;
+			}
+
+			const status = info.event.extendedProps?.status;
+			if (status === 'completed' || status === 'cancelled') {
+				toast.error('Cannot resize cancelled or completed jobs');
+				return;
+			}
+
+			const harnessEl = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
+			if (!harnessEl) return;
+
+			const scrollEl = getMobileScrollEl();
+			// Fresh dates from FC (not closure from mount) so resize after drag stays correct.
+			const liveEvent = dayApi?.getEventById(eventId);
+			const liveStart = liveEvent?.start ? new Date(liveEvent.start) : originalStart;
+			const liveEnd = liveEvent?.end ? new Date(liveEvent.end) : originalEnd;
+
+			beginCalendarInteraction();
+			mobileResizeLastSnapKey = '';
+			activeMobileResize = {
+				eventId,
+				eventEl,
+				harnessEl,
+				resizeStartEdge:
+					resizer.classList.contains('fc-event-resizer-start') ||
+					(resizer as HTMLElement).dataset?.edge === 'start',
+				pointerStartY: clientY,
+				initialScrollTop: scrollEl?.scrollTop ?? 0,
+				originalStart: liveStart,
+				originalEnd: liveEnd,
+				previewStart: liveStart,
+				previewEnd: liveEnd
+			};
+
+			eventEl.classList.add('fc-event-resizing');
+			mobileHaptic(10);
+			updateMobileResizeFromClientY(clientY);
+			ensureMobileEdgeAutoScrollRunning(clientY);
+			document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
+			document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
+			document.addEventListener('touchcancel', handleMobileResizeEnd, { passive: true });
+			document.addEventListener('pointermove', handleMobileResizePointerMove, { passive: false });
+			document.addEventListener('pointerup', handleMobileResizePointerEnd, { passive: true });
+			document.addEventListener('pointercancel', handleMobileResizePointerEnd, { passive: true });
+		};
+
+		eventEl.addEventListener(
+			'pointerdown',
+			(e) => {
+				if (!isMobile) return;
+				if (e.pointerType === 'mouse' && e.button !== 0) return;
+				const target = e.target;
+				if (!(target instanceof Element)) return;
+				const resizer = target.closest('.fc-event-resizer, .fc-event__edge-pill');
+				if (!resizer) return;
+
+				// Claim the gesture so long-press move / day swipe cannot steal the edge drag.
+				e.stopPropagation();
+				try {
+					eventEl.setPointerCapture?.(e.pointerId);
+				} catch {
+					// ignore
+				}
+				beginResizeFromPointer(e.clientY, resizer);
+			},
+			{ capture: true, passive: true }
+		);
+
+		// Touch fallback for browsers that still prefer touch events over pointer for capture/scroll.
 		eventEl.addEventListener(
 			'touchstart',
 			(e) => {
 				const target = e.target;
 				if (!(target instanceof Element)) return;
-				const resizer = target.closest('.fc-event-resizer');
+				const resizer = target.closest('.fc-event-resizer, .fc-event__edge-pill');
 				if (!resizer) return;
-
-				// Resize only works after selection so fat-finger edge hits don't fight with select/open.
-				if (selectedMobileEventId !== eventId) {
-					selectMobileEvent(eventId, eventEl);
-					return;
-				}
-
-				const status = info.event.extendedProps?.status;
-				if (status === 'completed' || status === 'cancelled') {
-					toast.error('Cannot resize cancelled or completed jobs');
-					return;
-				}
-
-				const touch = e.changedTouches[0] || e.touches[0];
-				if (!touch) return;
-
-				const harnessEl = eventEl.closest('.fc-timegrid-event-harness') as HTMLElement | null;
-				if (!harnessEl) return;
+				if (activeMobileResize) return;
 
 				e.stopPropagation();
-
-				const scrollEl = getMobileScrollEl();
-				// Fresh dates from FC (not closure from mount) so resize after drag stays correct.
-				const liveEvent = dayApi?.getEventById(eventId);
-				const liveStart = liveEvent?.start ? new Date(liveEvent.start) : originalStart;
-				const liveEnd = liveEvent?.end
-					? new Date(liveEvent.end)
-					: originalEnd;
-
-				beginCalendarInteraction();
-				mobileResizeLastSnapKey = '';
-				activeMobileResize = {
-					eventId,
-					eventEl,
-					harnessEl,
-					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
-					pointerStartY: touch.clientY,
-					initialScrollTop: scrollEl?.scrollTop ?? 0,
-					originalStart: liveStart,
-					originalEnd: liveEnd,
-					previewStart: liveStart,
-					previewEnd: liveEnd
-				};
-
-				eventEl.classList.add('fc-event-resizing');
-				mobileHaptic(10);
-				updateMobileResizeFromClientY(touch.clientY);
-				ensureMobileEdgeAutoScrollRunning(touch.clientY);
-				document.addEventListener('touchmove', handleMobileResizeMove, { passive: false });
-				document.addEventListener('touchend', handleMobileResizeEnd, { passive: true });
-				document.addEventListener('touchcancel', handleMobileResizeEnd, { passive: true });
+				const touch = e.changedTouches[0] || e.touches[0];
+				if (!touch) return;
+				beginResizeFromPointer(touch.clientY, resizer);
 			},
 			{ capture: true, passive: true }
 		);
@@ -3132,26 +3214,76 @@
 			display: none !important;
 		}
 
-		:global(.fc-timegrid-event .fc-event-resizer) {
+		/* Custom edge pills (injected in JS). Hidden until the card is selected.
+		   FC native resizers are never mounted on mobile (eventDurationEditable=false). */
+		:global(.fc-event__edge-pill),
+		:global(.fc-event-resizer.fc-event__edge-pill) {
+			position: absolute;
+			left: 6px;
+			right: 6px;
+			height: 44px;
+			z-index: 30;
 			display: none;
+			align-items: center;
+			justify-content: center;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 10px;
+			background: rgba(0, 0, 0, 0.28);
+			touch-action: none;
+			cursor: ns-resize;
+			-webkit-tap-highlight-color: transparent;
+			pointer-events: auto;
 		}
 
-		:global(.fc-event--mobile-selected .fc-event-resizer) {
+		:global(.fc-event__edge-pill--end),
+		:global(.fc-event-resizer-end.fc-event__edge-pill) {
+			bottom: -8px;
+			top: auto;
+		}
+
+		:global(.fc-event__edge-pill--start),
+		:global(.fc-event-resizer-start.fc-event__edge-pill) {
+			top: -8px;
+			bottom: auto;
+		}
+
+		:global(.fc-event__edge-pill-bar) {
 			display: block;
+			width: 52px;
+			height: 7px;
+			border-radius: 999px;
+			background: rgba(255, 255, 255, 0.98);
+			box-shadow:
+				0 0 0 1px rgba(0, 0, 0, 0.22),
+				0 2px 6px rgba(0, 0, 0, 0.18);
+			pointer-events: none;
 		}
 
-		:global(.event-completed.fc-event--mobile-selected .fc-event-resizer),
-		:global(.event-cancelled.fc-event--mobile-selected .fc-event-resizer) {
+		/* Selected rules MUST come after base display:none so pills actually appear. */
+		:global(.fc-event--mobile-selected .fc-event__edge-pill),
+		:global(.fc-event--mobile-selected .fc-event-resizer.fc-event__edge-pill) {
+			display: flex !important;
+		}
+
+		:global(.event-completed.fc-event--mobile-selected .fc-event__edge-pill),
+		:global(.event-cancelled.fc-event--mobile-selected .fc-event__edge-pill) {
 			display: none !important;
 		}
 
+		:global(.fc-event--mobile-selected .fc-event__edge-pill:active),
+		:global(.fc-event-resizing .fc-event__edge-pill) {
+			background: color-mix(in srgb, var(--color-primary) 55%, rgba(0, 0, 0, 0.35));
+		}
+
 		/* Touch-friendly event resizing on mobile.
-		   Drag the top or bottom edge (pill handles) after selecting the card.
+		   Drag the top or bottom edge pills after selecting the card.
 		   Avatars sit bottom-right (inset above resizers).
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
 			top: auto;
-			bottom: 12px;
+			bottom: 14px;
 			left: auto;
 			right: 4px;
 		}
@@ -3173,51 +3305,14 @@
 		}
 
 		:global(.fc-event--mobile-selected .fc-event-title) {
-			padding-bottom: 24px;
+			padding-bottom: 28px;
+			padding-top: 18px;
 		}
 
-		:global(.fc-event-resizer) {
-			height: 48px;
-			z-index: 22;
-			background-color: rgba(255, 255, 255, 0.22);
-			border-radius: 6px;
-			touch-action: none;
-		}
-
-		:global(.fc-event-resizer-end) {
-			bottom: -10px;
-		}
-
-		:global(.fc-event-resizer-end::after) {
-			content: '';
-			position: absolute;
-			left: 50%;
-			bottom: 12px;
-			transform: translateX(-50%);
-			width: 48px;
-			height: 6px;
-			border-radius: 3px;
-			background: rgba(255, 255, 255, 0.95);
-			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
-			pointer-events: none;
-		}
-
-		:global(.fc-event-resizer-start) {
-			top: -10px;
-		}
-
-		:global(.fc-event-resizer-start::after) {
-			content: '';
-			position: absolute;
-			left: 50%;
-			top: 12px;
-			transform: translateX(-50%);
-			width: 48px;
-			height: 6px;
-			border-radius: 3px;
-			background: rgba(255, 255, 255, 0.95);
-			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
-			pointer-events: none;
+		/* Let edge pills overhang without being clipped by the card. */
+		:global(.fc-timegrid-event.fc-event--mobile-selected),
+		:global(.fc-timegrid-event-harness:has(.fc-event--mobile-selected)) {
+			overflow: visible !important;
 		}
 
 		/* Elevated “picked up” ghost while dragging (Material-style lift). */
