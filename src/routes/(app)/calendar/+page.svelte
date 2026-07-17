@@ -29,7 +29,7 @@
 		margin: 0;
 	}
 
-	/* Desktop: allow the day wrapper to size based on calendar content (no fixed cap) */
+	/* Allow the day wrapper to size based on calendar content (no fixed cap) */
 	:global(.split-calendar__day-wrapper) {
 		flex: 1 0 auto;
 		min-height: 300px;
@@ -43,42 +43,36 @@
 		}
 	}
 
-	/* Mobile: lock the page to the viewport above the fixed bottom nav so FullCalendar can use
-	   height:100%. That pins the day/date header while only the time-grid body scrolls.
-	   (flex:1 0 auto on the day-wrapper was growing with content → page scroll → header left.) */
-	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
+	/* Mobile: full height chain so the day calendar can take the remaining space after the compact
+	   anchored MonthPicker. The day-wrapper uses internal overflow auto for the time slots (so you
+	   can scroll past 10am etc). Top nav is hidden, footer is in flow below this block.
+
+	   === AI / AGENTS: DO NOT CHANGE CALENDAR HEIGHT ===
+	   Do NOT set height/max-height to calc(100dvh - …), do NOT force flex:1 1 0 + height:100%
+	   chains to pin FullCalendar headers, and do NOT re-apply FC height:'100%' for sticky dates.
+	   Those changes have made the calendar DISAPPEAR multiple times. Content-driven height +
+	   height:'auto' after FC init is required. */
+	@media (max-width: 768px) {
 		.schedule-page {
-			/* Bottom tab bar is fixed ~62px; top-nav is hidden on mobile. */
-			height: calc(100dvh - 62px);
-			max-height: calc(100dvh - 62px);
+			height: 100%;
 			min-height: 0;
 			flex: 1;
 			display: flex;
 			flex-direction: column;
-			overflow: hidden;
 		}
 
 		.schedule-page__content {
-			flex: 1 1 0;
+			flex: 1;
 			min-height: 0;
 			display: flex;
 			flex-direction: column;
 			height: 100%;
 			padding: 0;
 			margin: 0;
-			overflow: hidden;
-		}
-
-		:global(.split-calendar-container),
-		:global(.split-calendar-container--mobile) {
-			flex: 1 1 0;
-			min-height: 0;
-			height: 100%;
+			overflow: hidden; /* clip so the inner day-wrapper scroller works properly */
 		}
 
 		:global(.split-calendar__day-wrapper) {
-			flex: 1 1 0 !important;
-			min-height: 0 !important;
 			border-radius: 0;
 			border-left: none;
 			border-right: none;
