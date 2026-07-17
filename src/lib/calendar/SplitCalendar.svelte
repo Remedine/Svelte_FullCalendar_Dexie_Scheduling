@@ -229,8 +229,10 @@
 	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
 	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 72;
 	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 390;
-	const MOBILE_SWIPE_MIN_DX_PX = 56;
-	const MOBILE_SWIPE_MAX_SLOPE = 0.65;
+	// Fat-finger horizontal day change: modest distance, allow some vertical drift.
+	const MOBILE_SWIPE_MIN_DX_PX = 48;
+	const MOBILE_SWIPE_MAX_SLOPE = 0.9;
+	const MOBILE_SWIPE_CLAIM_DX_PX = 18;
 	const MOBILE_TAP_MOVE_SLOP_PX = 14;
 
 	let mobileEdgeScrollPointerY: number | null = null;
@@ -267,8 +269,18 @@
 	let suppressNextDateClick = false;
 	let suppressNextEventClick = false;
 	let mobileBackgroundDeselectListenerActive = false;
+	let mobileDaySwipeDocListenersActive = false;
 	let mobileDaySwipe:
-		| { x: number; y: number; pointerId: number; fromEvent: boolean }
+		| {
+				x: number;
+				y: number;
+				lastX: number;
+				lastY: number;
+				pointerId: number;
+				fromEvent: boolean;
+				/** True once the gesture is clearly horizontal (prefer day-nav over vertical scroll). */
+				claimedHorizontal: boolean;
+		  }
 		| null = null;
 	let mobileEventPointer:
 		| { eventId: string; x: number; y: number; moved: boolean }
@@ -333,80 +345,141 @@
 		await handleDateSelect(getLocalDateString(base));
 	}
 
+	function getDayWrapperEl(): HTMLElement | null {
+		return dayWrapperEl ?? (document.querySelector('.split-calendar__day-wrapper') as HTMLElement | null);
+	}
+
+	function teardownMobileDaySwipeDocListeners() {
+		if (!mobileDaySwipeDocListenersActive) return;
+		document.removeEventListener('pointermove', handleMobileDaySwipePointerMove);
+		document.removeEventListener('pointerup', handleMobileDaySwipePointerUp);
+		document.removeEventListener('pointercancel', handleMobileDaySwipePointerCancel);
+		mobileDaySwipeDocListenersActive = false;
+	}
+
+	function ensureMobileDaySwipeDocListeners() {
+		if (mobileDaySwipeDocListenersActive) return;
+		mobileDaySwipeDocListenersActive = true;
+		// Document-level so we still finish the gesture if the finger leaves the wrapper
+		// or FullCalendar's scroller steals the hit target mid-swipe.
+		document.addEventListener('pointermove', handleMobileDaySwipePointerMove, { passive: true });
+		document.addEventListener('pointerup', handleMobileDaySwipePointerUp, { passive: true });
+		document.addEventListener('pointercancel', handleMobileDaySwipePointerCancel, { passive: true });
+	}
+
 	function handleMobileDaySwipePointerDown(e: PointerEvent) {
 		if (!isMobile || appointmentDragActive || activeMobileResize) return;
 		if (e.pointerType === 'mouse' && e.button !== 0) return;
 		if (!(e.target instanceof Element)) return;
-		// Only the day grid area (not month picker / filters).
+		// Only the day grid area (not month picker / filters / chrome).
 		if (e.target.closest('.month-picker, .split-calendar__filters, .split-calendar__view-switcher')) {
 			return;
 		}
+		// Resize/move chrome owns the pointer.
+		if (isMobileGestureChromeTarget(e.target)) return;
+
 		const fromEvent = !!e.target.closest('.fc-event');
 		mobileDaySwipe = {
 			x: e.clientX,
 			y: e.clientY,
+			lastX: e.clientX,
+			lastY: e.clientY,
 			pointerId: e.pointerId,
-			fromEvent
+			fromEvent,
+			claimedHorizontal: false
 		};
+		ensureMobileDaySwipeDocListeners();
+
+		// Keep receiving coords even if the finger leaves the start element.
+		const wrapper = getDayWrapperEl();
+		try {
+			wrapper?.setPointerCapture?.(e.pointerId);
+		} catch {
+			// Some browsers throw if capture is not allowed for this pointer type.
+		}
 	}
 
-	function handleMobileDaySwipePointerUp(e: PointerEvent) {
+	function handleMobileDaySwipePointerMove(e: PointerEvent) {
 		const gesture = mobileDaySwipe;
-		if (!gesture || gesture.pointerId !== e.pointerId) {
-			mobileDaySwipe = null;
-			return;
-		}
-		mobileDaySwipe = null;
+		if (!gesture || gesture.pointerId !== e.pointerId) return;
 
-		if (!isMobile || appointmentDragActive || activeMobileResize || gesture.fromEvent) return;
+		gesture.lastX = e.clientX;
+		gesture.lastY = e.clientY;
 
 		const dx = e.clientX - gesture.x;
 		const dy = e.clientY - gesture.y;
+		if (
+			!gesture.claimedHorizontal &&
+			Math.abs(dx) >= MOBILE_SWIPE_CLAIM_DX_PX &&
+			Math.abs(dx) > Math.abs(dy) * 1.15
+		) {
+			gesture.claimedHorizontal = true;
+		}
+	}
+
+	function finishMobileDaySwipe(clientX: number, clientY: number, pointerId: number) {
+		const gesture = mobileDaySwipe;
+		if (!gesture || gesture.pointerId !== pointerId) return;
+
+		mobileDaySwipe = null;
+		teardownMobileDaySwipeDocListeners();
+
+		if (!isMobile || appointmentDragActive || activeMobileResize || gesture.fromEvent) return;
+
+		const dx = clientX - gesture.x;
+		const dy = clientY - gesture.y;
 		if (Math.abs(dx) < MOBILE_SWIPE_MIN_DX_PX) return;
-		if (Math.abs(dy) > Math.abs(dx) * MOBILE_SWIPE_MAX_SLOPE) return;
+		// Require mostly-horizontal; claimed swipes get a slightly looser slope.
+		const maxSlope = gesture.claimedHorizontal ? MOBILE_SWIPE_MAX_SLOPE + 0.15 : MOBILE_SWIPE_MAX_SLOPE;
+		if (Math.abs(dy) > Math.abs(dx) * maxSlope) return;
 
 		// Swipe left → next day; swipe right → previous day.
 		void shiftCalendarDay(dx < 0 ? 1 : -1);
 	}
 
+	function handleMobileDaySwipePointerUp(e: PointerEvent) {
+		if (mobileDaySwipe?.pointerId !== e.pointerId) return;
+		finishMobileDaySwipe(e.clientX, e.clientY, e.pointerId);
+	}
+
 	function handleMobileDaySwipePointerCancel(e: PointerEvent) {
-		if (mobileDaySwipe?.pointerId === e.pointerId) {
-			mobileDaySwipe = null;
-		}
+		const gesture = mobileDaySwipe;
+		if (!gesture || gesture.pointerId !== e.pointerId) return;
+		// Browser often cancels the pointer when a scroll container engages.
+		// Still honor a clear horizontal swipe using the last tracked coords.
+		finishMobileDaySwipe(gesture.lastX, gesture.lastY, e.pointerId);
 	}
 
 	function ensureMobileBackgroundDeselectListener() {
 		if (mobileBackgroundDeselectListenerActive || !isMobile) return;
-		const wrapper = document.querySelector('.split-calendar__day-wrapper');
+		const wrapper = getDayWrapperEl();
 		if (!wrapper) return;
 		mobileBackgroundDeselectListenerActive = true;
 		wrapper.addEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
 			capture: true,
 			passive: true
 		});
+		// Capture so FullCalendar / nested scrollers cannot swallow the start of a day swipe.
 		wrapper.addEventListener('pointerdown', handleMobileDaySwipePointerDown, {
-			capture: false,
-			passive: true
-		});
-		wrapper.addEventListener('pointerup', handleMobileDaySwipePointerUp, {
-			capture: false,
-			passive: true
-		});
-		wrapper.addEventListener('pointercancel', handleMobileDaySwipePointerCancel, {
-			capture: false,
+			capture: true,
 			passive: true
 		});
 	}
 
 	function teardownMobileBackgroundListeners() {
-		const wrapper = document.querySelector('.split-calendar__day-wrapper');
-		if (!wrapper || !mobileBackgroundDeselectListenerActive) return;
+		const wrapper = getDayWrapperEl();
+		teardownMobileDaySwipeDocListeners();
+		mobileDaySwipe = null;
+		if (!wrapper || !mobileBackgroundDeselectListenerActive) {
+			mobileBackgroundDeselectListenerActive = false;
+			return;
+		}
 		wrapper.removeEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
 			capture: true
 		} as EventListenerOptions);
-		wrapper.removeEventListener('pointerdown', handleMobileDaySwipePointerDown);
-		wrapper.removeEventListener('pointerup', handleMobileDaySwipePointerUp);
-		wrapper.removeEventListener('pointercancel', handleMobileDaySwipePointerCancel);
+		wrapper.removeEventListener('pointerdown', handleMobileDaySwipePointerDown, {
+			capture: true
+		} as EventListenerOptions);
 		mobileBackgroundDeselectListenerActive = false;
 	}
 
@@ -797,6 +870,7 @@
 	}
 
 	let dayEl = $state<HTMLDivElement | null>(null);
+	let dayWrapperEl = $state<HTMLDivElement | null>(null);
 	const initialSearchParams =
 		typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
 
@@ -927,6 +1001,12 @@
 			}
 		}, 400);
 	}
+
+	// Attach mobile day-swipe / background-deselect listeners once the wrapper is in the DOM.
+	$effect(() => {
+		if (!isMobile || !dayWrapperEl) return;
+		ensureMobileBackgroundDeselectListener();
+	});
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
@@ -2075,7 +2155,7 @@
 				{/if}
 			</div>
 
-			<div class="split-calendar__day-wrapper" class:refreshing={isSyncing}>
+			<div class="split-calendar__day-wrapper" class:refreshing={isSyncing} bind:this={dayWrapperEl}>
 				<div class="split-calendar__day" bind:this={dayEl}></div>
 			</div>
 		</div>
@@ -2234,6 +2314,9 @@
 			min-height: 0;
 			overflow-y: auto; /* internal scroll for the day's time slots */
 			-webkit-overflow-scrolling: touch;
+			/* Vertical scroll only — horizontal gestures stay available for day swipe nav. */
+			touch-action: pan-y;
+			overscroll-behavior-x: contain;
 			margin-bottom: 0;
 			border-radius: var(--radius-md);
 		}
@@ -2241,6 +2324,19 @@
 		/* Make the FC container inside fill the remaining height */
 		.split-calendar__day {
 			height: 100%;
+			touch-action: pan-y;
+		}
+
+		/* FullCalendar's internal scroller also claims touches by default; lock it to pan-y
+		   so left/right swipes are not cancelled mid-gesture by the browser scroll takeover. */
+		:global(.split-calendar__day .fc-scroller),
+		:global(.split-calendar__day .fc-timegrid-body),
+		:global(.split-calendar__day .fc-timegrid-cols),
+		:global(.split-calendar__day .fc-timegrid-col-frame),
+		:global(.split-calendar__day .fc-timegrid-col-bg),
+		:global(.split-calendar__day .fc-timegrid-col-events),
+		:global(.split-calendar__day .fc-timegrid-slot) {
+			touch-action: pan-y;
 		}
 	}
 
@@ -2881,10 +2977,6 @@
 			pointer-events: none;
 		}
 
-		/* Soft edge hint that the day grid supports horizontal swipe navigation. */
-		.split-calendar__day-wrapper {
-			overscroll-behavior-x: contain;
-		}
 	}
 
 	/* Ghost / drag visual feedback.
