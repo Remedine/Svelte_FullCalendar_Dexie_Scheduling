@@ -5,7 +5,16 @@
 	import dayGridPlugin from '@fullcalendar/daygrid';
 	import interactionPlugin from '@fullcalendar/interaction';
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import { getJobsForRange, updateJobDates, getUserPhotoSrc, db, cleanupDuplicateUsers, dedupJobs, repairJobDateFields } from '$lib/db/index';
+	import {
+		getJobsForRange,
+		updateJobDates,
+		getUserPhotoSrc,
+		db,
+		cleanupDuplicateUsers,
+		cleanupDuplicateJobs,
+		dedupJobs,
+		repairJobDateFields
+	} from '$lib/db/index';
 	import { pullJobsFromServer, applyServerJobRecord, pb } from '$lib/db/pb';
 	import { onJobsRealtime } from '$lib/db/realtime';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
@@ -211,10 +220,18 @@
 		return { x: 0, y: 0 };
 	}
 
-	// Mobile touch zones: drag only from + handle, resize only from edge pills (custom gesture).
-	// FullCalendar touch resize requires pre-selecting by internal instanceId and fights scroll.
+	// Mobile touch model (select-first, fat-finger safe):
+	// 1) Tap appointment → select (shows move grip + resize pills)
+	// 2) Hold/drag selected card → move time or drop on month picker
+	// 3) Drag top/bottom pills → resize duration only
+	// 4) Second tap on selected body → open job
+	// 5) Horizontal swipe on empty day grid → previous / next day
+	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
 	const MOBILE_EDGE_SCROLL_THRESHOLD_PX = 72;
 	const MOBILE_EDGE_SCROLL_MAX_VELOCITY = 390;
+	const MOBILE_SWIPE_MIN_DX_PX = 56;
+	const MOBILE_SWIPE_MAX_SLOPE = 0.65;
+	const MOBILE_TAP_MOVE_SLOP_PX = 14;
 
 	let mobileEdgeScrollPointerY: number | null = null;
 	let mobileEdgeScrollRaf: number | null = null;
@@ -243,32 +260,55 @@
 
 	function isMobileGestureChromeTarget(target: EventTarget | null): boolean {
 		if (!(target instanceof Element)) return false;
-		return !!target.closest('.fc-event-resizer');
+		return !!target.closest('.fc-event-resizer, .fc-event__move-handle');
 	}
 
 	let selectedMobileEventId = $state<string | null>(null);
 	let suppressNextDateClick = false;
+	let suppressNextEventClick = false;
 	let mobileBackgroundDeselectListenerActive = false;
+	let mobileDaySwipe:
+		| { x: number; y: number; pointerId: number; fromEvent: boolean }
+		| null = null;
+	let mobileEventPointer:
+		| { eventId: string; x: number; y: number; moved: boolean }
+		| null = null;
+
+	function setMobileEventStartEditable(eventId: string | null, editable: boolean) {
+		if (!dayApi || !eventId) return;
+		const ev = dayApi.getEventById(eventId);
+		if (ev) {
+			ev.setProp('startEditable', editable);
+		}
+	}
 
 	function clearMobileEventSelection() {
 		if (!selectedMobileEventId) return;
+		setMobileEventStartEditable(selectedMobileEventId, false);
 		document.querySelectorAll('.fc-event--mobile-selected').forEach((el) => {
 			el.classList.remove('fc-event--mobile-selected');
 		});
 		selectedMobileEventId = null;
+		mobileEventPointer = null;
 	}
 
 	function selectMobileEvent(eventId: string, eventEl: HTMLElement) {
-		clearMobileEventSelection();
+		if (selectedMobileEventId && selectedMobileEventId !== eventId) {
+			setMobileEventStartEditable(selectedMobileEventId, false);
+			document.querySelectorAll('.fc-event--mobile-selected').forEach((el) => {
+				el.classList.remove('fc-event--mobile-selected');
+			});
+		}
 		selectedMobileEventId = eventId;
 		eventEl.classList.add('fc-event--mobile-selected');
+		setMobileEventStartEditable(eventId, true);
 	}
 
 	function handleMobileCalendarBackgroundPointerDown(e: PointerEvent) {
 		if (!isMobile || appointmentDragActive || activeMobileResize) return;
 		const target = e.target;
 		if (!(target instanceof Element)) return;
-		if (target.closest('.fc-event-resizer')) return;
+		if (isMobileGestureChromeTarget(target)) return;
 
 		const eventRoot = target.closest('.fc-event') as HTMLElement | null;
 		if (!eventRoot) {
@@ -279,7 +319,59 @@
 
 		const id = eventRoot.dataset.mobileEventId;
 		if (id && id !== selectedMobileEventId) {
+			// Deselect previous; eventClick will select the new one.
 			clearMobileEventSelection();
+		}
+	}
+
+	async function shiftCalendarDay(deltaDays: number) {
+		const base = parseLocalDate(selectedDate);
+		if (isNaN(base.getTime())) return;
+		base.setDate(base.getDate() + deltaDays);
+		clearMobileEventSelection();
+		suppressNextDateClick = true;
+		await handleDateSelect(getLocalDateString(base));
+	}
+
+	function handleMobileDaySwipePointerDown(e: PointerEvent) {
+		if (!isMobile || appointmentDragActive || activeMobileResize) return;
+		if (e.pointerType === 'mouse' && e.button !== 0) return;
+		if (!(e.target instanceof Element)) return;
+		// Only the day grid area (not month picker / filters).
+		if (e.target.closest('.month-picker, .split-calendar__filters, .split-calendar__view-switcher')) {
+			return;
+		}
+		const fromEvent = !!e.target.closest('.fc-event');
+		mobileDaySwipe = {
+			x: e.clientX,
+			y: e.clientY,
+			pointerId: e.pointerId,
+			fromEvent
+		};
+	}
+
+	function handleMobileDaySwipePointerUp(e: PointerEvent) {
+		const gesture = mobileDaySwipe;
+		if (!gesture || gesture.pointerId !== e.pointerId) {
+			mobileDaySwipe = null;
+			return;
+		}
+		mobileDaySwipe = null;
+
+		if (!isMobile || appointmentDragActive || activeMobileResize || gesture.fromEvent) return;
+
+		const dx = e.clientX - gesture.x;
+		const dy = e.clientY - gesture.y;
+		if (Math.abs(dx) < MOBILE_SWIPE_MIN_DX_PX) return;
+		if (Math.abs(dy) > Math.abs(dx) * MOBILE_SWIPE_MAX_SLOPE) return;
+
+		// Swipe left → next day; swipe right → previous day.
+		void shiftCalendarDay(dx < 0 ? 1 : -1);
+	}
+
+	function handleMobileDaySwipePointerCancel(e: PointerEvent) {
+		if (mobileDaySwipe?.pointerId === e.pointerId) {
+			mobileDaySwipe = null;
 		}
 	}
 
@@ -292,6 +384,30 @@
 			capture: true,
 			passive: true
 		});
+		wrapper.addEventListener('pointerdown', handleMobileDaySwipePointerDown, {
+			capture: false,
+			passive: true
+		});
+		wrapper.addEventListener('pointerup', handleMobileDaySwipePointerUp, {
+			capture: false,
+			passive: true
+		});
+		wrapper.addEventListener('pointercancel', handleMobileDaySwipePointerCancel, {
+			capture: false,
+			passive: true
+		});
+	}
+
+	function teardownMobileBackgroundListeners() {
+		const wrapper = document.querySelector('.split-calendar__day-wrapper');
+		if (!wrapper || !mobileBackgroundDeselectListenerActive) return;
+		wrapper.removeEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
+			capture: true
+		} as EventListenerOptions);
+		wrapper.removeEventListener('pointerdown', handleMobileDaySwipePointerDown);
+		wrapper.removeEventListener('pointerup', handleMobileDaySwipePointerUp);
+		wrapper.removeEventListener('pointercancel', handleMobileDaySwipePointerCancel);
+		mobileBackgroundDeselectListenerActive = false;
 	}
 
 	function getEventHarnessEl(el: HTMLElement): HTMLElement | null {
@@ -535,6 +651,23 @@
 		}
 	}
 
+	function ensureMobileMoveHandle(eventEl: HTMLElement) {
+		if (eventEl.querySelector('.fc-event__move-handle')) return;
+		const handle = document.createElement('button');
+		handle.type = 'button';
+		handle.className = 'fc-event__move-handle';
+		handle.setAttribute('aria-label', 'Hold and drag to move appointment');
+		handle.tabIndex = -1;
+		handle.innerHTML =
+			'<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5 3.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm7-9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>';
+		// Prevent button click from opening the job modal; drag is handled by FullCalendar long-press.
+		handle.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+		});
+		eventEl.appendChild(handle);
+	}
+
 	function setupMobileEventTouchZones(info: {
 		el: HTMLElement;
 		event: {
@@ -547,11 +680,17 @@
 		const eventEl = info.el;
 		eventEl.dataset.mobileEventId = info.event.id;
 		eventEl.classList.add('fc-event-draggable');
+		ensureMobileMoveHandle(eventEl);
+
+		// Re-apply selection + drag permission after FC rebuilds event DOM.
+		if (selectedMobileEventId === info.event.id) {
+			eventEl.classList.add('fc-event--mobile-selected');
+			setMobileEventStartEditable(info.event.id, true);
+		} else {
+			setMobileEventStartEditable(info.event.id, false);
+		}
 
 		if (eventEl.dataset.mobileTouchZones === '1') {
-			if (selectedMobileEventId === info.event.id) {
-				eventEl.classList.add('fc-event--mobile-selected');
-			}
 			return;
 		}
 		eventEl.dataset.mobileTouchZones = '1';
@@ -565,6 +704,37 @@
 			? new Date(info.event.end)
 			: new Date(originalStart.getTime() + getMobileSlotMetrics().slotMs);
 
+		// Track finger movement so a sloppy second tap does not open the job when the user meant to drag.
+		eventEl.addEventListener(
+			'pointerdown',
+			(e) => {
+				if (!isMobile) return;
+				if (e.pointerType === 'mouse' && e.button !== 0) return;
+				const target = e.target;
+				if (!(target instanceof Element) || isMobileGestureChromeTarget(target)) return;
+				mobileEventPointer = {
+					eventId,
+					x: e.clientX,
+					y: e.clientY,
+					moved: false
+				};
+			},
+			{ capture: true, passive: true }
+		);
+
+		eventEl.addEventListener(
+			'pointermove',
+			(e) => {
+				if (!mobileEventPointer || mobileEventPointer.eventId !== eventId) return;
+				const dx = e.clientX - mobileEventPointer.x;
+				const dy = e.clientY - mobileEventPointer.y;
+				if (Math.hypot(dx, dy) > MOBILE_TAP_MOVE_SLOP_PX) {
+					mobileEventPointer.moved = true;
+				}
+			},
+			{ capture: true, passive: true }
+		);
+
 		eventEl.addEventListener(
 			'touchstart',
 			(e) => {
@@ -572,6 +742,12 @@
 				if (!(target instanceof Element)) return;
 				const resizer = target.closest('.fc-event-resizer');
 				if (!resizer) return;
+
+				// Resize only works after selection so fat-finger edge hits don't fight with select/open.
+				if (selectedMobileEventId !== eventId) {
+					selectMobileEvent(eventId, eventEl);
+					return;
+				}
 
 				const status = info.event.extendedProps?.status;
 				if (status === 'completed' || status === 'cancelled') {
@@ -588,6 +764,12 @@
 				e.stopPropagation();
 
 				const scrollEl = getMobileScrollEl();
+				// Fresh dates from FC (not closure from mount) so resize after drag stays correct.
+				const liveEvent = dayApi?.getEventById(eventId);
+				const liveStart = liveEvent?.start ? new Date(liveEvent.start) : originalStart;
+				const liveEnd = liveEvent?.end
+					? new Date(liveEvent.end)
+					: originalEnd;
 
 				beginCalendarInteraction();
 				activeMobileResize = {
@@ -597,10 +779,10 @@
 					resizeStartEdge: resizer.classList.contains('fc-event-resizer-start'),
 					pointerStartY: touch.clientY,
 					initialScrollTop: scrollEl?.scrollTop ?? 0,
-					originalStart,
-					originalEnd,
-					previewStart: originalStart,
-					previewEnd: originalEnd
+					originalStart: liveStart,
+					originalEnd: liveEnd,
+					previewStart: liveStart,
+					previewEnd: liveEnd
 				};
 
 				eventEl.classList.add('fc-event-resizing');
@@ -754,9 +936,21 @@
 
 		const listener = (e: MediaQueryListEvent) => {
 			isMobile = e.matches;
-			if (isMobile) ensureMobileDayView();
+			if (isMobile) {
+				ensureMobileDayView();
+				ensureMobileBackgroundDeselectListener();
+			} else {
+				clearMobileEventSelection();
+				teardownMobileBackgroundListeners();
+			}
 			if (dayApi) {
-				dayApi.setOption('eventResizableFromStart', isMobile);
+				dayApi.setOption('eventStartEditable', !isMobile);
+				dayApi.setOption('eventDurationEditable', !isMobile);
+				dayApi.setOption('eventResizableFromStart', false);
+				dayApi.setOption('selectable', !isMobile);
+				dayApi.setOption('eventDragMinDistance', isMobile ? 18 : 10);
+				dayApi.setOption('eventLongPressDelay', isMobile ? 450 : 280);
+				dayApi.setOption('longPressDelay', isMobile ? 450 : 280);
 			}
 		};
 		mql.addEventListener('change', listener);
@@ -970,6 +1164,12 @@
 		const { start, end } = getCalendarJobsRange(focusDateStr);
 		const includeCancelled = shouldIncludeCancelledJobs();
 		await repairJobDateFields();
+		// Remove local-uuid + canonical pbId twin rows so the day grid never paints the same job twice.
+		try {
+			await cleanupDuplicateJobs();
+		} catch {
+			// best-effort; range query still dedups in memory
+		}
 		jobs = await getJobsForRange(start, end, includeCancelled);
 		loadedJobsRangeStart = start;
 		loadedJobsRangeEnd = end;
@@ -1308,15 +1508,22 @@
 				nowIndicator: true,
 				expandRows: false,
 				editable: true,
-				// On mobile, allow resizing from both top and bottom edges — doubles the touch targets.
-				eventResizableFromStart: isMobile,
+				// Mobile: select-first model. Events are not start-editable until selected (see setMobileEventStartEditable).
+				// Duration resize uses custom edge pills, not FullCalendar's built-in touch resize.
+				eventStartEditable: !isMobile,
+				eventDurationEditable: !isMobile,
+				// Mobile uses custom edge pills; keep false so FC resize never fights custom gesture.
+				eventResizableFromStart: false,
+				// Drag-to-create ranges fight with day swipes on touch; use dateClick only.
+				selectable: !isMobile,
 				dragScroll: true,
 				snapDuration: '00:30:00',
-				eventDragMinDistance: 10,
-				// Mobile: 1s hold anywhere on the card enters ghost/drag mode. Short taps select / open edit.
-				eventLongPressDelay: isMobile ? 1000 : 280,
+				// Higher min distance reduces accidental moves from fat-finger jitter.
+				eventDragMinDistance: isMobile ? 18 : 10,
+				// Mobile: hold on a *selected* card to move. Unselected cards only select on tap.
+				eventLongPressDelay: isMobile ? 450 : 280,
 				selectLongPressDelay: isMobile ? 1000 : 280,
-				longPressDelay: isMobile ? 1000 : 280,
+				longPressDelay: isMobile ? 450 : 280,
 
 				dateClick: (info) => {
 					if (isMobile && suppressNextDateClick) {
@@ -1440,10 +1647,18 @@
 
 					if (status === 'completed' || status === 'cancelled') {
 						toast.error('Cannot move cancelled or completed jobs');
+						info.event.setProp('startEditable', false);
 						return;
 					}
 
-					clearMobileEventSelection();
+					// Mobile: only the currently selected appointment can enter drag mode.
+					// Prevents "stuck moving" when a long-press hits an unselected neighbor.
+					if (isMobile && selectedMobileEventId !== info.event.id) {
+						info.event.setProp('startEditable', false);
+						return;
+					}
+
+					suppressNextEventClick = true;
 					beginCalendarInteraction();
 					draggedJobId = info.event.id!;
 					originalEventRect = info.el.getBoundingClientRect();
@@ -1456,11 +1671,20 @@
 					appointmentDragActive = false;
 					endCalendarInteraction();
 					originalEventRect = null;
+					// Avoid opening the job modal from the pointerup that ends a drag.
+					suppressNextEventClick = true;
+					window.setTimeout(() => {
+						suppressNextEventClick = false;
+					}, 320);
 
 					if (!draggedJobId) return;
 
 					const monthPickerEl = document.querySelector('.month-picker');
 					if (!monthPickerEl) {
+						// Keep selection after an internal time-slot drag so resize handles remain available.
+						if (isMobile && info.event.id) {
+							selectMobileEvent(info.event.id, info.el);
+						}
 						draggedJobId = null;
 						return;
 					}
@@ -1493,21 +1717,41 @@
 					if (monthPickerDay) {
 						isExternalDrop = true;
 						handleExternalDrop(draggedJobId, clientX, clientY);
+					} else if (isMobile && info.event.id) {
+						// Stay selected after internal move so user can adjust edges without re-tapping.
+						selectMobileEvent(info.event.id, info.el);
 					}
 
 					draggedJobId = null;
 				},
 
 				select: (info) => {
+					if (isMobile) return;
 					openJobModal({ start: info.start, end: info.end }, () => refreshAfterUpdate());
 				},
 
 				eventClick: (info) => {
+					if (isMobile && suppressNextEventClick) {
+						suppressNextEventClick = false;
+						return;
+					}
+
 					if (isMobile && isMobileGestureChromeTarget(info.jsEvent.target)) {
 						return;
 					}
 
 					if (isMobile) {
+						const pointer = mobileEventPointer;
+						mobileEventPointer = null;
+						// Finger slid while pressing — treat as drag intent, not a second-tap open.
+						if (pointer?.eventId === info.event.id && pointer.moved) {
+							if (selectedMobileEventId !== info.event.id) {
+								clearJobHighlight();
+								selectMobileEvent(info.event.id!, info.el);
+							}
+							return;
+						}
+
 						if (selectedMobileEventId === info.event.id) {
 							clearMobileEventSelection();
 							clearJobHighlight();
@@ -1616,13 +1860,12 @@
 		return () => {
 			// Do NOT reset calendarInitialized here.
 			// (See comment at declaration for why.)
-			const wrapper = document.querySelector('.split-calendar__day-wrapper');
-			if (wrapper && mobileBackgroundDeselectListenerActive) {
-				wrapper.removeEventListener('pointerdown', handleMobileCalendarBackgroundPointerDown, {
-					capture: true
-				});
-				mobileBackgroundDeselectListenerActive = false;
-			}
+			teardownMobileBackgroundListeners();
+			stopAppointmentDragToMonthTracking();
+			clearMobileResizeListeners();
+			activeMobileResize = null;
+			appointmentDragActive = false;
+			calendarInteractionDepth = 0;
 			clearMobileEventSelection();
 			if (api) {
 				api.destroy();
@@ -2488,13 +2731,20 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 	}
 
-	/* Mobile / touch: tap to select (shows resize handles), second tap to edit, 1s hold to drag. */
+	/* Mobile / touch:
+	   - Tap = select (move grip + resize pills)
+	   - Hold selected card = move
+	   - Drag edge pills = resize
+	   - Second clean tap = open
+	   - Swipe empty day grid left/right = next/prev day
+	*/
 	@media (max-width: 768px) {
 		:global(.fc-event__drag-handle) {
 			display: none !important;
 		}
 
 		:global(.fc-event--draggable) {
+			/* Allow vertical scroll through unselected cards; selected cards opt into pan-x via FC drag. */
 			touch-action: pan-y;
 		}
 
@@ -2503,13 +2753,46 @@
 				0 0 0 2px var(--color-primary),
 				0 4px 12px rgb(0 0 0 / 0.18);
 			z-index: 12;
+			/* Selected card: FC long-press drag needs free pointer movement. */
+			touch-action: none;
 		}
 
 		:global(.fc-event--draggable:active:not(.fc-event-dragging)) {
 			transform: scale(0.995);
 		}
 
-		/* Resize handles appear only after the card is selected. */
+		/* Move grip + resize handles only after selection (large fat-finger targets). */
+		:global(.fc-event__move-handle) {
+			display: none;
+			position: absolute;
+			top: 4px;
+			right: 4px;
+			width: 36px;
+			height: 36px;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 8px;
+			background: rgba(0, 0, 0, 0.28);
+			color: #fff;
+			align-items: center;
+			justify-content: center;
+			z-index: 24;
+			touch-action: none;
+			cursor: grab;
+			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+			-webkit-tap-highlight-color: transparent;
+		}
+
+		:global(.fc-event--mobile-selected .fc-event__move-handle) {
+			display: flex;
+		}
+
+		:global(.event-completed .fc-event__move-handle),
+		:global(.event-cancelled .fc-event__move-handle) {
+			display: none !important;
+		}
+
 		:global(.fc-timegrid-event .fc-event-resizer) {
 			display: none;
 		}
@@ -2529,9 +2812,9 @@
 		*/
 		:global(.fc-timegrid-event .fc-event__crew-avatars) {
 			top: auto;
-			bottom: 10px;
+			bottom: 12px;
 			left: auto;
-			right: 3px;
+			right: 4px;
 		}
 
 		:global(.fc-timegrid-event .fc-event__crew-avatar) {
@@ -2541,62 +2824,67 @@
 		}
 
 		:global(.fc-timegrid-event .fc-event-time) {
-			padding-right: 4px;
+			padding-right: 40px;
 		}
 
 		:global(.fc-timegrid-event .fc-event-title) {
 			padding-bottom: 8px;
 			padding-top: 2px;
+			padding-right: 4px;
 		}
 
 		:global(.fc-event--mobile-selected .fc-event-title) {
-			padding-bottom: 22px;
+			padding-bottom: 24px;
 		}
 
 		:global(.fc-event-resizer) {
-			height: 44px;
+			height: 48px;
 			z-index: 22;
-			background-color: rgba(255, 255, 255, 0.2);
-			border-radius: 4px;
+			background-color: rgba(255, 255, 255, 0.22);
+			border-radius: 6px;
 			touch-action: none;
 		}
 
 		:global(.fc-event-resizer-end) {
-			bottom: -8px;
+			bottom: -10px;
 		}
 
 		:global(.fc-event-resizer-end::after) {
 			content: '';
 			position: absolute;
 			left: 50%;
-			bottom: 10px;
+			bottom: 12px;
 			transform: translateX(-50%);
-			width: 40px;
-			height: 5px;
+			width: 48px;
+			height: 6px;
 			border-radius: 3px;
-			background: rgba(255, 255, 255, 0.92);
-			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+			background: rgba(255, 255, 255, 0.95);
+			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 			pointer-events: none;
 		}
 
 		:global(.fc-event-resizer-start) {
-			top: -8px;
+			top: -10px;
 		}
 
 		:global(.fc-event-resizer-start::after) {
 			content: '';
 			position: absolute;
 			left: 50%;
-			top: 10px;
+			top: 12px;
 			transform: translateX(-50%);
-			width: 40px;
-			height: 5px;
+			width: 48px;
+			height: 6px;
 			border-radius: 3px;
-			background: rgba(255, 255, 255, 0.92);
-			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+			background: rgba(255, 255, 255, 0.95);
+			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 			pointer-events: none;
 		}
 
+		/* Soft edge hint that the day grid supports horizontal swipe navigation. */
+		.split-calendar__day-wrapper {
+			overscroll-behavior-x: contain;
+		}
 	}
 
 	/* Ghost / drag visual feedback.

@@ -1684,4 +1684,24 @@ describe('dedupJobs prefers newer updatedAt', () => {
 		expect(result[0].id).toBe('local-uuid-1');
 		expect(result[0].start).toEqual(freshLocal.start);
 	});
+
+	it('collapses create+pull twins where id of one row is the pbId of the other', () => {
+		const local = {
+			id: 'local-uuid-2',
+			pbId: 'pb-job-2',
+			updatedAt: new Date('2026-07-01T10:00:00'),
+			title: 'Local'
+		} as Job;
+		// Same logical job keyed only by id (race row from pull before pbId was written on local).
+		const raceCanonical = {
+			id: 'pb-job-2',
+			pbId: 'pb-job-2',
+			updatedAt: new Date('2026-07-01T09:00:00'),
+			title: 'Race'
+		} as Job;
+
+		const result = dedupJobs([local, raceCanonical]);
+		expect(result).toHaveLength(1);
+		expect(result[0].id).toBe('local-uuid-2');
+	});
 });

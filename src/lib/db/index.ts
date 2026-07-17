@@ -888,8 +888,34 @@ export async function getJobsForRange(
  * Deduplicate an array of jobs by canonical key (pbId preferred, then local id).
  * Central helper so the calendar snapshot, client page lists, etc. all see the same unique set
  * even when Dexie has accumulated (pbId + local-uuid) records for the same logical job.
+ *
+ * Also collapses the create+pull race where one row is local-uuid+pbId and another is id===pbId.
  */
 export function dedupJobs(list: Job[]): Job[] {
+	const preferJob = (existing: Job, candidate: Job): Job => {
+		const existingUpdated = new Date(existing.updatedAt || 0).getTime();
+		const candidateUpdated = new Date(candidate.updatedAt || 0).getTime();
+
+		// Prefer the most recently edited row. Canonical id === pbId is only a tiebreaker so
+		// drag-and-drop updates on a local-uuid row are not discarded when a stale canonical row exists.
+		if (candidateUpdated > existingUpdated) return candidate;
+		if (candidateUpdated < existingUpdated) return existing;
+
+		const existingIsCanonical = !!existing.pbId && existing.id === existing.pbId;
+		const candidateIsCanonical = !!candidate.pbId && candidate.id === candidate.pbId;
+		const candidateIsLocalWithPb =
+			!!candidate.pbId && !!candidate.id && candidate.id !== candidate.pbId;
+		const existingIsLocalWithPb =
+			!!existing.pbId && !!existing.id && existing.id !== existing.pbId;
+
+		// When timestamps match, keep the local-uuid row that already carries pbId
+		// (that is what drag/update paths usually mutate).
+		if (candidateIsLocalWithPb && existingIsCanonical) return candidate;
+		if (existingIsLocalWithPb && candidateIsCanonical) return existing;
+		if (candidateIsCanonical && !existingIsCanonical) return candidate;
+		return existing;
+	};
+
 	const byKey = new Map<string, Job>();
 	for (const j of list) {
 		const key = j.pbId || j.id || '';
@@ -899,25 +925,25 @@ export function dedupJobs(list: Job[]): Job[] {
 			byKey.set(key, j);
 			continue;
 		}
-
-		const existingUpdated = new Date(existing.updatedAt || 0).getTime();
-		const candidateUpdated = new Date(j.updatedAt || 0).getTime();
-
-		// Prefer the most recently edited row. Canonical id === pbId is only a tiebreaker so
-		// drag-and-drop updates on a local-uuid row are not discarded when a stale canonical row exists.
-		if (candidateUpdated > existingUpdated) {
-			byKey.set(key, j);
-		} else if (candidateUpdated < existingUpdated) {
-			// keep existing
-		} else {
-			const existingIsCanonical = existing.id === existing.pbId;
-			const candidateIsCanonical = j.id === j.pbId;
-			if (candidateIsCanonical && !existingIsCanonical) {
-				byKey.set(key, j);
-			}
-		}
+		byKey.set(key, preferJob(existing, j));
 	}
-	return Array.from(byKey.values());
+
+	// Second pass: collapse twins where one row's id is the other row's pbId
+	// (same logical job indexed under two different Map keys).
+	const jobs = Array.from(byKey.values());
+	const byId = new Map(jobs.map((j) => [j.id!, j] as const));
+	const drop = new Set<string>();
+
+	for (const j of jobs) {
+		if (!j.id || !j.pbId || j.pbId === j.id || drop.has(j.id)) continue;
+		const twin = byId.get(j.pbId);
+		if (!twin || twin.id === j.id || drop.has(twin.id!)) continue;
+		const keep = preferJob(j, twin);
+		const lose = keep.id === j.id ? twin : j;
+		if (lose.id) drop.add(lose.id);
+	}
+
+	return jobs.filter((j) => j.id && !drop.has(j.id));
 }
 
 /**
@@ -1931,6 +1957,17 @@ async function runProcessSyncQueue(): Promise<void> {
 					try {
 						const record = await pb.collection('jobs').create(pbPayload);
 						await db.jobs.update(item.recordId, { pbId: record.id });
+						// Pull/realtime can race ahead and insert a second row with id === PB id.
+						// Drop that phantom so we keep the local UUID row (with pbId set) as the single source.
+						if (item.recordId !== record.id) {
+							const raceRow = await db.jobs.get(record.id);
+							if (raceRow && raceRow.pbId === record.id) {
+								await db.jobs.delete(record.id);
+								console.log(
+									`🧹 Removed race-created job row ${record.id} (kept local ${item.recordId})`
+								);
+							}
+						}
 						console.log(`✅ Job pushed to PocketBase: ${record.id}`);
 						itemSynced = true;
 					} catch (err: any) {
