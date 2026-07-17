@@ -445,7 +445,12 @@ function timestampMs(value: Date | string | number | undefined): number {
 
 /** Merge one PocketBase job record into Dexie with updatedAt conflict check. */
 export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipped'> {
-	const existingLocal = await db.jobs.where('pbId').equals(rec.id).first();
+	// Prefer the offline-created row that already has this pbId (local UUID id).
+	let existingLocal = await db.jobs.where('pbId').equals(rec.id).first();
+	// Also match a row whose primary key is already the PB id (server-originated / prior pull).
+	if (!existingLocal) {
+		existingLocal = await db.jobs.get(rec.id);
+	}
 
 	const serverJob = {
 		id: existingLocal ? existingLocal.id : rec.id,
@@ -480,6 +485,15 @@ export async function applyServerJobRecord(rec: any): Promise<'applied' | 'skipp
 	}
 
 	await db.jobs.put(serverJob);
+
+	// If we kept a local-uuid row, drop a twin row keyed by the PB id (common create+pull race).
+	if (serverJob.id !== rec.id) {
+		const twin = await db.jobs.get(rec.id);
+		if (twin && twin.pbId === rec.id) {
+			await db.jobs.delete(rec.id);
+		}
+	}
+
 	return 'applied';
 }
 
