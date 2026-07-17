@@ -10,6 +10,7 @@
 		type BulkCommitResult,
 		type BulkDryRunResult,
 		type BulkEntity,
+		type BulkFileAttachResult,
 		type BulkTemplateId
 	} from '$lib/bulk';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -31,6 +32,15 @@
 	let lastPayload = $state<Parameters<typeof runBulkDryRun>[0] | null>(null);
 	let apiError = $state('');
 	let filterErrorsOnly = $state(false);
+
+	// Supporting / primary document attach
+	let attachFiles = $state<File[]>([]);
+	let attachMappingText = $state('');
+	let treatDocxAsPrimary = $state(true);
+	let attachLoading = $state(false);
+	let attachCommitting = $state(false);
+	let attachResult = $state<BulkFileAttachResult | null>(null);
+	let attachError = $state('');
 
 	const templateIds = Object.keys(BULK_TEMPLATES) as BulkTemplateId[];
 
@@ -272,6 +282,10 @@
 				return 'Created';
 			case 'updated':
 				return 'Updated';
+			case 'would_attach':
+				return 'Would attach';
+			case 'attached':
+				return 'Attached';
 			case 'deferred':
 				return 'Deferred';
 			case 'error':
@@ -280,6 +294,157 @@
 				return action;
 		}
 	}
+
+	function onAttachFilesChange(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		attachFiles = input.files ? Array.from(input.files) : [];
+		attachResult = null;
+		attachError = '';
+	}
+
+	function parseMapping():
+		| { ok: true; mapping?: Record<string, string> }
+		| { ok: false; error: string } {
+		const t = attachMappingText.trim();
+		if (!t) return { ok: true };
+		try {
+			const parsed = JSON.parse(t) as unknown;
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+				return { ok: false, error: 'Mapping must be a JSON object of filename → invoiceNumber' };
+			}
+			return { ok: true, mapping: parsed as Record<string, string> };
+		} catch {
+			return { ok: false, error: 'Mapping JSON is invalid' };
+		}
+	}
+
+	async function previewAttachments() {
+		attachError = '';
+		attachResult = null;
+		if (!attachFiles.length) {
+			attachError = 'Choose one or more files first';
+			toast.error(attachError);
+			return;
+		}
+		const map = parseMapping();
+		if (!map.ok) {
+			attachError = map.error;
+			toast.error(map.error);
+			return;
+		}
+		const token = pb.authStore.token;
+		if (!token) {
+			attachError = 'Not signed in';
+			toast.error(attachError);
+			return;
+		}
+		attachLoading = true;
+		try {
+			const form = new FormData();
+			form.set('dryRun', 'true');
+			form.set('treatDocxAsPrimary', treatDocxAsPrimary ? 'true' : 'false');
+			if (map.mapping) form.set('mapping', JSON.stringify(map.mapping));
+			for (const f of attachFiles) form.append('files', f);
+
+			const res = await fetch('/api/admin/bulk/files', {
+				method: 'POST',
+				headers: { Authorization: token },
+				body: form
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				attachError = data.error || `Preview failed (${res.status})`;
+				toast.error(attachError);
+				return;
+			}
+			attachResult = data as BulkFileAttachResult;
+			if (attachResult.summary.error > 0) {
+				toast.error(`${attachResult.summary.error} file(s) unmatched`);
+			} else {
+				toast.success(`${attachResult.summary.matched} file(s) matched`);
+			}
+		} catch (err) {
+			attachError = err instanceof Error ? err.message : 'Preview failed';
+			toast.error(attachError);
+		} finally {
+			attachLoading = false;
+		}
+	}
+
+	async function commitAttachments() {
+		attachError = '';
+		if (!attachFiles.length) {
+			toast.error('Choose files first');
+			return;
+		}
+		if (!attachResult || attachResult.summary.error > 0 || attachResult.summary.matched === 0) {
+			toast.error('Run a clean file preview first');
+			return;
+		}
+		if (attachResult.dryRun === false) {
+			toast.error('Already committed — choose files again to attach more');
+			return;
+		}
+		const ok = confirm(
+			`Attach ${attachResult.summary.matched} file(s) to invoices on the live server?`
+		);
+		if (!ok) return;
+
+		const map = parseMapping();
+		if (!map.ok) {
+			attachError = map.error;
+			toast.error(map.error);
+			return;
+		}
+		const token = pb.authStore.token;
+		if (!token) {
+			attachError = 'Not signed in';
+			toast.error(attachError);
+			return;
+		}
+		attachCommitting = true;
+		try {
+			const form = new FormData();
+			form.set('dryRun', 'false');
+			form.set('treatDocxAsPrimary', treatDocxAsPrimary ? 'true' : 'false');
+			if (map.mapping) form.set('mapping', JSON.stringify(map.mapping));
+			for (const f of attachFiles) form.append('files', f);
+
+			const res = await fetch('/api/admin/bulk/files', {
+				method: 'POST',
+				headers: { Authorization: token },
+				body: form
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				attachError = data.error || `Attach failed (${res.status})`;
+				toast.error(attachError);
+				return;
+			}
+			attachResult = data as BulkFileAttachResult;
+			const s = attachResult.summary;
+			if (s.error > 0) {
+				toast.error(`Attached ${s.attached}; ${s.error} error(s)`);
+			} else {
+				toast.success(`Attached ${s.attached} file(s)`);
+			}
+			try {
+				scheduleAppDataSync(auth.currentUser, 'bulk-import-files', true);
+			} catch {
+				/* non-fatal */
+			}
+		} catch (err) {
+			attachError = err instanceof Error ? err.message : 'Attach failed';
+			toast.error(attachError);
+		} finally {
+			attachCommitting = false;
+		}
+	}
+
+	const canAttachCommit = $derived.by(() => {
+		if (!attachResult || attachResult.dryRun === false) return false;
+		return attachResult.summary.matched > 0 && attachResult.summary.error === 0;
+	});
 </script>
 
 <div class="bulk-import">
@@ -288,7 +453,8 @@
 			<p class="bulk-import__lede">
 				Upload CSV or JSON, preview against the database, then <strong>commit</strong> clients,
 				jobs, and invoices (in that order). Re-uploads with the same
-				<code>externalId</code> / invoice number update existing rows.
+				<code>externalId</code> / invoice number update existing rows. After invoices exist, attach
+				scans or .docx files below (filename should include the invoice number).
 			</p>
 		</header>
 
@@ -537,6 +703,144 @@
 				</div>
 			</section>
 		{/if}
+
+		<section class="bulk-import__input bulk-import__attach" aria-label="Attach documents">
+			<h2 class="bulk-import__section-title">Attach documents</h2>
+			<p class="bulk-import__hint">
+				After invoices exist in the database, select scans or .docx files. Name each file with the
+				<strong>invoice number</strong> or <strong>importKey</strong> (e.g.
+				<code>CCW-2026-0001.pdf</code> or <code>scan_CCW-2026-0001_front.jpg</code>). Optional JSON
+				mapping overrides auto-match. <code>.docx</code> files become the primary invoice file unless
+				you turn that off.
+			</p>
+
+			<div class="bulk-import__field-row">
+				<label class="bulk-import__label" for="bulk-attach-files">Files</label>
+				<input
+					id="bulk-attach-files"
+					class="bulk-import__file"
+					type="file"
+					multiple
+					accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.docx,.doc,image/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+					onchange={onAttachFilesChange}
+				/>
+				{#if attachFiles.length}
+					<p class="bulk-import__file-name">{attachFiles.length} file(s) selected</p>
+				{/if}
+			</div>
+
+			<label class="bulk-import__filter">
+				<input type="checkbox" bind:checked={treatDocxAsPrimary} />
+				Treat .docx as primary invoice file
+			</label>
+
+			<div class="bulk-import__field-row">
+				<label class="bulk-import__label" for="bulk-attach-map"
+					>Optional mapping JSON (filename → invoiceNumber)</label
+				>
+				<textarea
+					id="bulk-attach-map"
+					class="bulk-import__textarea"
+					rows="4"
+					placeholder={'{\n  "scan1.jpg": "CCW-2026-0001"\n}'}
+					bind:value={attachMappingText}
+				></textarea>
+			</div>
+
+			<div class="bulk-import__actions">
+				<button
+					type="button"
+					class="bulk-import__btn bulk-import__btn--secondary"
+					onclick={previewAttachments}
+					disabled={attachLoading || attachCommitting || !attachFiles.length}
+				>
+					{attachLoading ? 'Matching…' : 'Preview file matches'}
+				</button>
+				<button
+					type="button"
+					class="bulk-import__btn bulk-import__btn--primary"
+					onclick={commitAttachments}
+					disabled={!canAttachCommit || attachLoading || attachCommitting}
+				>
+					{attachCommitting ? 'Uploading…' : 'Attach files'}
+				</button>
+			</div>
+
+			{#if attachError}
+				<p class="bulk-import__error" role="alert">{attachError}</p>
+			{/if}
+
+			{#if attachResult}
+				<div class="bulk-import__summary">
+					<div class="bulk-import__stat">
+						<span class="bulk-import__stat-label">Matched</span>
+						<span class="bulk-import__stat-value bulk-import__stat-value--ok"
+							>{attachResult.summary.matched}</span
+						>
+					</div>
+					<div class="bulk-import__stat">
+						<span class="bulk-import__stat-label">Errors</span>
+						<span class="bulk-import__stat-value bulk-import__stat-value--err"
+							>{attachResult.summary.error}</span
+						>
+					</div>
+					<div class="bulk-import__stat">
+						<span class="bulk-import__stat-label">Attached</span>
+						<span class="bulk-import__stat-value">{attachResult.summary.attached}</span>
+					</div>
+				</div>
+
+				<div class="bulk-import__table-wrap">
+					<table class="bulk-import__table">
+						<thead>
+							<tr>
+								<th>File</th>
+								<th>Action</th>
+								<th>Role</th>
+								<th>Invoice</th>
+								<th>Errors</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each attachResult.rows as row (row.filename)}
+								<tr
+									class:bulk-import__row--error={row.action === 'error'}
+									class:bulk-import__row--ok={row.action === 'would_attach' ||
+										row.action === 'attached'}
+								>
+									<td class="bulk-import__mono">{row.filename}</td>
+									<td>
+										<span
+											class="bulk-import__badge"
+											class:bulk-import__badge--ok={row.action === 'would_attach' ||
+												row.action === 'attached'}
+											class:bulk-import__badge--err={row.action === 'error'}
+										>
+											{actionLabel(row.action)}
+										</span>
+									</td>
+									<td>{row.role}</td>
+									<td class="bulk-import__mono"
+										>{row.invoiceNumber || row.importKey || row.invoiceId || '—'}</td
+									>
+									<td>
+										{#if row.errors?.length}
+											<ul class="bulk-import__row-errors">
+												{#each row.errors as e (e)}
+													<li>{e}</li>
+												{/each}
+											</ul>
+										{:else}
+											—
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</section>
 </div>
 
 <style>

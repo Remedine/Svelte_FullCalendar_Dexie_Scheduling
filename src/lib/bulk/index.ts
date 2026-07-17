@@ -65,3 +65,19 @@ export {
 	type InvoiceCounterBump
 } from './invoiceCounter';
 export { bumpNextInvoiceNumberAfterImport, type OptionsBumpResult } from './optionsBump';
+export {
+	matchFilesToInvoices,
+	buildInvoiceKeyIndex,
+	type InvoiceFileTarget,
+	type FileMatchResult,
+	type FileMatchRole,
+	type MatchFilesOptions
+} from './fileMatch';
+export {
+	planFileAttachments,
+	commitFileAttachments,
+	loadInvoiceFileTargets,
+	type BulkFileInput,
+	type BulkFileAttachResult,
+	type BulkFileAttachRow
+} from './attachFiles';
