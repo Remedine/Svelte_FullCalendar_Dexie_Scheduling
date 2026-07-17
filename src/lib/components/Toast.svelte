@@ -136,11 +136,39 @@
 		}
 	}
 
-	@media (max-width: 640px) {
+	/* Mobile: compact chips — base/lg felt like a banner on phones. */
+	@media (max-width: 768px) {
+		.toast-container {
+			top: var(--space-2);
+			gap: var(--space-2);
+			padding: 0 var(--space-3);
+		}
+
 		.toast {
-			padding: var(--space-5) var(--space-5);
-			font-size: var(--font-size-lg);
-			min-width: 260px;
+			padding: 8px 12px;
+			font-size: var(--font-size-sm, 0.8125rem);
+			line-height: 1.3;
+			min-width: 0;
+			max-width: min(360px, 94vw);
+			border-radius: var(--radius-md);
+			box-shadow: var(--shadow-sm);
+		}
+
+		.toast--countdown {
+			min-width: 0;
+			max-width: min(420px, 96vw);
+			font-size: var(--font-size-sm, 0.8125rem);
+		}
+
+		.toast__message {
+			margin-right: var(--space-2);
+		}
+
+		.toast__close {
+			font-size: 1rem;
+			min-width: 28px;
+			min-height: 28px;
+			padding: 2px 4px;
 		}
 	}
 </style>
