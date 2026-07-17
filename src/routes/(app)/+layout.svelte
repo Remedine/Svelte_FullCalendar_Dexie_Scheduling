@@ -383,8 +383,8 @@
 		background-color: var(--color-bg);
 	}
 
-	/* On mobile, allow the content (calendar etc) to be taller than the viewport so the page can scroll to show the full calendar. */
-	@media (max-width: 768px) {
+	/* On mobile (incl. phone landscape), allow the content (calendar etc) to be taller than the viewport so the page can scroll to show the full calendar. */
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.app-layout {
 			height: auto;
 			min-height: 100dvh;
@@ -427,11 +427,11 @@
 		}
 	}
 
-	@media (max-width: 768px) {
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.top-nav__menu {
 			display: none;
 		}
-		/* Completely hide the top navigation bar on mobile.
+		/* Completely hide the top navigation bar on mobile (incl. phone landscape).
 		   Avatar (profile/logout) + theme toggle are now integrated into the bottom tab bar (toggle placed under avatar). */
 		.top-nav {
 			display: none;
@@ -601,13 +601,13 @@
 		box-shadow: 0 -2px 8px rgb(0 0 0 / 0.06);
 	}
 
-	@media (max-width: 768px) {
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.bottom-nav {
 			display: flex;
 		}
 
 		/* Reserve space at bottom of main-content for the fixed bottom tab bar (now also contains user avatar + toggle on mobile).
-		   Content should not be hidden behind the fixed nav. */
+		   Content should not be hidden behind the fixed nav. Phone landscape keeps the same shell. */
 		.main-content {
 			display: flex;
 			flex-direction: column;

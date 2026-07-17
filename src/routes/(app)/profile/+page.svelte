@@ -31,7 +31,7 @@
 		registerPasskey,
 		removePasskey
 	} from '$lib/auth/passkeys';
-	import { isMobileViewport, MOBILE_MAX_WIDTH_PX } from '$lib/utils/device';
+	import { isMobileViewport, mobileViewportMediaQuery } from '$lib/utils/device';
 
 	let loading = $state(false);
 	let error = $state('');
@@ -133,7 +133,7 @@
 
 	$effect(() => {
 		isMobile = isMobileViewport();
-		const mql = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH_PX}px)`);
+		const mql = window.matchMedia(mobileViewportMediaQuery());
 		const onChange = (e: MediaQueryListEvent) => {
 			isMobile = e.matches;
 		};

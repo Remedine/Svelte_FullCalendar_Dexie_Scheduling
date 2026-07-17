@@ -458,7 +458,8 @@
 		border: 1px solid var(--color-border);
 	}
 
-	@media (max-width: 768px) {
+	/* Portrait phones + short landscape (rotate keeps compact picker under 3-day calendar). */
+	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
 		.month-picker {
 			/* Midpoint between the prior compact (~1/3) and original (~2/3) mobile picker. */
 			--month-picker-grid-height: 134px;
