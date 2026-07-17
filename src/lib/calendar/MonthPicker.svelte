@@ -458,8 +458,8 @@
 		border: 1px solid var(--color-border);
 	}
 
-	/* Portrait phones + short landscape (rotate keeps compact picker under 3-day calendar). */
-	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
+	/* Portrait phones: compact picker that stays above the day grid. */
+	@media (max-width: 768px) {
 		.month-picker {
 			/* Midpoint between the prior compact (~1/3) and original (~2/3) mobile picker. */
 			--month-picker-grid-height: 134px;
@@ -545,6 +545,75 @@
 
 		.month-picker__drag-context-month {
 			font-size: var(--font-size-xs);
+		}
+	}
+
+	/* Phone landscape: ultra-compact so natural height fits above the 3-day grid
+	   without max-height clipping / overflow paint-over. */
+	@media (orientation: landscape) and (max-height: 500px) {
+		.month-picker {
+			--month-picker-grid-height: 78px;
+			--month-picker-nav-height: 32px;
+			padding: 2px 4px;
+		}
+
+		.month-picker__header {
+			margin-bottom: 1px;
+		}
+
+		.month-picker__weekdays {
+			gap: 1px;
+			margin-bottom: 1px;
+		}
+
+		.month-picker__weekday {
+			font-size: 9px;
+			padding: 0;
+			line-height: 1;
+		}
+
+		.month-picker__grid {
+			gap: 1px;
+		}
+
+		.month-picker__day {
+			min-height: 0;
+			padding: 0;
+			font-size: 10px;
+			line-height: 1;
+		}
+
+		.month-picker__number {
+			font-size: 10px;
+		}
+
+		/* Hide area dots in landscape — day cells are too short; saves a row of height. */
+		.month-picker__dots {
+			display: none;
+		}
+
+		.month-picker__footer {
+			margin-top: 2px;
+			gap: 3px;
+		}
+
+		.month-picker__nav {
+			min-height: var(--month-picker-nav-height);
+			font-size: var(--font-size-base);
+		}
+
+		.month-picker__today-btn {
+			padding: 1px 5px;
+			font-size: 9px;
+		}
+
+		.month-picker__drag-context {
+			margin-top: 1px;
+			padding: 2px 4px;
+		}
+
+		.month-picker__drag-context-month {
+			font-size: 10px;
 		}
 	}
 </style>
