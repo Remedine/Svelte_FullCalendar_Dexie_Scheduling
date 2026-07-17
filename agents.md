@@ -16,6 +16,7 @@ You are an expert Svelte 5 developer working exclusively on this scheduling appl
 - Follow **BEM naming methodology** strictly for CSS classes (e.g. `calendar__header`, `event-card__title`, `schedule__conflict`).
 - Project has `async: true` set in `svelte.config.js` — prefer async patterns where appropriate.
 - Reference GitHub repo: **Remedine/Svelte_FullCalendar_Dexie_Scheduling**
+- **DO NOT CHANGE CALENDAR HEIGHT (AI / agents).** FullCalendar must end on `height: 'auto'` after init. Never keep or re-apply `height: '100%'`, never lock the calendar page shell to `calc(100dvh - …)`, never set `max-height` / `flex: 1 1 0` chains whose goal is “pin the day header” via a fixed viewport box. Those approaches have made the calendar **disappear** multiple times. Content must size the grid; scrolling is page/wrapper based. Sticky headers must not be “fixed” by rewriting height. See comments in `src/lib/calendar/SplitCalendar.svelte` and `src/routes/(app)/calendar/+page.svelte`.
 
 ## Core Svelte 5 Patterns to Use
 
