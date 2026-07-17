@@ -263,7 +263,8 @@
 	// 2) Long-press any movable card → drag to new time (no pre-select required)
 	// 3) Drag top/bottom pills on selected card → resize duration
 	// 4) Second clean tap on selected body → open job
-	// 5) Horizontal swipe on empty day grid → previous / next day (or shift 3-day window)
+	// 5) Horizontal swipe on day grid (incl. over unselected cards) → prev/next day
+	//    (or shift 3-day window). Selected/edit-mode cards keep the pointer for move+resize.
 	// 6) Landscape rotate → timeGridThreeDay (3 columns); portrait → timeGridDay
 	// 7) Live time HUD + light haptics on select / grab / snap / drop
 	// FullCalendar touch resize is disabled; custom edge pills handle it instead.
@@ -311,6 +312,20 @@
 		return !!target.closest(
 			'.fc-event-resizer, .fc-event__edge-pill, .fc-event__move-handle'
 		);
+	}
+
+	/**
+	 * Selected appointment = edit mode (move grip + resize pills). Day swipe must not steal
+	 * those gestures. Unselected cards may be swiped over to change day.
+	 */
+	function isMobileEventInEditMode(target: EventTarget | null): boolean {
+		if (!(target instanceof Element)) return false;
+		if (isMobileGestureChromeTarget(target)) return true;
+		const eventRoot = target.closest('.fc-event') as HTMLElement | null;
+		if (!eventRoot) return false;
+		if (eventRoot.classList.contains('fc-event--mobile-selected')) return true;
+		const id = eventRoot.dataset.mobileEventId;
+		return Boolean(id && selectedMobileEventId && id === selectedMobileEventId);
 	}
 
 	function isMobileEventMovable(status?: string | null): boolean {
@@ -572,7 +587,8 @@
 				lastX: number;
 				lastY: number;
 				pointerId: number;
-				fromEvent: boolean;
+				/** Touch began on an appointment (used to suppress post-swipe select/open). */
+				startedOnEvent: boolean;
 				/** True once the gesture is clearly horizontal (prefer day-nav over vertical scroll). */
 				claimedHorizontal: boolean;
 		  }
@@ -677,17 +693,17 @@
 		if (e.target.closest('.month-picker, .split-calendar__filters, .split-calendar__view-switcher')) {
 			return;
 		}
-		// Resize/move chrome owns the pointer.
-		if (isMobileGestureChromeTarget(e.target)) return;
+		// Selected card / move grip / resize pills own the pointer (edit mode).
+		// Unselected cards: allow day swipe across their surface.
+		if (isMobileEventInEditMode(e.target)) return;
 
-		const fromEvent = !!e.target.closest('.fc-event');
 		mobileDaySwipe = {
 			x: e.clientX,
 			y: e.clientY,
 			lastX: e.clientX,
 			lastY: e.clientY,
 			pointerId: e.pointerId,
-			fromEvent,
+			startedOnEvent: !!e.target.closest('.fc-event'),
 			claimedHorizontal: false
 		};
 		ensureMobileDaySwipeDocListeners();
@@ -716,6 +732,11 @@
 			Math.abs(dx) > Math.abs(dy) * 1.15
 		) {
 			gesture.claimedHorizontal = true;
+			// Once it's a day swipe, don't let the release select/open the card under the finger.
+			if (gesture.startedOnEvent) {
+				suppressNextEventClick = true;
+				suppressNextDateClick = true;
+			}
 		}
 	}
 
@@ -726,7 +747,8 @@
 		mobileDaySwipe = null;
 		teardownMobileDaySwipeDocListeners();
 
-		if (!isMobile || appointmentDragActive || activeMobileResize || gesture.fromEvent) return;
+		// If a long-press move engaged mid-gesture, leave the day alone.
+		if (!isMobile || appointmentDragActive || activeMobileResize) return;
 
 		const dx = clientX - gesture.x;
 		const dy = clientY - gesture.y;
@@ -735,7 +757,9 @@
 		const maxSlope = gesture.claimedHorizontal ? MOBILE_SWIPE_MAX_SLOPE + 0.15 : MOBILE_SWIPE_MAX_SLOPE;
 		if (Math.abs(dy) > Math.abs(dx) * maxSlope) return;
 
-		// Swipe left → next day; swipe right → previous day.
+		// Swipe left → next day; swipe right → previous day (works over unselected cards too).
+		suppressNextEventClick = true;
+		suppressNextDateClick = true;
 		void shiftCalendarDay(dx < 0 ? 1 : -1);
 	}
 
