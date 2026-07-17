@@ -2979,9 +2979,18 @@
 	}
 
 	.split-calendar-container--mobile .split-calendar__sidebar {
-		/* Only the compact MonthPicker is shown at top; filters moved out of way */
+		/* Only the compact MonthPicker is shown at top; filters moved out of way.
+		   Force full-width column sizing even when the container is wide enough that
+		   the desktop @container (min-width: 900px) sidebar rules would otherwise apply
+		   (common on phone landscape). */
 		margin-bottom: 0;
+		flex: 0 0 auto;
 		flex-shrink: 0;
+		width: 100%;
+		max-width: none;
+		align-self: stretch;
+		position: relative;
+		z-index: 2;
 	}
 
 	/* Hide the big filters panel on mobile day view (user can still use on desktop) */
@@ -3061,10 +3070,20 @@
 		bottom: 2px;
 	}
 
-	/* Extra vertical room for the time grid when the phone is sideways (short height). */
-	.split-calendar-container--three-day :global(.month-picker) {
-		--month-picker-grid-height: 96px;
-		--month-picker-nav-height: 40px;
+	/* Landscape 3-day layout shell (picker flow/sticky overrides live at end of stylesheet
+	   so they beat the general mobile sticky rules). */
+	.split-calendar-container--three-day .split-calendar {
+		gap: var(--space-1);
+		/* Column layout must win over wide landscape container-query row layout. */
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.split-calendar-container--three-day .split-calendar__main {
+		position: relative;
+		z-index: 0;
+		/* Leave clear space below the picker; never sit under sticky paint. */
+		margin-top: 0;
 	}
 
 	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
@@ -3954,10 +3973,10 @@
 		outline-offset: 2px;
 	}
 
-	/* === Compact + anchored MonthPicker on mobile ===
-	   ~half the normal height. Sticky to top so it is "always visible" above the scrolling day calendar.
-	   Reclaims vertical space and supports the "monthly at top, day slots scroll below" mobile pattern.
-	   Class-based + media query so phone landscape (width often > 768) still anchors the picker.
+	/* === Compact MonthPicker on mobile ===
+	   Portrait: sticky so it stays visible while the tall day grid scrolls at page level.
+	   Landscape 3-day: sticky is disabled above — day grid scrolls inside its own wrapper,
+	   and sticky was painting over the time-grid day headers on short viewports.
 	   BEM rules + tokens. */
 	.split-calendar-container--mobile :global(.month-picker) {
 		border-radius: var(--radius-sm);
@@ -3967,6 +3986,8 @@
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 		background: var(--color-surface);
 		max-height: 58dvh;
+		/* Prevent tall months / content from painting over the day grid under max-height. */
+		overflow: auto;
 	}
 
 	.split-calendar-container--mobile :global(.month-picker__header) {
@@ -3977,22 +3998,17 @@
 		font-size: var(--font-size-xs);
 	}
 
-	/* Landscape 3-day: keep month picker shorter so three day columns get more vertical room. */
-	.split-calendar-container--three-day :global(.month-picker) {
-		max-height: 42dvh;
-	}
-
-	@media (max-width: 768px), (orientation: landscape) and (max-height: 500px) {
+	/* Portrait-only sticky (and media fallback). Landscape three-day overrides to relative. */
+	@media (max-width: 768px) {
 		:global(.month-picker) {
 			border-radius: var(--radius-sm);
-			/* Anchor to top of the mobile viewport / scroll container */
 			position: sticky;
 			top: 0;
 			z-index: 20;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 			background: var(--color-surface);
-			/* ~half screen: grid/nav sizing lives in MonthPicker.svelte */
 			max-height: 58dvh;
+			overflow: auto;
 		}
 
 		:global(.month-picker__header) {
@@ -4002,5 +4018,35 @@
 		:global(.month-picker__title) {
 			font-size: var(--font-size-xs);
 		}
+	}
+
+	/* Phone landscape without the three-day class still shouldn't sticky-overlap. */
+	@media (orientation: landscape) and (max-height: 500px) {
+		:global(.month-picker) {
+			border-radius: var(--radius-sm);
+			position: relative;
+			top: auto;
+			z-index: 1;
+			box-shadow: none;
+			background: var(--color-surface);
+			max-height: none;
+			overflow: hidden;
+		}
+	}
+
+	/* Landscape 3-day picker: MUST come after mobile sticky rules so it wins specificity order.
+	   Sticky + max-height (overflow visible) was painting the month grid over day headers. */
+	.split-calendar-container--three-day :global(.month-picker),
+	.split-calendar-container--mobile.split-calendar-container--three-day :global(.month-picker) {
+		--month-picker-grid-height: 78px;
+		--month-picker-nav-height: 32px;
+		position: relative !important;
+		top: auto !important;
+		z-index: 1;
+		max-height: none !important;
+		/* Clip any residual overflow instead of covering the day grid. */
+		overflow: hidden;
+		box-shadow: none;
+		border-bottom: 1px solid var(--color-border);
 	}
 </style>
