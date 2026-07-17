@@ -3061,6 +3061,38 @@
 		touch-action: pan-y;
 	}
 
+	/* Day/date header sticks to the top of the day-wrapper scroller while slots scroll under it.
+	   Intermediate overflow:hidden on .split-calendar__day / .fc would trap sticky, so open those. */
+	.split-calendar-container--mobile .split-calendar__day,
+	.split-calendar-container--mobile :global(.fc) {
+		overflow: visible;
+	}
+
+	.split-calendar-container--mobile :global(.fc-scrollgrid > thead),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header) {
+		position: sticky;
+		top: 0;
+		z-index: 6;
+	}
+
+	.split-calendar-container--mobile :global(.fc-scrollgrid > thead),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header),
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header > th),
+	.split-calendar-container--mobile :global(.fc-col-header),
+	.split-calendar-container--mobile :global(.fc-col-header-cell),
+	.split-calendar-container--mobile :global(.fc-timegrid-axis) {
+		background: var(--color-surface);
+	}
+
+	/* Keep today header tint above the solid sticky fill. */
+	.split-calendar-container--mobile :global(.fc-col-header-cell.fc-day-today) {
+		background: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface)) !important;
+	}
+
+	.split-calendar-container--mobile :global(.fc-scrollgrid-section-header) {
+		box-shadow: 0 1px 0 var(--color-border);
+	}
+
 	/* Landscape 3-day: denser columns so three days fit without crushing touch targets too hard. */
 	.split-calendar-container--three-day :global(.fc-col-header-cell-cushion) {
 		font-size: 0.68rem;
