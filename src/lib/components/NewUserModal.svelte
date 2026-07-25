@@ -8,6 +8,7 @@
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	import { createUser, db } from '$lib/db';
 	import { z } from 'zod';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	interface Props {
 		onClose: (success?: boolean) => void;
@@ -111,13 +112,18 @@
 		onClose(hadSuccess);
 	}
 
-	function stopProp(e: Event) {
-		e.stopPropagation();
-	}
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs).
+	// Uses closeModal so temp password state is cleared consistently.
+	const backdrop = createBackdropDismiss(closeModal);
 </script>
 
-<div class="modal-overlay" role="presentation" onclick={onClose}>
-	<div class="modal-content" role="dialog" aria-modal="true" tabindex="-1" onclick={stopProp}>
+<div
+	class="modal-overlay"
+	role="presentation"
+	onpointerdown={backdrop.onpointerdown}
+	onclick={backdrop.onclick}
+>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="-1">
 		<h2 class="modal__title">Add New User</h2>
 
 		{#if tempPasswordForUser}

@@ -31,6 +31,7 @@
 	import { normalizeTaxRateToPercent } from '$lib/utils/tax';
 	import { db, type Client, cleanupDuplicateUsers, getUserPhotoSrc } from '$lib/db';
 	import { goto } from '$app/navigation';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	let show = $state(false);
 	let isEditing = $state(false);
@@ -363,6 +364,10 @@
 		closeCancelConfirm();
 	}
 
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
+	const mainBackdrop = createBackdropDismiss(closeModal);
+	const cancelBackdrop = createBackdropDismiss(closeCancelConfirm);
+
 	async function completeJobAndGoToInvoice() {
 		if (!editingJobId || !canCompleteJob || completingJob) return;
 
@@ -435,13 +440,17 @@
 
 <!-- Main Modal -->
 {#if show}
-	<div class="modal-overlay new-job-modal" role="presentation" onclick={closeModal}>
+	<div
+		class="modal-overlay new-job-modal"
+		role="presentation"
+		onpointerdown={mainBackdrop.onpointerdown}
+		onclick={mainBackdrop.onclick}
+	>
 		<div
 			class="modal-content new-job-modal__content"
 			role="dialog"
 			aria-modal="true"
 			tabindex="-1"
-			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => {
 				if (e.key === 'Escape') {
 					e.stopPropagation();
@@ -687,13 +696,17 @@
 
 <!-- Cancel Confirmation (stacked above the job form modal) -->
 {#if showCancelConfirm}
-	<div class="modal-overlay cancel-confirm-modal" role="presentation" onclick={closeCancelConfirm}>
+	<div
+		class="modal-overlay cancel-confirm-modal"
+		role="presentation"
+		onpointerdown={cancelBackdrop.onpointerdown}
+		onclick={cancelBackdrop.onclick}
+	>
 		<div
 			class="modal-content cancel-confirm-modal__content"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="cancel-confirm-title"
-			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => {
 				if (e.key === 'Escape') {
 					e.stopPropagation();

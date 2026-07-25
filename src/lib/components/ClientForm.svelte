@@ -4,6 +4,7 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { z } from 'zod';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	const ClientSchema = z.object({
 		name: z.string().min(1, 'Full name is required'),
@@ -183,6 +184,9 @@
 		show = false;
 	}
 
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
+	const backdrop = createBackdropDismiss(closeForm);
+
 	async function handleDelete() {
 		if (!isEditing || !client?.id || !canDelete) return;
 		if (!confirm('Delete this client? This action cannot be undone.')) return;
@@ -199,8 +203,13 @@
 </script>
 
 {#if show}
-	<div class="modal-overlay client-form-modal" role="presentation" onclick={closeForm}>
-		<div class="modal-content client-form-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+	<div
+		class="modal-overlay client-form-modal"
+		role="presentation"
+		onpointerdown={backdrop.onpointerdown}
+		onclick={backdrop.onclick}
+	>
+		<div class="modal-content client-form-modal__content" role="dialog" aria-modal="true">
 			<h2 class="client-form-modal__title">
 				{isEditing ? 'Edit Client' : 'New Client'}
 			</h2>

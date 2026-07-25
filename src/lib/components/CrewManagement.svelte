@@ -14,6 +14,7 @@
 	import NewUserModal from './NewUserModal.svelte';
 	import UserJobsModal from './UserJobsModal.svelte';
 	import { loginWithEmail, pullUsersFromServer } from '$lib/db/pb';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	let allUsers = $state<User[]>([]);
 
@@ -35,6 +36,16 @@
 	let editUserHasJobs = $state(false);
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
+
+	function closeEditModal() {
+		pendingDelete = false;
+		editUserHasJobs = false;
+		showEditModal = false;
+		selectedUser = null;
+	}
+
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
+	const editBackdrop = createBackdropDismiss(closeEditModal);
 
 	// Guard so we only auto-load the roster once per page instance (prevents repeated server calls on reactivity).
 	let hasAutoLoadedRoster = $state(false);
@@ -355,24 +366,18 @@
 		<div
 			class="modal-overlay"
 			role="presentation"
-			onclick={() => {
-				showEditModal = false;
-				selectedUser = null;
-			}}
+			onpointerdown={editBackdrop.onpointerdown}
+			onclick={editBackdrop.onclick}
 		>
 			<div
 				class="modal-content"
 				role="dialog"
 				aria-modal="true"
 				tabindex="-1"
-				onclick={(e) => e.stopPropagation()}
 				onkeydown={(e) => {
 					if (e.key === 'Escape') {
 						e.stopPropagation();
-						pendingDelete = false;
-						editUserHasJobs = false;
-						showEditModal = false;
-						selectedUser = null;
+						closeEditModal();
 					}
 				}}
 			>

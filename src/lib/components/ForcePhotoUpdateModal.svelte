@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth.svelte';
 	import { updateUser, getUserPhotoSrc, type User } from '$lib/db';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	interface Props {
 		user: User;
@@ -63,19 +64,24 @@
 			saving = false;
 		}
 	}
+
+	// Only dismiss on true backdrop press (and only after done, when close is allowed)
+	const backdrop = createBackdropDismiss(() => {
+		if (done) onClose();
+	});
 </script>
 
 <div
 	class="force-photo-update__overlay"
 	role="presentation"
-	onclick={() => (done ? onClose() : undefined)}
+	onpointerdown={backdrop.onpointerdown}
+	onclick={backdrop.onclick}
 >
 	<div
 		class="force-photo-update__content"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
-		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => {
 			if (e.key === 'Escape' && done) onClose();
 		}}

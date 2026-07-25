@@ -42,6 +42,7 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import InvoiceEditor from './InvoiceEditor.svelte';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	// )=- Module-level singleton so any page can call openJobDetailsModal(job) without prop drilling.
 	// Mirrors the proven pattern from JobFormModal.
@@ -150,6 +151,9 @@
 		showCancelForm = false;
 	}
 
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
+	const backdrop = createBackdropDismiss(closeModal);
+
 	// )=- "Edit full job" flow required by spec: close this modal first (avoid inception),
 	// call the existing openJobModal, then use its onAfterSave callback to re-open this details modal
 	// with fresh data. This gives the user a seamless round-trip.
@@ -236,8 +240,13 @@
 </script>
 
 {#if show}
-	<div class="modal-overlay job-details-modal" role="presentation" onclick={closeModal}>
-		<div class="modal-content job-details-modal__content" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+	<div
+		class="modal-overlay job-details-modal"
+		role="presentation"
+		onpointerdown={backdrop.onpointerdown}
+		onclick={backdrop.onclick}
+	>
+		<div class="modal-content job-details-modal__content" role="dialog" aria-modal="true">
 			{#if loading}
 				<div class="job-details-modal__loading">Loading job details…</div>
 			{:else if !job}

@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { getJobsForCrewMember, type Job } from '$lib/db';
 	import { startOfLocalWeek } from '$lib/utils/dates';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	interface Props {
 		// userId here is actually the value stored in job.assignedCrew (the crew member's name string)
@@ -37,9 +38,8 @@
 		jobs = await getJobsForCrewMember(userId);
 	}
 
-	function stopProp(e: Event) {
-		e.stopPropagation();
-	}
+	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
+	const backdrop = createBackdropDismiss(onClose);
 
 	function formatJobWhen(job: Job): string {
 		const start = new Date(job.start);
@@ -67,8 +67,13 @@
 	}
 </script>
 
-<div class="modal-overlay" onclick={onClose}>
-	<div class="modal-content user-jobs-modal" onclick={stopProp}>
+<div
+	class="modal-overlay"
+	role="presentation"
+	onpointerdown={backdrop.onpointerdown}
+	onclick={backdrop.onclick}
+>
+	<div class="modal-content user-jobs-modal">
 		<h2 class="modal__title">Jobs for {userName}</h2>
 		<p class="user-jobs-modal__subtitle">This week and upcoming assignments</p>
 

@@ -12,6 +12,7 @@
 	import { pb } from '$lib/db/pb';
 	import { updateUser } from '$lib/db';
 	import type { User } from '$lib/db';
+	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	interface Props {
 		user: User;
@@ -102,19 +103,24 @@
 	function finish() {
 		onClose();
 	}
+
+	// Only dismiss on true backdrop press (and only after success, when close is allowed)
+	const backdrop = createBackdropDismiss(() => {
+		if (success) finish();
+	});
 </script>
 
 <div
 	class="modal-overlay"
 	role="presentation"
-	onclick={success ? finish : undefined}
+	onpointerdown={backdrop.onpointerdown}
+	onclick={backdrop.onclick}
 >
 	<div
 		class="modal-content"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
-		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => {
 			if (e.key === 'Escape' && success) {
 				e.stopPropagation();
