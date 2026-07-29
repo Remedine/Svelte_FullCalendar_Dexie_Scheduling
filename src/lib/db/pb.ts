@@ -172,6 +172,13 @@ export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Prom
 			await repairJobDateFields();
 			if (!stillCurrent()) return;
 
+			// Outbound first: offline profile/options/job edits must hit PB before pulls
+			// can refresh UI from server (and before options pull re-queues local-newer rows).
+			if (typeof navigator === 'undefined' || navigator.onLine) {
+				await processSyncQueue();
+			}
+			if (!stillCurrent()) return;
+
 			await pullJobsFromServer();
 			if (!stillCurrent()) return;
 
@@ -187,6 +194,17 @@ export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Prom
 				if (!stillCurrent()) return;
 			}
 
+			// Options pull uses lastUpdated / pending-queue guard; may re-queue local-newer
+			// rows that never entered the queue (legacy offline saves).
+			try {
+				const { optionsStore } = await import('$lib/stores/options.svelte');
+				await optionsStore.pullFromPB();
+			} catch (optErr) {
+				console.warn('[sync] options pull during app data sync failed', optErr);
+			}
+			if (!stillCurrent()) return;
+
+			// Second flush: relation-resolved creates + options re-queued by pull guard.
 			if (typeof navigator === 'undefined' || navigator.onLine) {
 				await processSyncQueue();
 			}
@@ -814,15 +832,15 @@ export async function pullUsersFromServer(force = false) {
 		return;
 	}
 
-	// Always ensure the currently authenticated admin is in Dexie with up-to-date server data.
+	// Upsert current admin into Dexie with last-write-wins so offline profile edits
+	// (newer local updatedAt) are not clobbered before the outbound queue flushes.
 	try {
 		const existingSelf = await findLocalUserForPbRecord(currentAuth as PbUserRecord);
 		const selfUser = buildUserFromPbRecord(currentAuth as PbUserRecord, existingSelf, {
 			isCurrentAuth: true,
 			authEmail: currentAuth.email
 		});
-
-		await db.users.put(selfUser);
+		await db.users.put(mergeServerUserOverLocal(existingSelf, selfUser));
 	} catch (e) {
 		console.warn('[pullUsers] Could not upsert current admin self into Dexie', e);
 	}

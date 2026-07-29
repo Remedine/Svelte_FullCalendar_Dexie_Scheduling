@@ -395,6 +395,21 @@ export const optionsStore = $state({
 		await this.queuePendingSync(updatedData);
 	},
 
+	/** Prefer auth model role; fall back to Dexie user (auth model can lag right after login). */
+	async resolveAdminRole(): Promise<boolean> {
+		const model = pb?.authStore?.model as { id?: string; role?: string } | null;
+		if (model?.role === 'admin') return true;
+		if (!model?.id) return false;
+		try {
+			const byPb = await db.users.where('pbId').equals(model.id).first();
+			if (byPb?.role === 'admin') return true;
+			const byId = await db.users.get(model.id);
+			return byId?.role === 'admin';
+		} catch {
+			return false;
+		}
+	},
+
 	/**
 	 * Push options to PocketBase immediately.
 	 * @returns true when the server accepted create/update.
@@ -405,11 +420,11 @@ export const optionsStore = $state({
 		// )=- Only admins can write options (per collection create/updateRule). Guard here too
 		// so a misconfigured role never attempts the write that produces 400.
 		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + pb_migrations/1780477923_updated_options_rules.js
-		const currentRole = pb.authStore.model?.role;
-		if (currentRole !== 'admin') {
+		const isAdmin = await this.resolveAdminRole();
+		if (!isAdmin) {
 			console.warn(
 				'[options] syncToPB skipped — current auth role is not "admin":',
-				currentRole
+				(pb.authStore.model as { role?: string } | null)?.role
 			);
 			return false;
 		}

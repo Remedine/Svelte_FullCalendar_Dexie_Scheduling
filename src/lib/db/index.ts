@@ -2173,31 +2173,44 @@ async function runProcessSyncQueue(): Promise<void> {
 							continue;
 						}
 
-						const { id, pbId, createdAt: _createdAt, updatedAt: _updatedAt, ...cleanData } = item.data;
+						// Prefer latest Dexie row + queue delta so a pull between enqueue and flush
+						// cannot leave us pushing a stale partial payload (or nothing).
+						const localUser = await db.users.get(item.recordId);
+						const merged = safeClone({ ...(localUser || {}), ...(item.data || {}) });
 
-						const pbPayload = safeClone(cleanData);
+						const pbPayload: Record<string, unknown> = {};
+						for (const key of [
+							'firstName',
+							'lastName',
+							'name',
+							'photo',
+							'forcePhotoUpdate',
+							'active',
+							'role'
+						] as const) {
+							if (merged[key] !== undefined) pbPayload[key] = merged[key];
+						}
+						// Keep name aligned with first/last when either side changed.
+						if (
+							(pbPayload.firstName !== undefined || pbPayload.lastName !== undefined) &&
+							pbPayload.name === undefined
+						) {
+							pbPayload.name =
+								`${pbPayload.firstName || merged.firstName || ''} ${pbPayload.lastName || merged.lastName || ''}`.trim();
+						}
 
 						// )=- Convert any data URL photo to Blob so PB accepts it as a valid file upload.
 						// This fixes the 400 "validation_invalid_file" when crew uploads photo from /profile.
 						if (typeof pbPayload.photo === 'string' && pbPayload.photo.startsWith('data:')) {
-							pbPayload.photo = dataUrlToBlob(pbPayload.photo);
+							pbPayload.photo = dataUrlToBlob(pbPayload.photo as string);
 						}
 
-						// )=- Never send 'email' in a generic users update payload.
-						// Direct { email: 'new@...' } on an auth collection while authenticated as that user
-						// triggers "validation_values_mismatch" (because email change confirmation is enabled by default).
-						// Email changes are handled via pb.collection('users').requestEmailChange() in the profile UI
-						// (the secure flow that sends a confirmation to the new address).
-						// We still update the email locally in Dexie for immediate app use.
-						if ('email' in pbPayload) {
-							delete (pbPayload as any).email;
-						}
+						// Never send email here (requestEmailChange flow). pinHash/local-only fields stay out.
 
-						// Avoid sending an empty (or only-meta) payload which can happen for email-only changes.
 						const keys = Object.keys(pbPayload);
-						if (keys.length === 0 || keys.every((k) => k === 'updatedAt')) {
+						if (keys.length === 0) {
 							console.log(
-								`ℹ️ Skipping empty PB user update for ${realId} (email change handled via requestEmailChange)`
+								`ℹ️ Skipping empty PB user update for ${realId} (email-only or no syncable fields)`
 							);
 						} else {
 							await pb.collection('users').update(realId, pbPayload);

@@ -345,20 +345,33 @@ export async function logout() {
 				}
 			}
 
+			let pending = 0;
 			try {
-				const pending = await db.syncQueue.count();
+				pending = await db.syncQueue.count();
+			} catch {
+				// DB may already be unstable; continue carefully.
+			}
+
+			// Offline logout with pending queue: keep Dexie so profile/options/job edits
+			// can flush on the next online login. Wiping would permanently drop them.
+			const offlineWithPending =
+				typeof navigator !== 'undefined' && !navigator.onLine && pending > 0;
+
+			if (offlineWithPending) {
+				console.warn(
+					`[auth] Offline logout with ${pending} unsynced queue item(s) — preserving local Dexie for next online sync`
+				);
+				await restoreDeviceAuth(deviceAuthSnapshot);
+			} else {
 				if (pending > 0) {
 					console.warn(
 						`[auth] Logging out with ${pending} unsynced queue item(s) — local data will still be cleared`
 					);
 				}
-			} catch {
-				// DB may already be unstable; continue with wipe.
+				await resetAppDatabase(async () => {
+					await restoreDeviceAuth(deviceAuthSnapshot);
+				});
 			}
-
-			await resetAppDatabase(async () => {
-				await restoreDeviceAuth(deviceAuthSnapshot);
-			});
 		} catch (err) {
 			console.warn('[auth] Failed to clear local Dexie data on logout', err);
 			// Last resort: try reopen so the next login is not stuck on a closed DB.

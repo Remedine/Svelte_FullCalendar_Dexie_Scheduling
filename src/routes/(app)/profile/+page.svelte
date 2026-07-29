@@ -507,13 +507,15 @@
 				success =
 					'Email updated locally. Log in with your email + password (using the new address) to initiate the server change via confirmation.';
 			} else {
-				// Offline: local only
+				// Offline: local only — email cannot use the generic sync queue (PB requires
+				// requestEmailChange + confirmation). Do not claim it will auto-sync.
 				await db.users.update(auth.currentUser.id!, {
 					email: trimmed,
 					updatedAt: new Date()
 				});
 				auth.currentUser.email = trimmed;
-				success = 'Email updated locally (offline). Will sync when back online.';
+				success =
+					'Email updated locally while offline. When back online, change email again while logged in so a confirmation can be sent.';
 			}
 
 			editing = null;
