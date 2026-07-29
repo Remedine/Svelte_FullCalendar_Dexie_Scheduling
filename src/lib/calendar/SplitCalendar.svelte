@@ -9,7 +9,6 @@
 		getJobsForRange,
 		updateJobDates,
 		getUserPhotoSrc,
-		getUserCrewNameAliases,
 		db,
 		cleanupDuplicateUsers,
 		cleanupDuplicateJobs,
@@ -28,7 +27,13 @@
 	import { getLocalDateString, parseLocalDate } from '$lib/utils/dates';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
+	import {
+		getUserDisplayName,
+		buildCanonicalCrewDirectory,
+		getCrewNameAliases,
+		isJobAssignedToAnyCrewFilter,
+		type CrewLike
+	} from '$lib/utils/crew';
 	import { getCalendarSlotBounds } from '$lib/utils/calendar';
 	import {
 		isMobileViewport,
@@ -1635,16 +1640,19 @@
 	});
 
 	// )=- Map of crew name → photo URL for event cards + filter chips.
-	// Keys include all getUserCrewNameAliases so job.assignedCrew strings match.
+	// Keys include all name aliases so job.assignedCrew strings match after renames.
 	let crewPhotoMap = $state<Record<string, string>>({});
+	/** alias → canonical display name (filter chips use canonical names only). */
+	let crewAliasToCanonical = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
 	let draggedJobId: string | null = null;
 	let crewDirectoryRefreshInFlight: Promise<void> | null = null;
 	let lastRosterPullAt = 0;
 
 	/**
-	 * Rebuild crew filter list + photo map from Dexie (users + job assignedCrew).
-	 * Optionally pull full admin roster first so calendar is not stuck with only the signed-in user.
+	 * Rebuild crew filter list + photo map from Dexie users (one chip per person).
+	 * Does NOT union every job.assignedCrew string — that inflated the filter past real users
+	 * (renames, typos, Dexie dupes). Job strings still map via aliases for photos + filtering.
 	 */
 	async function refreshCrewDirectory(opts: { pullRoster?: boolean } = {}): Promise<void> {
 		// Wait for any in-flight rebuild, then continue if we still need a roster pull.
@@ -1670,38 +1678,33 @@
 
 				await cleanupDuplicateUsers().catch(() => {});
 
-				const users = await db.users.toArray();
-				const fromUsers = users
-					.filter((u: any) => u.active !== false)
-					.map((u: any) => getUserDisplayName(u))
-					.filter(Boolean);
+				const users = (await db.users.toArray()) as CrewLike[];
+				const { options, users: canonicalUsers, aliasToCanonical } =
+					buildCanonicalCrewDirectory(users);
 
-				// Names that appear on jobs even if that user row is missing from Dexie.
-				const fromJobs = new Set<string>();
-				const allJobs = await db.jobs.toArray();
-				for (const j of allJobs) {
-					for (const name of j.assignedCrew || []) {
-						const t = (name || '').trim();
-						if (t) fromJobs.add(t);
-					}
-				}
-
-				crewOptions = Array.from(new Set([...fromUsers, ...fromJobs])).sort((a, b) =>
-					a.localeCompare(b)
-				);
+				crewOptions = options;
+				crewAliasToCanonical = aliasToCanonical;
 
 				const map: Record<string, string> = {};
-				for (const u of users) {
+				for (const u of canonicalUsers) {
 					if (!u.photo) continue;
 					const src = getUserPhotoSrc(u.photo, u);
 					if (!src) continue;
-					for (const alias of getUserCrewNameAliases(u)) {
+					// Index by every alias so event cards resolve photos after renames.
+					for (const alias of getCrewNameAliases(u)) {
 						map[alias] = src;
 					}
-					const fn = (u.firstName || '').trim();
-					if (fn && !map[fn]) map[fn] = src;
 				}
 				crewPhotoMap = map;
+
+				// Drop filter selections that no longer exist (stale orphan chips).
+				if (filters.crew.length) {
+					const valid = new Set(options);
+					const next = filters.crew.filter((c) => valid.has(c));
+					if (next.length !== filters.crew.length) {
+						filters = { ...filters, crew: next };
+					}
+				}
 
 				// Rebuild event DOM so avatars pick up photos that arrived after first paint.
 				if (dayApi) {
@@ -1977,16 +1980,21 @@
 		if (auth.currentUser?.role !== 'crew') return jobs;
 		const crewName = getUserDisplayName(auth.currentUser);
 		if (!crewName) return jobs;
-		return jobs.filter((job: any) => isJobAssignedToCrew(job, crewName));
+		// Alias map so renames / first-name-only job strings still match.
+		return jobs.filter((job: any) =>
+			isJobAssignedToAnyCrewFilter(job, [crewName], crewAliasToCanonical)
+		);
 	});
 
 	const calendarSlotBounds = $derived(getCalendarSlotBounds(optionsStore.data));
 
 	const filteredJobs = $derived(
 		crewScopedJobs.filter((job: any) => {
-			const matchesCrew =
-				filters.crew.length === 0 ||
-				job.assignedCrew?.some((c: string) => filters.crew.includes(c));
+			const matchesCrew = isJobAssignedToAnyCrewFilter(
+				job,
+				filters.crew,
+				crewAliasToCanonical
+			);
 			const matchesArea = filters.areas.length === 0 || filters.areas.includes(job.areaOfTown);
 			const matchesStatus = filters.statuses.length === 0 || filters.statuses.includes(job.status);
 			return matchesCrew && matchesArea && matchesStatus;
