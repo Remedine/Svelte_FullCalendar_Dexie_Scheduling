@@ -16,6 +16,7 @@
 		hour24To12,
 		type Hour12Period
 	} from '$lib/utils/dates';
+	import { db } from '$lib/db';
 	import { pb } from '$lib/db/pb';
 	import { isFullBackupFilename } from '$lib/backups/names';
 	import { dateFromBackupFilename, SERVER_SAFETY_NET_DAYS } from '$lib/backups/retention';
@@ -402,14 +403,20 @@
 				updatedBy: auth.currentUser?.name || 'Admin'
 			};
 
-			await optionsStore.saveToDexie(updated);
-
-			if (navigator.onLine) {
-				await optionsStore.syncToPB(updated);
-			}
+			// Local-first + sync queue (offline edits flush on reconnect via processSyncQueue).
+			await optionsStore.saveLocalAndQueue(updated);
 
 			editingOptions = safeClone(updated);
-			toast.success('Options saved and synced successfully!');
+			if (!navigator.onLine) {
+				toast.success('Options saved offline. They will sync when you are back online.');
+			} else {
+				const stillPending = await db.syncQueue.where('collection').equals('options').count();
+				if (stillPending > 0) {
+					toast.success('Options saved locally. Cloud sync will retry shortly.');
+				} else {
+					toast.success('Options saved and synced successfully!');
+				}
+			}
 		} catch (err) {
 			console.error('Save error:', err);
 			toast.error('Saved locally. Cloud sync encountered an issue.');

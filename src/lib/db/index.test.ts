@@ -1529,6 +1529,38 @@ describe('processSyncQueue (with mocked pb)', () => {
 		const remainingQueue = await syncDb.syncQueue.where('recordId').equals(localId).toArray();
 		expect(remainingQueue.length).toBe(1);
 	});
+
+	it('processes an options update queue item via syncToPB', async () => {
+		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');
+		const { optionsStore } = await import('$lib/stores/options.svelte');
+
+		const syncSpy = vi.spyOn(optionsStore, 'syncToPB').mockResolvedValue(true);
+
+		await syncDb.options.put({
+			id: '1',
+			taxRate: 7.5,
+			invoiceDueDays: 21,
+			areasOfTown: [],
+			defaultBillableItems: [],
+			cancelReasons: [],
+			lastUpdated: new Date(),
+			updatedBy: 'test'
+		} as any);
+
+		await addToSyncQueue({
+			type: 'update',
+			collection: 'options',
+			recordId: '1',
+			data: { id: '1', taxRate: 7.5 }
+		});
+
+		await processSyncQueue();
+
+		expect(syncSpy).toHaveBeenCalled();
+		const remaining = await syncDb.syncQueue.where('collection').equals('options').toArray();
+		expect(remaining.length).toBe(0);
+		syncSpy.mockRestore();
+	});
 });
 
 describe('getUserCrewNameAliases', () => {

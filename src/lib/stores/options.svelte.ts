@@ -1,6 +1,81 @@
 // src/lib/stores/options.svelte.ts
-import { db } from '$lib/db';
+import { db, addToSyncQueue, processSyncQueue } from '$lib/db';
 import { pb } from '$lib/db/pb';
+
+/** Stable local id for the single global options row. */
+export const OPTIONS_LOCAL_ID = '1';
+
+/** Milliseconds from options lastUpdated (Date | string | number). */
+export function optionsTimestampMs(value: unknown): number {
+	if (value == null || value === '') return 0;
+	const t = value instanceof Date ? value.getTime() : new Date(value as string | number).getTime();
+	return Number.isFinite(t) ? t : 0;
+}
+
+function cleanOptionsClone(updatedData: any) {
+	return JSON.parse(
+		JSON.stringify(updatedData, (_key, value) => {
+			if (value instanceof Date) return value.toISOString();
+			return value;
+		})
+	);
+}
+
+function buildOptionsPbPayload(cleanData: any) {
+	return {
+		defaultJobDurationHours: Number(cleanData.defaultJobDurationHours) || 2,
+		taxRate: Number(cleanData.taxRate) || 5,
+		invoiceDueDays: Number(cleanData.invoiceDueDays) || 30,
+		crewAssignmentDaysBefore: Number(cleanData.crewAssignmentDaysBefore ?? 1),
+		crewAssignmentHour: Number(cleanData.crewAssignmentHour ?? 7),
+		crewNotificationLog: Array.isArray(cleanData.crewNotificationLog)
+			? cleanData.crewNotificationLog
+			: [],
+		calendarDayStartHour: Number(cleanData.calendarDayStartHour ?? 6),
+		calendarDayEndHour: Number(cleanData.calendarDayEndHour ?? 22),
+		quickUnlockIdleMinutes: Number(cleanData.quickUnlockIdleMinutes ?? 120),
+		desktopSecurityIdleMinutes: Number(cleanData.desktopSecurityIdleMinutes ?? 30),
+		backupScheduledEnabled: Boolean(cleanData.backupScheduledEnabled),
+		backupScheduledHour: Number(cleanData.backupScheduledHour ?? 23),
+		lastScheduledBackupDate: cleanData.lastScheduledBackupDate || '',
+		backupDestEmail: Boolean(cleanData.backupDestEmail),
+		backupDestGoogleDrive: Boolean(cleanData.backupDestGoogleDrive),
+		backupGoogleDriveFolderId: cleanData.backupGoogleDriveFolderId || '',
+		// Do not send or clear backupGoogleDriveRefreshToken from the client.
+		backupGoogleDriveEmail: cleanData.backupGoogleDriveEmail || '',
+		backupGoogleDriveFolderName: cleanData.backupGoogleDriveFolderName || '',
+		backupAlertEmails: cleanData.backupAlertEmails || '',
+		lastBackupAt: cleanData.lastBackupAt || '',
+		lastBackupSizeBytes: Number(cleanData.lastBackupSizeBytes ?? 0),
+		lastBackupFilename: cleanData.lastBackupFilename || '',
+		lastBackupStatus: cleanData.lastBackupStatus || '',
+		lastBackupError: cleanData.lastBackupError || '',
+		syncQueueSnapshotAt: cleanData.syncQueueSnapshotAt || '',
+		businessName: cleanData.businessName || 'Capital City Windows',
+		businessStreet: cleanData.businessStreet || '',
+		businessCity: cleanData.businessCity || '',
+		businessState: cleanData.businessState || '',
+		businessZip: cleanData.businessZip || '',
+		businessPhone: cleanData.businessPhone || '',
+		businessEmail: cleanData.businessEmail || '',
+		businessWebsite: cleanData.businessWebsite || '',
+		businessMailingStreet: cleanData.businessMailingStreet || '',
+		businessMailingCity: cleanData.businessMailingCity || '',
+		businessMailingState: cleanData.businessMailingState || '',
+		businessMailingZip: cleanData.businessMailingZip || '',
+		businessSalesTaxAccount: cleanData.businessSalesTaxAccount || '',
+		salesTaxJurisdiction:
+			cleanData.salesTaxJurisdiction || 'City and Borough of Juneau sales tax',
+		invoiceNumberPrefix: cleanData.invoiceNumberPrefix || 'CCW',
+		nextInvoiceNumber: Number(cleanData.nextInvoiceNumber ?? 1),
+		invoiceNumberYear: Number(cleanData.invoiceNumberYear ?? new Date().getFullYear()),
+		areasOfTown: cleanData.areasOfTown || [],
+		defaultBillableItems: cleanData.defaultBillableItems || [],
+		cancelReasons: cleanData.cancelReasons || [],
+		lastUpdated: cleanData.lastUpdated,
+		updatedBy: cleanData.updatedBy || 'Admin'
+	};
+}
 
 export const optionsStore = $state({
 	data: null as any,
@@ -22,7 +97,7 @@ export const optionsStore = $state({
 			this.isLoading = true;
 
 			// Try local first
-			let options = await db.options.get('1');
+			let options = await db.options.get(OPTIONS_LOCAL_ID);
 
 			if (!options) {
 				const pulled = await this.pullFromPB();
@@ -30,7 +105,7 @@ export const optionsStore = $state({
 					// )=- No record in PB and no local: create sensible default in Dexie
 					// so the options page always has editingOptions with .id and can save.
 					options = {
-						id: '1',
+						id: OPTIONS_LOCAL_ID,
 						defaultJobDurationHours: 2,
 						taxRate: 5,
 						invoiceDueDays: 30,
@@ -117,7 +192,11 @@ export const optionsStore = $state({
 					// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 					const currentRole = pb.authStore.model?.role;
 					if (currentRole !== 'admin') {
-						console.warn('[options] No options record in PB and current user is not admin (role=', currentRole, ') — using local Dexie only. Set role="admin" on your user record in PB admin UI to allow seeding.');
+						console.warn(
+							'[options] No options record in PB and current user is not admin (role=',
+							currentRole,
+							') — using local Dexie only. Set role="admin" on your user record in PB admin UI to allow seeding.'
+						);
 						return false;
 					}
 
@@ -163,7 +242,7 @@ export const optionsStore = $state({
 			// )=- Map PB record to our AppOptions shape. Strip PB's own 'id' (string) and force our stable '1'.
 			// PB record may contain collection metadata that doesn't match our Dexie/AppOptions interface.
 			const serverOptions = {
-				id: '1',
+				id: OPTIONS_LOCAL_ID,
 				defaultJobDurationHours: record.defaultJobDurationHours ?? 2,
 				taxRate: record.taxRate ?? 5,
 				invoiceDueDays: record.invoiceDueDays ?? 30,
@@ -218,12 +297,30 @@ export const optionsStore = $state({
 				updatedBy: record.updatedBy || 'System'
 			};
 
+			const local = await db.options.get(OPTIONS_LOCAL_ID);
+			const pendingOptions = await db.syncQueue
+				.where('collection')
+				.equals('options')
+				.count();
+			const localMs = optionsTimestampMs(local?.lastUpdated);
+			const serverMs = optionsTimestampMs(serverOptions.lastUpdated);
+
+			// Pending outbound options or a strictly newer local row: keep Dexie, do not clobber.
+			if (local && (pendingOptions > 0 || localMs > serverMs)) {
+				this.data = local;
+				if (pendingOptions === 0 && localMs > serverMs) {
+					// Legacy offline save with no queue row — re-queue so reconnect still pushes.
+					await this.queuePendingSync(local);
+				}
+				console.log(
+					'[options] Kept newer local options (pending queue or lastUpdated); skipped server overwrite'
+				);
+				return true;
+			}
+
 			await db.options.put(serverOptions);
 			this.data = serverOptions;
-			// Only log on actual changes or first load to reduce console noise (multiple components trigger load on mount/login/crew/jobs).
-			if (!this.data || this.data.lastUpdated !== serverOptions.lastUpdated) {
-				console.log('✅ Options pulled from PocketBase');
-			}
+			console.log('✅ Options pulled from PocketBase');
 			return true;
 		} catch (err: any) {
 			const isAbort =
@@ -238,27 +335,25 @@ export const optionsStore = $state({
 			const msg = (err?.message || '').toLowerCase();
 			const isPermissionOrCreateFail =
 				status === 403 ||
-				(status === 400 && (msg.includes('create') || msg.includes('permission') || msg.includes('rule')));
+				(status === 400 &&
+					(msg.includes('create') || msg.includes('permission') || msg.includes('rule')));
 			if (!isAbort && status !== 404 && !isPermissionOrCreateFail) {
 				console.error('❌ Failed to pull options from PocketBase:', err);
 			} else if (isPermissionOrCreateFail) {
 				// Quiet one-time hint in dev; remove or downgrade after role is confirmed admin.
-				console.warn('[options] Pull/create blocked by PB rules (role not admin or no record yet). Using Dexie fallback.');
+				console.warn(
+					'[options] Pull/create blocked by PB rules (role not admin or no record yet). Using Dexie fallback.'
+				);
 			}
 			return false;
 		}
 	},
 
-	// ... keep your existing saveToDexie and syncToPB methods unchanged ...
 	async saveToDexie(updatedData: any) {
 		if (!updatedData) return;
 		try {
-			const cleanData = JSON.parse(
-				JSON.stringify(updatedData, (key, value) => {
-					if (value instanceof Date) return value.toISOString();
-					return value;
-				})
-			);
+			const cleanData = cleanOptionsClone(updatedData);
+			if (!cleanData.id) cleanData.id = OPTIONS_LOCAL_ID;
 
 			await db.options.put(cleanData);
 			this.data = cleanData;
@@ -268,79 +363,60 @@ export const optionsStore = $state({
 		}
 	},
 
-	async syncToPB(updatedData: any) {
-		if (!pb?.authStore?.isValid || !updatedData) return;
+	/**
+	 * Coalesce + enqueue an options update for processSyncQueue (online flush / reconnect).
+	 * Does not write Dexie — call saveToDexie first or use saveLocalAndQueue.
+	 */
+	async queuePendingSync(updatedData: any): Promise<void> {
+		if (!updatedData) return;
+		const cleanData = cleanOptionsClone(updatedData);
+		if (!cleanData.id) cleanData.id = OPTIONS_LOCAL_ID;
+
+		const pending = await db.syncQueue.where('collection').equals('options').toArray();
+		for (const q of pending) {
+			if (q.id != null) await db.syncQueue.delete(q.id);
+		}
+
+		await addToSyncQueue({
+			type: 'update',
+			collection: 'options',
+			recordId: OPTIONS_LOCAL_ID,
+			data: cleanData
+		});
+
+		if (typeof navigator !== 'undefined' && navigator.onLine) {
+			await processSyncQueue();
+		}
+	},
+
+	/** Optimistic local save + sync queue (parity with jobs/clients/users). */
+	async saveLocalAndQueue(updatedData: any): Promise<void> {
+		await this.saveToDexie(updatedData);
+		await this.queuePendingSync(updatedData);
+	},
+
+	/**
+	 * Push options to PocketBase immediately.
+	 * @returns true when the server accepted create/update.
+	 */
+	async syncToPB(updatedData: any): Promise<boolean> {
+		if (!pb?.authStore?.isValid || !updatedData) return false;
 
 		// )=- Only admins can write options (per collection create/updateRule). Guard here too
 		// so a misconfigured role never attempts the write that produces 400.
 		// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling + pb_migrations/1780477923_updated_options_rules.js
 		const currentRole = pb.authStore.model?.role;
 		if (currentRole !== 'admin') {
-			console.warn('[options] syncToPB skipped — current auth role is not "admin":', currentRole);
-			return;
+			console.warn(
+				'[options] syncToPB skipped — current auth role is not "admin":',
+				currentRole
+			);
+			return false;
 		}
 
 		try {
-			const cleanData = JSON.parse(
-				JSON.stringify(updatedData, (key, value) => {
-					if (value instanceof Date) return value.toISOString();
-					return value;
-				})
-			);
-
-			const pbPayload = {
-				defaultJobDurationHours: Number(cleanData.defaultJobDurationHours) || 2,
-				taxRate: Number(cleanData.taxRate) || 5,
-				invoiceDueDays: Number(cleanData.invoiceDueDays) || 30,
-				crewAssignmentDaysBefore: Number(cleanData.crewAssignmentDaysBefore ?? 1),
-				crewAssignmentHour: Number(cleanData.crewAssignmentHour ?? 7),
-				crewNotificationLog: Array.isArray(cleanData.crewNotificationLog)
-					? cleanData.crewNotificationLog
-					: [],
-				calendarDayStartHour: Number(cleanData.calendarDayStartHour ?? 6),
-				calendarDayEndHour: Number(cleanData.calendarDayEndHour ?? 22),
-				quickUnlockIdleMinutes: Number(cleanData.quickUnlockIdleMinutes ?? 120),
-				desktopSecurityIdleMinutes: Number(cleanData.desktopSecurityIdleMinutes ?? 30),
-				backupScheduledEnabled: Boolean(cleanData.backupScheduledEnabled),
-				backupScheduledHour: Number(cleanData.backupScheduledHour ?? 23),
-				lastScheduledBackupDate: cleanData.lastScheduledBackupDate || '',
-				backupDestEmail: Boolean(cleanData.backupDestEmail),
-				backupDestGoogleDrive: Boolean(cleanData.backupDestGoogleDrive),
-				backupGoogleDriveFolderId: cleanData.backupGoogleDriveFolderId || '',
-				// Do not send or clear backupGoogleDriveRefreshToken from the client.
-				backupGoogleDriveEmail: cleanData.backupGoogleDriveEmail || '',
-				backupGoogleDriveFolderName: cleanData.backupGoogleDriveFolderName || '',
-				backupAlertEmails: cleanData.backupAlertEmails || '',
-				lastBackupAt: cleanData.lastBackupAt || '',
-				lastBackupSizeBytes: Number(cleanData.lastBackupSizeBytes ?? 0),
-				lastBackupFilename: cleanData.lastBackupFilename || '',
-				lastBackupStatus: cleanData.lastBackupStatus || '',
-				lastBackupError: cleanData.lastBackupError || '',
-				syncQueueSnapshotAt: cleanData.syncQueueSnapshotAt || '',
-				businessName: cleanData.businessName || 'Capital City Windows',
-				businessStreet: cleanData.businessStreet || '',
-				businessCity: cleanData.businessCity || '',
-				businessState: cleanData.businessState || '',
-				businessZip: cleanData.businessZip || '',
-				businessPhone: cleanData.businessPhone || '',
-				businessEmail: cleanData.businessEmail || '',
-				businessWebsite: cleanData.businessWebsite || '',
-				businessMailingStreet: cleanData.businessMailingStreet || '',
-				businessMailingCity: cleanData.businessMailingCity || '',
-				businessMailingState: cleanData.businessMailingState || '',
-				businessMailingZip: cleanData.businessMailingZip || '',
-				businessSalesTaxAccount: cleanData.businessSalesTaxAccount || '',
-				salesTaxJurisdiction:
-					cleanData.salesTaxJurisdiction || 'City and Borough of Juneau sales tax',
-				invoiceNumberPrefix: cleanData.invoiceNumberPrefix || 'CCW',
-				nextInvoiceNumber: Number(cleanData.nextInvoiceNumber ?? 1),
-				invoiceNumberYear: Number(cleanData.invoiceNumberYear ?? new Date().getFullYear()),
-				areasOfTown: cleanData.areasOfTown || [],
-				defaultBillableItems: cleanData.defaultBillableItems || [],
-				cancelReasons: cleanData.cancelReasons || [],
-				lastUpdated: cleanData.lastUpdated,
-				updatedBy: cleanData.updatedBy || 'Admin'
-			};
+			const cleanData = cleanOptionsClone(updatedData);
+			const pbPayload = buildOptionsPbPayload(cleanData);
 
 			console.log('📤 Sending to PocketBase:', pbPayload);
 
@@ -351,26 +427,29 @@ export const optionsStore = $state({
 				const existing = await pb
 					.collection('options')
 					.getFirstListItem('', { $autoCancel: false });
-				const record = await pb.collection('options').update(existing.id, pbPayload);
+				await pb.collection('options').update(existing.id, pbPayload);
 				console.log('✅ Options UPDATED in PocketBase');
-				return record;
+				return true;
 			} catch (err: any) {
 				if (err.status === 404) {
 					// Admin-only create (we already guarded above).
-					const record = await pb.collection('options').create(pbPayload);
+					await pb.collection('options').create(pbPayload);
 					console.log('✅ Options CREATED in PocketBase');
-					return record;
-				} else {
-					throw err;
+					return true;
 				}
+				throw err;
 			}
 		} catch (err: any) {
 			// )=- Swallow permission/create errors here too (e.g. transient rule mismatch after login before role claim settles).
 			// Real validation errors will still surface via the toast in the options page caller.
 			const status = err?.status;
-			if (status !== 403 && !(status === 400 && (err?.message || '').toLowerCase().includes('create'))) {
+			if (
+				status !== 403 &&
+				!(status === 400 && (err?.message || '').toLowerCase().includes('create'))
+			) {
 				console.error('❌ Failed to sync options to PocketBase:', err);
 			}
+			return false;
 		}
 	}
 });

@@ -375,8 +375,8 @@ export interface Invoice {
 export interface SyncQueueItem {
 	id?: string;
 	type: 'create' | 'update' | 'delete';
-	// )=- Added 'invoices' so the existing optimistic + queue + pull pattern works for the new entity.
-	collection: 'jobs' | 'clients' | 'users' | 'invoices';
+	// options: admin settings row (stable local id "1"); same optimistic + queue flush as CRM entities.
+	collection: 'jobs' | 'clients' | 'users' | 'invoices' | 'options';
 	recordId: string;
 	data?: any;
 	createdAt: Date;
@@ -1244,15 +1244,17 @@ export async function allocateInvoiceNumber(): Promise<string> {
 		lastUpdated: new Date()
 	};
 	await db.options.put(updated);
-
-	if (navigator.onLine) {
-		import('$lib/stores/options.svelte')
-			.then(({ optionsStore }) => {
-				optionsStore.data = updated;
-				return optionsStore.syncToPB(updated);
-			})
-			.catch(() => {});
-	}
+	// Admins: queue so offline invoice generation still pushes the counter when back online.
+	// Non-admins cannot write options on PB — leave counter local only (pre-existing limitation).
+	void import('$lib/stores/options.svelte')
+		.then(({ optionsStore }) => {
+			optionsStore.data = updated;
+			const role = (pb.authStore.model as { role?: string } | null)?.role;
+			if (role === 'admin') {
+				return optionsStore.queuePendingSync(updated);
+			}
+		})
+		.catch((err) => console.warn('[options] queue after invoice allocate failed', err));
 
 	return number;
 }
@@ -2728,6 +2730,24 @@ async function runProcessSyncQueue(): Promise<void> {
 							throw err;
 						}
 					}
+				}
+			}
+
+			// Admin options (areas, tax, invoice counter, etc.) — always push latest Dexie row.
+			if (item.collection === 'options') {
+				try {
+					const { optionsStore } = await import('$lib/stores/options.svelte');
+					const local = (await db.options.get('1')) || item.data;
+					if (!local) {
+						await db.syncQueue.delete(item.id!);
+						continue;
+					}
+					const ok = await optionsStore.syncToPB(local);
+					if (ok) {
+						itemSynced = true;
+					}
+				} catch (err: any) {
+					console.error('❌ Options sync failed:', err?.response?.data || err);
 				}
 			}
 
