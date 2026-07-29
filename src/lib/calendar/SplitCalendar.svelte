@@ -9,13 +9,14 @@
 		getJobsForRange,
 		updateJobDates,
 		getUserPhotoSrc,
+		getUserCrewNameAliases,
 		db,
 		cleanupDuplicateUsers,
 		cleanupDuplicateJobs,
 		dedupJobs,
 		repairJobDateFields
 	} from '$lib/db/index';
-	import { pullJobsFromServer, applyServerJobRecord, pb } from '$lib/db/pb';
+	import { pullJobsFromServer, pullUsersFromServer, applyServerJobRecord, pb } from '$lib/db/pb';
 	import { onJobsRealtime } from '$lib/db/realtime';
 	import { openJobModal } from '$lib/components/JobFormModal.svelte';
 	import MonthPicker from './MonthPicker.svelte';
@@ -1633,10 +1634,88 @@
 		};
 	});
 
-	// )=- Map of crew name to photo URL for rendering circular avatars on event cards.
+	// )=- Map of crew name → photo URL for event cards + filter chips.
+	// Keys include all getUserCrewNameAliases so job.assignedCrew strings match.
 	let crewPhotoMap = $state<Record<string, string>>({});
 	let filtersOpen = $state(true);
 	let draggedJobId: string | null = null;
+	let crewDirectoryRefreshInFlight: Promise<void> | null = null;
+	let lastRosterPullAt = 0;
+
+	/**
+	 * Rebuild crew filter list + photo map from Dexie (users + job assignedCrew).
+	 * Optionally pull full admin roster first so calendar is not stuck with only the signed-in user.
+	 */
+	async function refreshCrewDirectory(opts: { pullRoster?: boolean } = {}): Promise<void> {
+		// Wait for any in-flight rebuild, then continue if we still need a roster pull.
+		if (crewDirectoryRefreshInFlight) {
+			await crewDirectoryRefreshInFlight;
+			if (!opts.pullRoster || Date.now() - lastRosterPullAt < 15_000) return;
+		}
+
+		crewDirectoryRefreshInFlight = (async () => {
+			try {
+				if (
+					opts.pullRoster &&
+					navigator.onLine &&
+					pb.authStore.isValid &&
+					Date.now() - lastRosterPullAt > 15_000
+				) {
+					// Admin gets full roster; non-admin is a no-op inside pullUsersFromServer.
+					await pullUsersFromServer(true).catch((e) =>
+						console.warn('[calendar] roster pull failed', e)
+					);
+					lastRosterPullAt = Date.now();
+				}
+
+				await cleanupDuplicateUsers().catch(() => {});
+
+				const users = await db.users.toArray();
+				const fromUsers = users
+					.filter((u: any) => u.active !== false)
+					.map((u: any) => getUserDisplayName(u))
+					.filter(Boolean);
+
+				// Names that appear on jobs even if that user row is missing from Dexie.
+				const fromJobs = new Set<string>();
+				const allJobs = await db.jobs.toArray();
+				for (const j of allJobs) {
+					for (const name of j.assignedCrew || []) {
+						const t = (name || '').trim();
+						if (t) fromJobs.add(t);
+					}
+				}
+
+				crewOptions = Array.from(new Set([...fromUsers, ...fromJobs])).sort((a, b) =>
+					a.localeCompare(b)
+				);
+
+				const map: Record<string, string> = {};
+				for (const u of users) {
+					if (!u.photo) continue;
+					const src = getUserPhotoSrc(u.photo, u);
+					if (!src) continue;
+					for (const alias of getUserCrewNameAliases(u)) {
+						map[alias] = src;
+					}
+					const fn = (u.firstName || '').trim();
+					if (fn && !map[fn]) map[fn] = src;
+				}
+				crewPhotoMap = map;
+
+				// Rebuild event DOM so avatars pick up photos that arrived after first paint.
+				if (dayApi) {
+					dayApi.refetchEvents();
+				}
+			} catch (e) {
+				console.warn('[calendar] refreshCrewDirectory failed', e);
+			} finally {
+				crewDirectoryRefreshInFlight = null;
+			}
+		})();
+
+		return crewDirectoryRefreshInFlight;
+	}
 
 	function jobMatchesHighlight(jobId: string | undefined, job: any): boolean {
 		if (!highlightJobId || !jobId) return false;
@@ -1685,54 +1764,11 @@
 		localStorage.setItem('calendarFiltersOpen', String(filtersOpen));
 	});
 
-	// Load crew options
+	// Load crew filters + photos (local first, then admin roster when online).
+	// Previous "load once if map empty" left the UI stuck on only the signed-in user
+	// when roster arrived after first paint.
 	$effect(() => {
-		cleanupDuplicateUsers().then(() => {
-			db.users.toArray().then((users: any[]) => {
-				// )=- Dedup by display name...
-				crewOptions = Array.from(
-					new Set(
-						users
-							.filter((u: any) => u.active)
-							.map((u: any) => u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim())
-					)
-				).sort();
-			});
-		});
-	});
-
-	// )=- Load crew photos once (for circular avatars on job event cards, right edge under drag icon).
-	$effect(() => {
-		if (Object.keys(crewPhotoMap).length === 0) {
-			db.users.toArray().then((users: any[]) => {
-				const map: Record<string, string> = {};
-				users.forEach((u: any) => {
-					if (u.name && u.photo) {
-						// )=- Use central helper (normalizes bare filenames via getURL, keeps data:).
-						map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
-					}
-				});
-				crewPhotoMap = map;
-			});
-		}
-	});
-
-	// )=- Once crew photos loaded (or when dayApi becomes ready), refetch so eventDidMount appends the circular avatars.
-	// DayApi assignment re-runs this (reads dayApi), so if eager load in loadData already finished we get avatars on first paint too.
-	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-	$effect(() => {
-		if (dayApi && Object.keys(crewPhotoMap).length > 0) {
-			// )=- Removed unconditional refetch here (and similar in options effect below).
-			// These were firing on every photo/options update (including during/after login syncs
-			// and filter changes), causing repeated FullCalendar event list rebuilds.
-			// This + reactive drag state was the main source of "dog slow" + drag not working
-			// (heavy work on every pointer event + visual "reloading" of events).
-			// Colors/avatars are now populated before calendar creation (via loadData eager loads),
-			// and one refetch after initial render is sufficient. Extra refetches only on explicit
-			// data changes that matter (jobs, filters that affect range).
-			// Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-			// dayApi.refetchEvents();  // removed for perf
-		}
+		void refreshCrewDirectory({ pullRoster: true });
 	});
 
 	$effect(() => {
@@ -1886,9 +1922,12 @@
 			await refreshCalendarFromDexie();
 		});
 
-		// After app-state / resume sync lands in Dexie, refresh the open calendar UI.
+		// After app-state / resume sync lands in Dexie, refresh calendar jobs + crew directory.
 		const onAppDataSynced = () => {
-			void refreshCalendarFromDexie();
+			void (async () => {
+				await refreshCrewDirectory({ pullRoster: false });
+				await refreshCalendarFromDexie();
+			})();
 		};
 		if (typeof window !== 'undefined') {
 			window.addEventListener('ccw:app-data-synced', onAppDataSynced);
@@ -2012,28 +2051,23 @@
 
 	async function loadData() {
 		await optionsStore.load?.();
-		// )=- Removed the unconditional pullFromPB here.
-		// It was causing extra network roundtrips + optionsStore.data updates (which previously
-		// triggered refetch effects) on every calendar loadData (initial + certain filter toggles).
-		// This contributed to the "reloading slightly" feel. Freshness is handled at login
-		// (pull*FromServer) and explicit options pulls when user visits the options page.
-		// Eager crew photo load is kept for initial avatars.
+		// Options pull removed (extra roundtrips). Job freshness: paint Dexie first, then one
+		// server pull when online so returning after vacation does not show pre-leave events.
+		// Full pull also runs on login/session restore via scheduleAppDataSync.
 		// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
-		// if (navigator.onLine) { await optionsStore.pullFromPB?.(); }
 
-		// )=- Eagerly kick off crew photo load (for the right-edge circular avatars under drag handle)
-		// before we fetch jobs and create the FullCalendar instance. ...
-		db.users.toArray().then((users: any[]) => {
-			const map: Record<string, string> = {};
-			users.forEach((u: any) => {
-				if (u.name && u.photo) {
-					map[u.name] = getUserPhotoSrc(u.photo, u) || u.photo;
-				}
-			});
-			if (Object.keys(map).length > 0) {
-				crewPhotoMap = map;
+		// Local crew directory first (filters + avatar map for whoever is already in Dexie).
+		await refreshCrewDirectory({ pullRoster: false });
+
+		try {
+			if (navigator.onLine && pb.authStore.isValid) {
+				await pullJobsFromServer();
+				// Full roster so assigned crew photos/filters are not limited to the signed-in user.
+				await refreshCrewDirectory({ pullRoster: true });
 			}
-		});
+		} catch (e) {
+			console.warn('[calendar] initial jobs/roster pull failed', e);
+		}
 
 		await reloadJobsForCalendarRange();
 	}
@@ -2269,19 +2303,26 @@
 						info.el.style.borderColor = areaColor;
 					}
 
-					// )=- Add circular crew avatars.
-					// - Regular timeGrid card views: placed *inside* the card at bottom-right (no overhang).
-					// - dayGridMonth view: placed inline *to the right of the text/title*.
-					// Uses crewPhotoMap (Dexie users). Letter fallback if no photo.
-					// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
+					// )=- Crew avatars: always visible (client needs to see where crew is).
+					// Left edge + overflow:visible so concurrent FC columns never bury faces.
+					// Size: default 48px (2× old); shrink by height/width but never remove.
+					// Month: compact inline after title. Uses crewPhotoMap; letter fallback if no photo.
 					const crew = info.event.extendedProps?.assignedCrew || [];
 					if (crew.length > 0) {
-						// Remove any previous (on re-render / refetch)
 						const prev = info.el.querySelector('.fc-event__crew-avatars');
 						if (prev) prev.remove();
+						info.el.classList.remove(
+							'fc-event--avatar-xs',
+							'fc-event--avatar-sm',
+							'fc-event--avatar-md',
+							'fc-event--avatar-narrow',
+							'fc-event--avatar-tight',
+							'fc-event--has-crew-avatars'
+						);
 
 						const crewEl = document.createElement('div');
 						crewEl.className = 'fc-event__crew-avatars';
+						crewEl.setAttribute('aria-label', `Crew: ${crew.join(', ')}`);
 
 						const isMonthView =
 							info.view.type === 'dayGridMonth' ||
@@ -2290,6 +2331,33 @@
 
 						if (isMonthView) {
 							crewEl.classList.add('fc-event__crew-avatars--inline');
+						} else if (isTimeGrid) {
+							info.el.classList.add('fc-event--has-crew-avatars');
+							// Scale by height (short jobs) and width (concurrent stack columns).
+							// Never drop avatars — only size them so faces still read.
+							const applyAvatarSizeClass = () => {
+								const h = info.el.offsetHeight || 0;
+								const w = info.el.offsetWidth || 0;
+								info.el.classList.remove(
+									'fc-event--avatar-xs',
+									'fc-event--avatar-sm',
+									'fc-event--avatar-md',
+									'fc-event--avatar-narrow',
+									'fc-event--avatar-tight'
+								);
+								if (h > 0 && h < 44) info.el.classList.add('fc-event--avatar-xs');
+								else if (h > 0 && h < 72) info.el.classList.add('fc-event--avatar-sm');
+								else if (h > 0 && h < 100) info.el.classList.add('fc-event--avatar-md');
+
+								if (w > 0 && w < 42) info.el.classList.add('fc-event--avatar-tight');
+								else if (w > 0 && w < 72) info.el.classList.add('fc-event--avatar-narrow');
+							};
+							applyAvatarSizeClass();
+							requestAnimationFrame(applyAvatarSizeClass);
+						}
+
+						if (crew.length > 1) {
+							crewEl.classList.add('fc-event__crew-avatars--multi');
 						}
 
 						crew.forEach((name: string) => {
@@ -2310,15 +2378,21 @@
 						});
 
 						if (isMonthView) {
-							// Place directly after the title so it sits to the right of the text in month list items.
 							const titleEl = info.el.querySelector('.fc-event-title');
 							if (titleEl && titleEl.parentNode) {
 								titleEl.parentNode.insertBefore(crewEl, titleEl.nextSibling);
 							} else {
 								info.el.appendChild(crewEl);
 							}
+						} else if (isTimeGrid) {
+							// Left rail: insert before main frame content.
+							const main = info.el.querySelector('.fc-event-main');
+							if (main) {
+								main.insertBefore(crewEl, main.firstChild);
+							} else {
+								info.el.appendChild(crewEl);
+							}
 						} else {
-							// Inside the card for timeGrid views.
 							info.el.appendChild(crewEl);
 						}
 					}
@@ -3620,51 +3694,89 @@
 		}
 	}
 
-	/* )=- Crew avatars placed *inside* the event card (no more overhanging to the right).
-	   - Time grid card views (week/day): horizontal row at bottom-right inside the card, larger 24px circles.
-	   - Month view (dayGridMonth): inline row placed to the right of the event title text, smaller 14px.
-	   Row layout for compactness on both. Larger on week/day per request while staying fully contained.
+	/* Crew avatars — LEFT rail of each time-grid card (flex, not absolute right).
+	   Always shown; short/narrow cards only scale faces down.
 	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	:global(.fc-event) {
 		position: relative;
-		/* overflow visible no longer required for avatars (they stay inside) */
 	}
 
-	/* Reserve space at bottom of time-grid event titles so larger avatars at bottom-right don't cover the job title text.
-	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
-	:global(.fc-timegrid-event .fc-event-title) {
-		padding-bottom: 26px;
+	:global(.fc-timegrid-event.fc-event--has-crew-avatars) {
+		overflow: visible !important;
 	}
 
-	/* Default: inside card (timeGrid week/day views) - bottom right, horizontal row.
-	   Larger size (24px) as requested for week and day views while staying fully inside the card.
-	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
-	:global(.fc-event__crew-avatars) {
-		position: absolute;
-		right: 3px;
-		bottom: 3px;
+	/* Flex row: [avatars | time+title] — forces left placement regardless of FC internals */
+	:global(.fc-timegrid-event.fc-event--has-crew-avatars .fc-event-main) {
+		display: flex !important;
+		flex-direction: row !important;
+		align-items: center;
+		gap: 4px;
+		padding: 2px 4px 2px 3px !important;
+		box-sizing: border-box;
+		overflow: visible;
+		min-width: 0;
+		height: 100%;
+	}
+
+	:global(.fc-timegrid-event.fc-event--has-crew-avatars .fc-event-main-frame) {
+		flex: 1 1 auto;
+		min-width: 0;
+		order: 2;
+	}
+
+	:global(.fc-timegrid-event.fc-event--has-crew-avatars .fc-event-title) {
+		padding-bottom: 0;
+	}
+
+	/* Left rail — in document order first; never right/absolute */
+	:global(.fc-timegrid-event .fc-event__crew-avatars) {
+		position: relative !important;
+		left: auto !important;
+		right: auto !important;
+		top: auto !important;
+		bottom: auto !important;
+		transform: none !important;
+		order: 1;
+		flex: 0 0 auto;
 		display: flex;
-		flex-direction: row;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		align-self: center;
 		gap: 3px;
-		z-index: 10;
+		z-index: 25;
 		pointer-events: none;
+		max-height: 100%;
+		overflow: visible;
+		margin: 0;
+	}
+
+	:global(.fc-event__crew-avatars--multi) {
+		gap: 0;
+	}
+
+	:global(.fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -10px;
 	}
 
 	:global(.fc-event__crew-avatar) {
-		width: 24px;
-		height: 24px;
+		width: 48px;
+		height: 48px;
+		flex-shrink: 0;
 		border-radius: 50%;
 		overflow: hidden;
-		border: 1px solid var(--color-surface);
+		border: 2px solid var(--color-surface);
 		background: var(--color-text-muted);
 		color: var(--color-surface);
-		font-size: 10px;
+		font-size: 16px;
 		font-weight: 700;
 		line-height: 1;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+		box-shadow:
+			0 0 0 1px rgba(0, 0, 0, 0.2),
+			0 1px 3px rgba(0, 0, 0, 0.2);
 	}
 
 	:global(.fc-event__crew-avatar img) {
@@ -3674,17 +3786,90 @@
 		display: block;
 	}
 
-	/* Month view: inline to the right of the title text (not absolute, flows naturally).
-	   Kept small (14px) so they fit nicely in the compact month list items without pushing text around too much.
-	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
+	/* Height tiers — scale only */
+	:global(.fc-event--avatar-md .fc-event__crew-avatar) {
+		width: 36px;
+		height: 36px;
+		font-size: 13px;
+		border-width: 1.5px;
+	}
+	:global(.fc-event--avatar-md .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -8px;
+	}
+
+	:global(.fc-event--avatar-sm .fc-event__crew-avatars) {
+		flex-direction: row;
+	}
+	:global(.fc-event--avatar-sm .fc-event__crew-avatar) {
+		width: 28px;
+		height: 28px;
+		font-size: 11px;
+		border-width: 1px;
+	}
+	:global(.fc-event--avatar-sm .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -8px;
+	}
+
+	:global(.fc-event--avatar-xs .fc-event__crew-avatars) {
+		flex-direction: row;
+		align-self: flex-start;
+	}
+	:global(.fc-event--avatar-xs .fc-event__crew-avatar) {
+		width: 20px;
+		height: 20px;
+		font-size: 9px;
+		border-width: 1px;
+	}
+	:global(.fc-event--avatar-xs .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -6px;
+	}
+
+	/* Narrow concurrent columns — still LEFT, just smaller */
+	:global(.fc-event--avatar-narrow .fc-event__crew-avatars) {
+		flex-direction: column;
+	}
+	:global(.fc-event--avatar-narrow .fc-event__crew-avatar) {
+		width: 26px;
+		height: 26px;
+		font-size: 10px;
+		border-width: 1px;
+	}
+	:global(.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -6px;
+		margin-left: 0;
+	}
+
+	:global(.fc-event--avatar-tight .fc-event__crew-avatars) {
+		flex-direction: column;
+		align-self: flex-start;
+	}
+	:global(.fc-event--avatar-tight .fc-event__crew-avatar) {
+		width: 22px;
+		height: 22px;
+		font-size: 9px;
+		border-width: 1px;
+	}
+	:global(.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -6px;
+		margin-left: 0;
+	}
+
+	/* Month view: inline after title */
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatars),
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatars--inline) {
-		position: static;
+		position: static !important;
 		display: inline-flex;
+		flex-direction: row;
 		vertical-align: middle;
 		margin-left: 4px;
 		gap: 2px;
+		transform: none !important;
+		max-height: none;
+		overflow: visible;
 		z-index: auto;
+		order: unset;
 	}
 
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatar) {

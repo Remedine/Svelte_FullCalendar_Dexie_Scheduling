@@ -104,7 +104,7 @@ async function resolveSessionUser(
 
 async function completeSessionRestore(user: any, appSessionEmail?: string): Promise<boolean> {
 	const { persistAppSession, syncAppSessionPbBackup } = await import('$lib/auth/sessionPersist');
-	const { refreshPbAuthIfNeeded, scheduleAppDataSync } = await import('$lib/db/pb');
+	const { tryRefreshPbAuth, scheduleAppDataSync } = await import('$lib/db/pb');
 
 	auth.currentUser = user;
 	auth.isAuthenticated = true;
@@ -116,7 +116,23 @@ async function completeSessionRestore(user: any, appSessionEmail?: string): Prom
 		});
 	}
 
-	void refreshPbAuthIfNeeded().then(() => syncAppSessionPbBackup());
+	// Online: require a usable PB session so calendar can pull. Hard auth failure → soft re-auth
+	// (keep Dexie). Offline / transient network → stay in app on local cache.
+	if (navigator.onLine) {
+		const result = await tryRefreshPbAuth();
+		void syncAppSessionPbBackup();
+		if (result.needsReauth) {
+			console.warn('[auth] PB session invalid after restore — soft re-auth (Dexie kept)');
+			await expireSessionToLogin('reauth');
+			return false;
+		}
+		if (result.ok) {
+			scheduleAppDataSync(user, 'session-restore');
+		}
+	} else {
+		void syncAppSessionPbBackup();
+	}
+
 	await applyQuickUnlockIfNeeded(user.id);
 
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');
@@ -125,10 +141,6 @@ async function completeSessionRestore(user: any, appSessionEmail?: string): Prom
 		const { markSessionActivity } = await import('$lib/auth/sessionSecurity');
 		if (!auth.locked) markSessionActivity();
 	}
-
-	// Session restore from appSession only rehydrated auth — pull remote data so mobile/desktop
-	// converge without requiring a full re-login (local-first PWA gap).
-	scheduleAppDataSync(user, 'session-restore');
 
 	void import('$lib/pwa/warmOfflineRoutes').then(({ warmOfflineRouteCache }) =>
 		warmOfflineRouteCache()
@@ -262,7 +274,7 @@ export async function enforceDesktopLockIfInactive(): Promise<boolean> {
 
 /** Sign out to login without wiping offline Dexie data; keeps last email for passkey. */
 export async function expireSessionToLogin(
-	reason: 'expired' | 'default' = 'default'
+	reason: 'expired' | 'reauth' | 'default' = 'default'
 ): Promise<void> {
 	const email = auth.currentUser?.email;
 	auth.currentUser = null;
@@ -270,6 +282,8 @@ export async function expireSessionToLogin(
 	auth.locked = false;
 
 	try {
+		const { disconnectJobsRealtime } = await import('$lib/db/realtime');
+		disconnectJobsRealtime();
 		const { pb } = await import('$lib/db/pb');
 		pb.authStore.clear();
 	} catch {}
@@ -281,7 +295,12 @@ export async function expireSessionToLogin(
 	if (email) setLastLoginEmail(email);
 
 	const { goto } = await import('$app/navigation');
-	const query = reason === 'expired' ? '?session=expired' : '';
+	const query =
+		reason === 'expired'
+			? '?session=expired'
+			: reason === 'reauth'
+				? '?session=reauth'
+				: '';
 	goto(`/login${query}`, { replaceState: true });
 }
 
@@ -434,8 +453,8 @@ async function handleAppVisible(): Promise<void> {
 	// Foreground resume: re-pull from PocketBase + flush outbound queue + reconnect SSE.
 	// Mobile PWAs drop realtime while backgrounded; without this, desktop edits never arrive
 	// until the next full login. Pull into Dexie even if quick-unlock is showing so unlock is fresh.
-	const { scheduleAppDataSync, refreshPbAuthIfNeeded } = await import('$lib/db/pb');
-	void refreshPbAuthIfNeeded();
+	const { scheduleAppDataSync, softReauthIfNeeded } = await import('$lib/db/pb');
+	if (await softReauthIfNeeded('app-visible')) return;
 	scheduleAppDataSync(auth.currentUser, 'app-visible');
 
 	const { isQuickUnlockDevice } = await import('$lib/utils/device');

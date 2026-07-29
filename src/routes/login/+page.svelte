@@ -38,9 +38,11 @@
 	const sessionExpiredNotice = $derived(
 		page.url.searchParams.get('session') === 'expired'
 			? 'Session timed out. Sign in again — email remembered.'
-			: page.url.searchParams.get('session') === 'restored'
-				? 'The server was restored from backup. Sign in again to refresh your schedule data.'
-				: ''
+			: page.url.searchParams.get('session') === 'reauth'
+				? 'Your sign-in expired while you were away. Sign in again to load the latest schedule — email remembered; offline data kept.'
+				: page.url.searchParams.get('session') === 'restored'
+					? 'The server was restored from backup. Sign in again to refresh your schedule data.'
+					: ''
 	);
 	const rememberedEmailHint = $derived(
 		!sessionExpiredNotice && email ? 'Email prefilled from your last sign-in.' : ''

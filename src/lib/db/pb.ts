@@ -129,8 +129,17 @@ async function safeLoginUserDedup(keepId: string, opts: { pbId?: string; email?:
  * converge on full re-login (SSE dies when the PWA is backgrounded).
  */
 export async function syncAppDataFromServer(opts: AppDataSyncOptions = {}): Promise<void> {
-	if (!pb.authStore.isValid) return;
 	if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+	// JWT often expired after long sleep — refresh before bailing; hard 401 → soft re-auth.
+	if (!pb.authStore.isValid) {
+		const authResult = await tryRefreshPbAuth();
+		if (authResult.needsReauth && opts.reason !== 'login') {
+			const stopped = await softReauthIfNeeded(opts.reason || 'sync');
+			if (stopped) return;
+		}
+		if (!pb.authStore.isValid) return;
+	}
 
 	const now = Date.now();
 	if (!opts.force && now - lastAppDataSyncAt < APP_DATA_SYNC_MIN_INTERVAL_MS) {
@@ -276,33 +285,104 @@ export async function syncPbAuthRecord(): Promise<PbUserRecord | null> {
 	}
 }
 
-/** Refresh an expired JWT using the stored token (PocketBase auth-refresh). */
-export async function refreshPbAuthIfNeeded(): Promise<boolean> {
-	if (!pb.authStore.token) return false;
-	if (pb.authStore.isValid) return true;
-	if (!navigator.onLine) return false;
+/** PocketBase / ClientResponseError auth rejection (token dead or forbidden). */
+export function isPbAuthRejectedError(err: unknown): boolean {
+	const status =
+		(err as { status?: number })?.status ??
+		(err as { response?: { status?: number } })?.response?.status;
+	return status === 401 || status === 403;
+}
+
+export type PbAuthRefreshResult = {
+	ok: boolean;
+	/**
+	 * Online and the session cannot be used (missing token, 401/403, or refresh left invalid).
+	 * Soft re-auth is appropriate — do not wipe Dexie.
+	 * False when offline or on transient network/5xx errors.
+	 */
+	needsReauth: boolean;
+};
+
+/**
+ * Ensure PB JWT is usable when online.
+ * Distinguishes hard auth failure (needs soft re-auth) from offline/transient failure (stay in app).
+ */
+export async function tryRefreshPbAuth(): Promise<PbAuthRefreshResult> {
+	if (pb.authStore.isValid) {
+		return { ok: true, needsReauth: false };
+	}
+	if (typeof navigator !== 'undefined' && !navigator.onLine) {
+		// Offline-first: keep local session; no pull until connectivity returns.
+		return { ok: false, needsReauth: false };
+	}
+	if (!pb.authStore.token) {
+		return { ok: false, needsReauth: true };
+	}
 
 	try {
 		await pb.collection('users').authRefresh();
 		if (pb.authStore.isValid) {
 			const { syncAppSessionPbBackup } = await import('$lib/auth/sessionPersist');
 			await syncAppSessionPbBackup();
+			return { ok: true, needsReauth: false };
 		}
-		return pb.authStore.isValid;
+		return { ok: false, needsReauth: true };
 	} catch (err) {
 		console.warn('[auth] PocketBase token refresh failed', err);
-		return false;
+		if (isPbAuthRejectedError(err)) {
+			return { ok: false, needsReauth: true };
+		}
+		// Network blip / 5xx — stay in app with Dexie cache; retry later.
+		return { ok: false, needsReauth: false };
 	}
 }
 
-/** Re-validate the PB session when the PWA returns to the foreground. */
+/** Refresh an expired JWT using the stored token (PocketBase auth-refresh). */
+export async function refreshPbAuthIfNeeded(): Promise<boolean> {
+	const result = await tryRefreshPbAuth();
+	return result.ok;
+}
+
+/**
+ * Soft re-auth if PB session is dead online (keeps Dexie).
+ * @returns true if the caller should stop (user sent to login).
+ */
+export async function softReauthIfNeeded(reason = 'session'): Promise<boolean> {
+	const result = await tryRefreshPbAuth();
+	if (!result.needsReauth) return false;
+	try {
+		const { auth, expireSessionToLogin } = await import('$lib/stores/auth.svelte');
+		if (auth.isAuthenticated) {
+			console.warn(`[auth] PB session rejected (${reason}) — soft re-auth (Dexie kept)`);
+			await expireSessionToLogin('reauth');
+			return true;
+		}
+	} catch {
+		// non-fatal
+	}
+	return false;
+}
+
+/** Re-validate the PB session when the PWA returns to the foreground; pull if still valid. */
 export function registerAuthRefreshOnVisibility(): void {
 	if (visibilityRefreshBound || typeof document === 'undefined') return;
 	visibilityRefreshBound = true;
 
 	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState !== 'visible' || !navigator.onLine) return;
-		void refreshPbAuthIfNeeded();
+		void (async () => {
+			if (await softReauthIfNeeded('foreground')) return;
+			if (!pb.authStore.isValid) return;
+			try {
+				const { auth } = await import('$lib/stores/auth.svelte');
+				const user = auth.currentUser;
+				if (user && auth.isAuthenticated && !auth.locked) {
+					scheduleAppDataSync(user, 'app-visible');
+				}
+			} catch {
+				// Non-fatal — calendar poll / next login still recover.
+			}
+		})();
 	});
 }
 
