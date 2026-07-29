@@ -287,6 +287,7 @@
 	}
 
 	// Handle camera photo upload (phone-friendly capture="user"). Triggered directly by pencil next to avatar.
+	// Local Dexie gets the data URL immediately; processSyncQueue converts it to a File for PB multipart upload.
 	async function handlePhoto(e: Event) {
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
@@ -297,24 +298,32 @@
 		success = '';
 
 		try {
-			const reader = new FileReader();
-			reader.onload = async (ev) => {
-				const dataUrl = ev.target?.result as string;
-				await updateUser(auth.currentUser!.id!, {
-					photo: dataUrl,
-					forcePhotoUpdate: false
-				});
-				// Update in-memory for immediate UI feedback (sync happens via updateUser queue + dataUrlToBlob in pb sync)
-				auth.currentUser!.photo = dataUrl;
-				auth.currentUser!.forcePhotoUpdate = false;
-				success = 'Photo updated (syncs when online)';
-				editing = null;
-				loading = false;
-			};
-			reader.readAsDataURL(file);
+			const dataUrl = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(String(reader.result || ''));
+				reader.onerror = () => reject(new Error('Could not read photo'));
+				reader.readAsDataURL(file);
+			});
+			if (!dataUrl.startsWith('data:')) {
+				throw new Error('Invalid photo data');
+			}
+			await updateUser(auth.currentUser.id!, {
+				photo: dataUrl,
+				forcePhotoUpdate: false
+			});
+			// Prefer whatever Dexie has after sync (may already be PB filename).
+			const fresh = await db.users.get(auth.currentUser.id!);
+			auth.currentUser.photo = fresh?.photo || dataUrl;
+			auth.currentUser.forcePhotoUpdate = false;
+			success = navigator.onLine
+				? 'Photo updated and synced'
+				: 'Photo saved offline — will sync when online';
+			editing = null;
 		} catch (e: any) {
 			error = e.message || 'Failed to process photo';
+		} finally {
 			loading = false;
+			target.value = '';
 		}
 	}
 

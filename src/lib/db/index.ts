@@ -138,21 +138,42 @@ export async function repairJobDateFields(): Promise<number> {
 	return fixed;
 }
 
-// )=- Helper to convert data URL (from camera FileReader) back to Blob for proper PocketBase file field upload.
-// PB file fields (like 'photo' on users) expect Blob/File in the update payload, not raw base64 data URLs.
-// Without this, we get "validation_invalid_file" 400 on photo updates from profile page.
-// )=- Exported for unit testing as part of Phase 0 test infrastructure.
-export function dataUrlToBlob(dataUrl: string): Blob {
+/**
+ * Convert a data URL (from camera FileReader) into a File for PocketBase file fields.
+ *
+ * Important: the PocketBase JS SDK only treats `File` (not bare `Blob`) as a file upload.
+ * `hasFileField` / `isFile` check `instanceof File`. A plain Blob is JSON.stringified to `{}`
+ * and never reaches the server — which is why mobile camera photos lived in Dexie only.
+ *
+ * Returns a File (subclass of Blob) with a filename so multipart FormData is used.
+ */
+export function dataUrlToBlob(dataUrl: string, filenameBase = 'photo'): File {
 	const arr = dataUrl.split(',');
 	const mimeMatch = arr[0].match(/:(.*?);/);
 	const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-	const bstr = atob(arr[1]);
+	const bstr = atob(arr[1] || '');
 	let n = bstr.length;
 	const u8arr = new Uint8Array(n);
 	while (n--) {
 		u8arr[n] = bstr.charCodeAt(n);
 	}
-	return new Blob([u8arr], { type: mime });
+	const extFromMime: Record<string, string> = {
+		'image/jpeg': 'jpg',
+		'image/jpg': 'jpg',
+		'image/png': 'png',
+		'image/webp': 'webp',
+		'image/gif': 'gif',
+		'image/svg+xml': 'svg',
+		'application/octet-stream': 'bin'
+	};
+	const ext = extFromMime[mime] || (mime.startsWith('image/') ? mime.split('/')[1] : 'bin');
+	const safeBase = (filenameBase || 'photo').replace(/[^\w.-]+/g, '_') || 'photo';
+	return new File([u8arr], `${safeBase}.${ext}`, { type: mime });
+}
+
+/** @deprecated Alias — same as dataUrlToBlob (returns File). */
+export function dataUrlToFile(dataUrl: string, filenameBase = 'photo'): File {
+	return dataUrlToBlob(dataUrl, filenameBase);
 }
 
 // ==================== AREA HELPER (simplified for fresh start) ====================
@@ -1780,9 +1801,9 @@ function buildUserPbUpdatePayload(
 async function pushUserUpdateToPb(
 	realId: string,
 	pbPayload: Record<string, unknown>
-): Promise<void> {
+): Promise<Record<string, unknown> | null> {
 	try {
-		await pb.collection('users').update(realId, pbPayload);
+		return (await pb.collection('users').update(realId, pbPayload)) as Record<string, unknown>;
 	} catch (err: any) {
 		// Schema without firstName/lastName → 400 unknown field; retry with core fields only.
 		const hasSplit =
@@ -1790,13 +1811,43 @@ async function pushUserUpdateToPb(
 		if (err?.status === 400 && hasSplit) {
 			const { firstName: _f, lastName: _l, ...core } = pbPayload;
 			if (Object.keys(core).length === 0) throw err;
-			await pb.collection('users').update(realId, core);
+			const record = (await pb.collection('users').update(realId, core)) as Record<
+				string,
+				unknown
+			>;
 			console.warn(
 				'[sync] users update retried without firstName/lastName (not on PB schema)'
 			);
-			return;
+			return record;
 		}
 		throw err;
+	}
+}
+
+/** After PB accepts a user photo upload, store the server filename (not the huge data URL). */
+async function applyServerPhotoToLocalUser(
+	localUserId: string,
+	realId: string,
+	record: Record<string, unknown> | null | undefined
+): Promise<void> {
+	const serverPhoto =
+		record && typeof record.photo === 'string' ? (record.photo as string) : undefined;
+	if (!serverPhoto || serverPhoto.startsWith('data:')) return;
+
+	await db.users.update(localUserId, {
+		photo: serverPhoto,
+		updatedAt: new Date()
+	});
+	try {
+		const { auth } = await import('$lib/stores/auth.svelte');
+		if (
+			auth.currentUser &&
+			(auth.currentUser.id === localUserId || auth.currentUser.pbId === realId)
+		) {
+			auth.currentUser.photo = serverPhoto;
+		}
+	} catch {
+		// non-fatal
 	}
 }
 
@@ -2183,9 +2234,9 @@ async function runProcessSyncQueue(): Promise<void> {
 						// name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
 					});
 
-					// )=- Also convert photo for create path (defensive).
+					// Convert data-URL photo to File (not bare Blob) so PB SDK uses multipart FormData.
 					if (typeof safeUserData.photo === 'string' && safeUserData.photo.startsWith('data:')) {
-						safeUserData.photo = dataUrlToBlob(safeUserData.photo);
+						safeUserData.photo = dataUrlToBlob(safeUserData.photo, 'photo');
 					}
 
 					// Never include verified / emailConfirm / similar system auth fields in the *create* payload.
@@ -2207,10 +2258,16 @@ async function runProcessSyncQueue(): Promise<void> {
 						// The local Dexie marker (verified:false) is what drives the first-login Welcome gate.
 
 						const existing = await db.users.get(item.recordId);
+						const serverPhoto =
+							record && typeof (record as { photo?: string }).photo === 'string'
+								? (record as { photo: string }).photo
+								: undefined;
+						const photoPatch =
+							serverPhoto && !serverPhoto.startsWith('data:') ? { photo: serverPhoto } : {};
 						if (existing) {
-							await db.users.put({ ...existing, pbId: record.id });
+							await db.users.put({ ...existing, pbId: record.id, ...photoPatch });
 						} else {
-							await db.users.update(item.recordId, { pbId: record.id });
+							await db.users.update(item.recordId, { pbId: record.id, ...photoPatch });
 						}
 
 						console.log(`✅ User synced to PocketBase: ${record.id}`);
@@ -2250,10 +2307,9 @@ async function runProcessSyncQueue(): Promise<void> {
 							item.data as Record<string, unknown> | undefined
 						);
 
-						// )=- Convert any data URL photo to Blob so PB accepts it as a valid file upload.
-						// This fixes the 400 "validation_invalid_file" when crew uploads photo from /profile.
+						// PocketBase JS SDK only multipart-uploads `File` (not bare Blob). Bare Blob → JSON `{}`.
 						if (typeof pbPayload.photo === 'string' && pbPayload.photo.startsWith('data:')) {
-							pbPayload.photo = dataUrlToBlob(pbPayload.photo as string);
+							pbPayload.photo = dataUrlToBlob(pbPayload.photo as string, 'photo');
 						}
 
 						const keys = Object.keys(pbPayload);
@@ -2262,7 +2318,8 @@ async function runProcessSyncQueue(): Promise<void> {
 								`ℹ️ Skipping empty PB user update for ${realId} (email-only or no syncable fields)`
 							);
 						} else {
-							await pushUserUpdateToPb(realId, pbPayload);
+							const record = await pushUserUpdateToPb(realId, pbPayload);
+							await applyServerPhotoToLocalUser(item.recordId, realId, record);
 							console.log(`✅ User updated in PocketBase: ${realId}`, keys);
 						}
 						itemSynced = true;

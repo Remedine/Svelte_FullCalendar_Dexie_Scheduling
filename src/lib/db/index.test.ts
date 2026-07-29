@@ -179,24 +179,29 @@ describe('safeClone', () => {
 });
 
 describe('dataUrlToBlob', () => {
-	it('converts a base64 data URL into a Blob with correct type and size', () => {
+	it('converts a base64 data URL into a File (not bare Blob) with name, type, and size', () => {
 		// Tiny valid 1x1 transparent PNG as data URL (common pattern for avatar tests too)
 		const tinyPng =
 			'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 
-		const blob = dataUrlToBlob(tinyPng);
+		const file = dataUrlToBlob(tinyPng);
 
-		expect(blob).toBeInstanceOf(Blob);
-		expect(blob.type).toBe('image/png');
-		expect(blob.size).toBeGreaterThan(0);
+		// PB SDK isFile() only accepts File — bare Blob is JSON.stringified to {} and never uploaded.
+		expect(file).toBeInstanceOf(File);
+		expect(file).toBeInstanceOf(Blob);
+		expect(file.name).toBe('photo.png');
+		expect(file.type).toBe('image/png');
+		expect(file.size).toBeGreaterThan(0);
 	});
 
 	it('falls back to octet-stream for unknown mime (no semicolon capture)', () => {
 		// The helper's regex requires ":(something);" after the data: prefix.
 		// A string without the semicolon group hits the fallback.
 		const unknown = 'data:foo,SGVsbG8='; // malformed for our parser
-		const blob = dataUrlToBlob(unknown);
-		expect(blob.type).toBe('application/octet-stream');
+		const file = dataUrlToBlob(unknown);
+		expect(file).toBeInstanceOf(File);
+		expect(file.type).toBe('application/octet-stream');
+		expect(file.name).toMatch(/^photo\./);
 	});
 });
 
@@ -1610,6 +1615,51 @@ describe('processSyncQueue (with mocked pb)', () => {
 
 		const remaining = await syncDb.syncQueue.where('recordId').equals('local-user-1').toArray();
 		expect(remaining.length).toBe(0);
+	});
+
+	it('user photo update sends File (not bare Blob) so PB multipart-uploads', async () => {
+		const { pb } = await import('$lib/db/pb');
+		const { processSyncQueue, updateUser, dataUrlToBlob, db: syncDb } = await import('$lib/db');
+
+		const tinyPng =
+			'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+
+		const updateMock = vi.fn().mockResolvedValue({ id: 'pb-photo-1', photo: 'photo_abc.png' });
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'users') {
+				return { update: updateMock } as any;
+			}
+			return {} as any;
+		});
+
+		await syncDb.users.put({
+			id: 'local-photo-user',
+			pbId: 'pb-photo-1',
+			firstName: 'Cam',
+			lastName: 'Era',
+			name: 'Cam Era',
+			email: 'cam@example.com',
+			role: 'crew',
+			pinHash: '',
+			active: true,
+			forcePinUpdate: false,
+			forcePhotoUpdate: false,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		await updateUser('local-photo-user', { photo: tinyPng, forcePhotoUpdate: false });
+		await processSyncQueue();
+
+		expect(updateMock).toHaveBeenCalled();
+		const payload = updateMock.mock.calls[0][1];
+		expect(payload.photo).toBeInstanceOf(File);
+		expect(payload.photo.name).toMatch(/^photo\./);
+		// Sanity: helper itself returns File
+		expect(dataUrlToBlob(tinyPng)).toBeInstanceOf(File);
+
+		const local = await syncDb.users.get('local-photo-user');
+		expect(local?.photo).toBe('photo_abc.png');
 	});
 
 	it('user update retries without firstName/lastName when PB schema rejects them', async () => {
