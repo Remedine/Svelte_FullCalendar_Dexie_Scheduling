@@ -107,7 +107,9 @@ Then open the app and log in (it will sync against the real PB instance).
 ### PWA Notes
 
 - Service worker + offline support is active (vite-plugin-pwa).
-- For best home-screen install experience, add 192×192 and 512×512 PNG icons to `/static` and re-enable the `icons` array in `vite.config.ts`.
+- After login (or session restore), every app shell route is prefetched into the page cache (`OFFLINE_APP_ROUTES` in `src/lib/pwa/offlineCoreRoutes.ts`) so hard navigation works offline—not only calendar/jobs/clients.
+- CRM data continues to load from Dexie when offline; server-only actions (email, backups, bulk commit, etc.) still require a network.
+- Icons live in `/static` (`pwa-192x192.png`, `pwa-512x512.png`) and are listed in `vite.config.ts`.
 
 Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 

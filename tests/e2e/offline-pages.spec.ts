@@ -1,10 +1,20 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Offline navigation for core CRM pages (calendar, jobs, clients).
+ * Offline navigation for the full app shell (every authenticated page + login).
  * Run via `pnpm test:e2e:offline` (production node build + service worker).
  */
-const CORE_ROUTES = ['/calendar', '/jobs', '/clients'] as const;
+const APP_SHELL_ROUTES = [
+	'/login',
+	'/calendar',
+	'/calendar/split',
+	'/jobs',
+	'/clients',
+	'/profile',
+	'/admin/crew',
+	'/admin/options',
+	'/admin/import'
+] as const;
 
 async function ensureServiceWorkerActive(page: import('@playwright/test').Page) {
 	await page.goto('/login', { waitUntil: 'load' });
@@ -23,29 +33,34 @@ async function hasServiceWorkerController(page: import('@playwright/test').Page)
 	return page.evaluate(() => !!navigator.serviceWorker.controller);
 }
 
-test.describe('offline core pages', () => {
+/** Warm each shell path online so NetworkFirst can serve them offline. */
+async function warmAppShellRoutes(page: import('@playwright/test').Page) {
+	for (const route of APP_SHELL_ROUTES) {
+		await page.goto(route, { waitUntil: 'load' });
+		await expect(page).toHaveTitle(/Capital City Windows/i);
+	}
+}
+
+test.describe('offline app shell', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test('service worker installs on production build', async ({ page }) => {
 		await ensureServiceWorkerActive(page);
 	});
 
-	test('calendar, jobs, and clients load after going offline', async ({ page, context }) => {
-		test.setTimeout(120_000);
+	test('every app shell route loads after going offline', async ({ page, context }) => {
+		test.setTimeout(180_000);
 		await ensureServiceWorkerActive(page);
 		await page.reload({ waitUntil: 'load' });
 
 		const controlled = await hasServiceWorkerController(page);
 		test.skip(!controlled, 'Headless Chromium did not attach SW controller — manual PWA verify on device');
 
-		for (const route of CORE_ROUTES) {
-			await page.goto(route, { waitUntil: 'load' });
-			await expect(page).toHaveTitle(/Capital City Windows/i);
-		}
+		await warmAppShellRoutes(page);
 
 		await context.setOffline(true);
 
-		for (const route of CORE_ROUTES) {
+		for (const route of APP_SHELL_ROUTES) {
 			const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
 			expect(response?.status()).toBe(200);
 			await expect(page).toHaveTitle(/Capital City Windows/i);
@@ -54,15 +69,25 @@ test.describe('offline core pages', () => {
 		}
 	});
 
-	test('hard refresh works offline on calendar', async ({ page, context }) => {
-		test.setTimeout(120_000);
+	test('hard refresh works offline on calendar, profile, and admin options', async ({
+		page,
+		context
+	}) => {
+		test.setTimeout(180_000);
 		await ensureServiceWorkerActive(page);
-		await page.goto('/calendar', { waitUntil: 'load' });
-		const controlled = await hasServiceWorkerController(page);
-		test.skip(!controlled, 'Headless Chromium did not attach SW controller — manual PWA verify on device');
 
-		await context.setOffline(true);
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await expect(page).toHaveTitle(/Capital City Windows/i);
+		for (const route of ['/calendar', '/profile', '/admin/options'] as const) {
+			await page.goto(route, { waitUntil: 'load' });
+			const controlled = await hasServiceWorkerController(page);
+			test.skip(
+				!controlled,
+				'Headless Chromium did not attach SW controller — manual PWA verify on device'
+			);
+
+			await context.setOffline(true);
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await expect(page).toHaveTitle(/Capital City Windows/i);
+			await context.setOffline(false);
+		}
 	});
 });

@@ -2,7 +2,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vite';
-import { isOfflineCoreRoutePath } from './src/lib/pwa/offlineCoreRoutes';
+import { isOfflineAppRoutePath } from './src/lib/pwa/offlineCoreRoutes';
 
 export default defineConfig({
 	plugins: [
@@ -44,8 +44,8 @@ export default defineConfig({
 				'apple-touch-icon.png'
 			],
 			// )=- Offline shell: SvelteKit adapter-node has no static index.html — cache navigations at runtime.
-			// Precache already covers _app/immutable/*; NetworkFirst on document requests caches each route HTML
-			// after one online visit; warmOfflineRouteCache() prefetches calendar/jobs/clients/login on login.
+			// Precache covers _app/immutable/*; NetworkFirst caches document HTML for every app route.
+			// warmOfflineRouteCache() prefetches all OFFLINE_APP_ROUTES after login/session restore.
 			workbox: {
 				navigateFallback: null,
 				navigateFallbackDenylist: [/^\/api\//, /^\/_/],
@@ -54,11 +54,12 @@ export default defineConfig({
 					{
 						urlPattern: ({ request, url }) => {
 							if (url.pathname.startsWith('/api/')) return false;
+							// Full document navigations: cache any non-API page after first visit.
 							if (request.mode === 'navigate') return true;
 							// warmOfflineRouteCache() prefetches via fetch (mode: cors), not navigate.
 							return (
 								request.method === 'GET' &&
-								isOfflineCoreRoutePath(url.pathname) &&
+								isOfflineAppRoutePath(url.pathname) &&
 								request.headers.get('accept')?.includes('text/html') === true
 							);
 						},
@@ -67,7 +68,8 @@ export default defineConfig({
 							cacheName: 'ccw-pages',
 							networkTimeoutSeconds: 4,
 							expiration: {
-								maxEntries: 48,
+								// Headroom for all app shells + occasional query-string variants.
+								maxEntries: 64,
 								maxAgeSeconds: 60 * 60 * 24 * 30
 							},
 							cacheableResponse: { statuses: [0, 200] }

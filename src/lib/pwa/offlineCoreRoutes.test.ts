@@ -1,21 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { OFFLINE_CORE_ROUTES, isOfflineCoreRoutePath } from './offlineCoreRoutes';
+import {
+	OFFLINE_APP_ROUTES,
+	OFFLINE_CORE_ROUTES,
+	isOfflineAppRoutePath,
+	isOfflineCoreRoutePath
+} from './offlineCoreRoutes';
 
-describe('OFFLINE_CORE_ROUTES', () => {
-	it('includes calendar, jobs, clients, and login', () => {
-		expect(OFFLINE_CORE_ROUTES).toEqual(['/calendar', '/jobs', '/clients', '/login']);
+describe('OFFLINE_APP_ROUTES', () => {
+	it('covers login plus every authenticated shell page', () => {
+		expect(OFFLINE_APP_ROUTES).toEqual([
+			'/login',
+			'/calendar',
+			'/calendar/split',
+			'/jobs',
+			'/clients',
+			'/profile',
+			'/admin/crew',
+			'/admin/options',
+			'/admin/import'
+		]);
+	});
+
+	it('keeps OFFLINE_CORE_ROUTES as an alias', () => {
+		expect(OFFLINE_CORE_ROUTES).toBe(OFFLINE_APP_ROUTES);
 	});
 });
 
-describe('isOfflineCoreRoutePath', () => {
-	it('matches core CRM routes', () => {
-		for (const path of OFFLINE_CORE_ROUTES) {
+describe('isOfflineAppRoutePath', () => {
+	it('matches every app shell route', () => {
+		for (const path of OFFLINE_APP_ROUTES) {
+			expect(isOfflineAppRoutePath(path)).toBe(true);
 			expect(isOfflineCoreRoutePath(path)).toBe(true);
 		}
 	});
 
-	it('rejects unrelated paths', () => {
-		expect(isOfflineCoreRoutePath('/profile')).toBe(false);
-		expect(isOfflineCoreRoutePath('/api/health')).toBe(false);
+	it('accepts trailing slashes on app routes', () => {
+		expect(isOfflineAppRoutePath('/jobs/')).toBe(true);
+		expect(isOfflineAppRoutePath('/admin/options/')).toBe(true);
+	});
+
+	it('rejects API and unknown paths', () => {
+		expect(isOfflineAppRoutePath('/api/health')).toBe(false);
+		expect(isOfflineAppRoutePath('/not-a-page')).toBe(false);
+		expect(isOfflineAppRoutePath('/')).toBe(false);
 	});
 });
