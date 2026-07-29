@@ -3196,20 +3196,23 @@
 		font-size: 0.65rem;
 	}
 
-	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event-title) {
-		padding-bottom: 16px;
+	.split-calendar-container--three-day :global(.fc-timegrid-event.fc-event--has-crew-avatars .fc-event-title) {
+		padding-bottom: 0;
 	}
 
-	.split-calendar-container--three-day :global(.fc-event__crew-avatar) {
-		width: 16px;
-		height: 16px;
-		font-size: 8px;
+	/* Dense 3-day columns: keep left-rail layout, smaller default faces (tier classes still apply). */
+	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatar) {
+		width: 22px;
+		height: 22px;
+		font-size: 9px;
+		border-width: 1px;
 	}
 
-	.split-calendar-container--three-day :global(.fc-event__crew-avatars) {
+	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatars) {
 		gap: 2px;
-		right: 2px;
-		bottom: 2px;
+		position: relative !important;
+		right: auto !important;
+		bottom: auto !important;
 	}
 
 	/* Landscape 3-day layout shell (picker flow/sticky overrides live at end of stylesheet
