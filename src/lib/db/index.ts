@@ -1705,16 +1705,31 @@ export async function createUser(
 
 export async function updateUser(userId: string, updates: Partial<User>) {
 	const existing = await db.users.get(userId);
-	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() });
+	const safeUpdates = safeClone({ ...updates, updatedAt: new Date() }) as Partial<User>;
+
+	// PocketBase auth users store display name in `name`. Profile UI edits first/last only —
+	// always keep the composite `name` field in sync so outbound queue + PB stay correct.
+	if (
+		safeUpdates.name === undefined &&
+		(updates.firstName !== undefined || updates.lastName !== undefined)
+	) {
+		const first =
+			updates.firstName !== undefined ? updates.firstName : (existing?.firstName ?? '');
+		const last = updates.lastName !== undefined ? updates.lastName : (existing?.lastName ?? '');
+		safeUpdates.name = `${first || ''} ${last || ''}`.trim();
+	}
+
 	await db.users.update(userId, safeUpdates);
 
 	if (
 		existing &&
-		(updates.name !== undefined || updates.firstName !== undefined || updates.lastName !== undefined)
+		(safeUpdates.name !== undefined ||
+			updates.firstName !== undefined ||
+			updates.lastName !== undefined)
 	) {
 		const merged = { ...existing, ...safeUpdates };
 		const newName =
-			merged.name || `${merged.firstName || ''} ${merged.lastName || ''}`.trim();
+			(merged.name || `${merged.firstName || ''} ${merged.lastName || ''}`).trim();
 		const oldAliases = getUserCrewNameAliases(existing);
 		if (newName && oldAliases.some((a) => a !== newName)) {
 			await renameCrewNamesOnJobs(oldAliases, newName);
@@ -1729,6 +1744,60 @@ export async function updateUser(userId: string, updates: Partial<User>) {
 	});
 
 	if (navigator.onLine) await processSyncQueue();
+}
+
+/** Fields safe to PATCH on PocketBase auth `users` (custom firstName/lastName may not exist). */
+function buildUserPbUpdatePayload(
+	localUser: User | undefined,
+	queueData: Record<string, unknown> | undefined
+): Record<string, unknown> {
+	const data = queueData || {};
+	const first =
+		data.firstName !== undefined ? data.firstName : localUser?.firstName;
+	const last = data.lastName !== undefined ? data.lastName : localUser?.lastName;
+	const fromParts = `${first ?? ''} ${last ?? ''}`.trim();
+	const name =
+		data.name !== undefined
+			? String(data.name ?? '').trim()
+			: fromParts || (localUser?.name || '').trim();
+
+	const pbPayload: Record<string, unknown> = {};
+	// Always send `name` when we can derive it — this is the PB field that actually persists.
+	if (name) pbPayload.name = name;
+
+	// Include split name fields when present; stripped automatically if PB schema rejects them.
+	if (data.firstName !== undefined) pbPayload.firstName = data.firstName;
+	if (data.lastName !== undefined) pbPayload.lastName = data.lastName;
+
+	if (data.photo !== undefined) pbPayload.photo = data.photo;
+	if (data.forcePhotoUpdate !== undefined) pbPayload.forcePhotoUpdate = data.forcePhotoUpdate;
+	if (data.active !== undefined) pbPayload.active = data.active;
+	if (data.role !== undefined) pbPayload.role = data.role;
+
+	return pbPayload;
+}
+
+async function pushUserUpdateToPb(
+	realId: string,
+	pbPayload: Record<string, unknown>
+): Promise<void> {
+	try {
+		await pb.collection('users').update(realId, pbPayload);
+	} catch (err: any) {
+		// Schema without firstName/lastName → 400 unknown field; retry with core fields only.
+		const hasSplit =
+			pbPayload.firstName !== undefined || pbPayload.lastName !== undefined;
+		if (err?.status === 400 && hasSplit) {
+			const { firstName: _f, lastName: _l, ...core } = pbPayload;
+			if (Object.keys(core).length === 0) throw err;
+			await pb.collection('users').update(realId, core);
+			console.warn(
+				'[sync] users update retried without firstName/lastName (not on PB schema)'
+			);
+			return;
+		}
+		throw err;
+	}
 }
 
 export async function deleteUser(userId: string) {
@@ -2173,31 +2242,13 @@ async function runProcessSyncQueue(): Promise<void> {
 							continue;
 						}
 
-						// Prefer latest Dexie row + queue delta so a pull between enqueue and flush
-						// cannot leave us pushing a stale partial payload (or nothing).
+						// Merge Dexie + queue, but derive `name` from first/last when profile edits
+						// only those fields (PB auth collection persists `name`, not always first/last).
 						const localUser = await db.users.get(item.recordId);
-						const merged = safeClone({ ...(localUser || {}), ...(item.data || {}) });
-
-						const pbPayload: Record<string, unknown> = {};
-						for (const key of [
-							'firstName',
-							'lastName',
-							'name',
-							'photo',
-							'forcePhotoUpdate',
-							'active',
-							'role'
-						] as const) {
-							if (merged[key] !== undefined) pbPayload[key] = merged[key];
-						}
-						// Keep name aligned with first/last when either side changed.
-						if (
-							(pbPayload.firstName !== undefined || pbPayload.lastName !== undefined) &&
-							pbPayload.name === undefined
-						) {
-							pbPayload.name =
-								`${pbPayload.firstName || merged.firstName || ''} ${pbPayload.lastName || merged.lastName || ''}`.trim();
-						}
+						const pbPayload = buildUserPbUpdatePayload(
+							localUser,
+							item.data as Record<string, unknown> | undefined
+						);
 
 						// )=- Convert any data URL photo to Blob so PB accepts it as a valid file upload.
 						// This fixes the 400 "validation_invalid_file" when crew uploads photo from /profile.
@@ -2205,16 +2256,14 @@ async function runProcessSyncQueue(): Promise<void> {
 							pbPayload.photo = dataUrlToBlob(pbPayload.photo as string);
 						}
 
-						// Never send email here (requestEmailChange flow). pinHash/local-only fields stay out.
-
 						const keys = Object.keys(pbPayload);
 						if (keys.length === 0) {
 							console.log(
 								`ℹ️ Skipping empty PB user update for ${realId} (email-only or no syncable fields)`
 							);
 						} else {
-							await pb.collection('users').update(realId, pbPayload);
-							console.log(`✅ User updated in PocketBase: ${realId}`);
+							await pushUserUpdateToPb(realId, pbPayload);
+							console.log(`✅ User updated in PocketBase: ${realId}`, keys);
 						}
 						itemSynced = true;
 					} catch (err: any) {

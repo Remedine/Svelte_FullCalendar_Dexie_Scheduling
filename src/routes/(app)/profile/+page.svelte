@@ -387,14 +387,20 @@
 		error = '';
 		success = '';
 		try {
+			const nextFirst = firstName.trim();
+			const nextLast = lastName.trim();
+			const nextName = `${nextFirst} ${nextLast}`.trim();
 			await updateUser(auth.currentUser.id!, {
-				firstName: firstName.trim(),
-				lastName: lastName.trim()
+				firstName: nextFirst,
+				lastName: nextLast,
+				name: nextName
 			});
-			auth.currentUser.firstName = firstName.trim();
-			auth.currentUser.lastName = lastName.trim();
-			auth.currentUser.name = `${firstName.trim()} ${lastName.trim()}`.trim();
-			success = 'Name updated';
+			auth.currentUser.firstName = nextFirst;
+			auth.currentUser.lastName = nextLast;
+			auth.currentUser.name = nextName;
+			success = navigator.onLine
+				? 'Name updated'
+				: 'Name saved offline. It will sync when you are back online.';
 			editing = null;
 		} catch (e: any) {
 			error = e.message || 'Failed to update name';

@@ -1561,6 +1561,103 @@ describe('processSyncQueue (with mocked pb)', () => {
 		expect(remaining.length).toBe(0);
 		syncSpy.mockRestore();
 	});
+
+	it('user name update sends composite name to PocketBase (not stale Dexie name)', async () => {
+		const { pb } = await import('$lib/db/pb');
+		const { processSyncQueue, updateUser, db: syncDb } = await import('$lib/db');
+
+		const updateMock = vi.fn().mockResolvedValue({});
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'users') {
+				return { update: updateMock } as any;
+			}
+			return {} as any;
+		});
+
+		await syncDb.users.put({
+			id: 'local-user-1',
+			pbId: 'pb-user-1',
+			firstName: 'Old',
+			lastName: 'Name',
+			name: 'Old Name',
+			email: 'crew@example.com',
+			role: 'crew',
+			pinHash: '',
+			active: true,
+			forcePinUpdate: false,
+			forcePhotoUpdate: false,
+			createdAt: new Date(),
+			updatedAt: new Date('2026-01-01T00:00:00Z')
+		} as any);
+
+		// File beforeEach keeps navigator.onLine=false so updateUser only queues.
+		await updateUser('local-user-1', { firstName: 'New', lastName: 'Person' });
+
+		const local = await syncDb.users.get('local-user-1');
+		expect(local?.name).toBe('New Person');
+		expect(local?.firstName).toBe('New');
+
+		const queued = await syncDb.syncQueue.where('recordId').equals('local-user-1').toArray();
+		expect(queued).toHaveLength(1);
+		expect(queued[0].data?.name).toBe('New Person');
+
+		await processSyncQueue();
+
+		expect(updateMock).toHaveBeenCalled();
+		const payload = updateMock.mock.calls[0][1];
+		expect(payload.name).toBe('New Person');
+		expect(updateMock.mock.calls[0][0]).toBe('pb-user-1');
+
+		const remaining = await syncDb.syncQueue.where('recordId').equals('local-user-1').toArray();
+		expect(remaining.length).toBe(0);
+	});
+
+	it('user update retries without firstName/lastName when PB schema rejects them', async () => {
+		const { pb } = await import('$lib/db/pb');
+		const { processSyncQueue, addToSyncQueue, db: syncDb } = await import('$lib/db');
+
+		const updateMock = vi
+			.fn()
+			.mockRejectedValueOnce({ status: 400, response: { data: { firstName: { code: 'validation_unknown' } } } })
+			.mockResolvedValueOnce({});
+
+		vi.spyOn(pb, 'collection').mockImplementation((name: string) => {
+			if (name === 'users') {
+				return { update: updateMock } as any;
+			}
+			return {} as any;
+		});
+
+		await syncDb.users.put({
+			id: 'local-user-2',
+			pbId: 'pb-user-2',
+			firstName: 'A',
+			lastName: 'B',
+			name: 'A B',
+			email: 'a@example.com',
+			role: 'admin',
+			pinHash: '',
+			active: true,
+			forcePinUpdate: false,
+			forcePhotoUpdate: false,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		} as any);
+
+		await addToSyncQueue({
+			type: 'update',
+			collection: 'users',
+			recordId: 'local-user-2',
+			data: { firstName: 'C', lastName: 'D', name: 'C D', updatedAt: new Date() }
+		});
+
+		await processSyncQueue();
+
+		expect(updateMock).toHaveBeenCalledTimes(2);
+		expect(updateMock.mock.calls[1][1]).toEqual({ name: 'C D' });
+		const remaining = await syncDb.syncQueue.where('recordId').equals('local-user-2').toArray();
+		expect(remaining.length).toBe(0);
+	});
 });
 
 describe('getUserCrewNameAliases', () => {
