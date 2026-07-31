@@ -2311,9 +2311,9 @@
 						info.el.style.borderColor = areaColor;
 					}
 
-					// )=- Crew avatars: always visible (client needs to see where crew is).
-					// Left edge + overflow:visible so concurrent FC columns never bury faces.
-					// Size: default 48px (2× old); shrink by height/width but never remove.
+					// )=- Crew avatars: left rail inside the card (overflow:hidden so concurrent
+					// stacks use FC harness z-index only — no faces/titles punching through).
+					// Size: default 48px; shrink by height/width but never remove.
 					// Month: compact inline after title. Uses crewPhotoMap; letter fallback if no photo.
 					const crew = info.event.extendedProps?.assignedCrew || [];
 					if (crew.length > 0) {
@@ -3707,13 +3707,16 @@
 
 	/* Crew avatars — LEFT rail of each time-grid card (flex, not absolute right).
 	   Always shown; short/narrow cards only scale faces down.
+	   Contain paint with overflow:hidden so FC harness z-index owns concurrent stacking
+	   (no avatars/titles punching through neighboring cards).
 	   )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling */
 	:global(.fc-event) {
 		position: relative;
 	}
 
 	:global(.fc-timegrid-event.fc-event--has-crew-avatars) {
-		overflow: visible !important;
+		/* Clip to card so concurrent overlaps stack by harness z-index only */
+		overflow: hidden !important;
 	}
 
 	/* Flex row: [avatars | time+title] — forces left placement regardless of FC internals */
@@ -3724,7 +3727,7 @@
 		gap: 4px;
 		padding: 2px 4px 2px 3px !important;
 		box-sizing: border-box;
-		overflow: visible;
+		overflow: hidden;
 		min-width: 0;
 		height: 100%;
 	}
@@ -3733,13 +3736,16 @@
 		flex: 1 1 auto;
 		min-width: 0;
 		order: 2;
+		overflow: hidden;
 	}
 
 	:global(.fc-timegrid-event.fc-event--has-crew-avatars .fc-event-title) {
 		padding-bottom: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
-	/* Left rail — in document order first; never right/absolute */
+	/* Left rail — in document order first; never right/absolute; no local z-index elevating faces over siblings */
 	:global(.fc-timegrid-event .fc-event__crew-avatars) {
 		position: relative !important;
 		left: auto !important;
@@ -3755,10 +3761,10 @@
 		justify-content: center;
 		align-self: center;
 		gap: 3px;
-		z-index: 25;
+		z-index: auto;
 		pointer-events: none;
 		max-height: 100%;
-		overflow: visible;
+		overflow: hidden;
 		margin: 0;
 	}
 
