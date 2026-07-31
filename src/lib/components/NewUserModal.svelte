@@ -7,6 +7,7 @@
 	// Zod for the admin creation form. BEM + runes used.
 	// )=- Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling
 	import { createUser, db } from '$lib/db';
+	import { pb } from '$lib/db/pb';
 	import { z } from 'zod';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
@@ -92,13 +93,26 @@
 			// /api/auth/mark-verified (internal secret) after the user sets their real password.
 			const normalizedForWelcome = data.email.trim().toLowerCase();
 			try {
-				await fetch('/api/auth/send-welcome', {
+				const token = pb.authStore.token;
+				const welcomeRes = await fetch('/api/auth/send-welcome', {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
+					headers: {
+						'Content-Type': 'application/json',
+						...(token ? { Authorization: token } : {})
+					},
 					body: JSON.stringify({ email: normalizedForWelcome })
 				});
+				if (!welcomeRes.ok) {
+					const errBody = await welcomeRes.json().catch(() => ({}));
+					console.warn('Welcome email failed:', errBody?.error || welcomeRes.status);
+					errors.general =
+						(errBody?.error as string) ||
+						'User created, but the welcome email could not be sent. Use Resend welcome in Crew.';
+				}
 			} catch (e) {
 				console.warn('Failed to send welcome email for new user (non-blocking):', e);
+				errors.general =
+					'User created, but the welcome email could not be sent. Use Resend welcome in Crew.';
 			}
 		} catch (err) {
 			console.error('Failed to create new user:', err);

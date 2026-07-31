@@ -13,13 +13,18 @@
 	import { toast } from '$lib/stores/toast.svelte';
 	import NewUserModal from './NewUserModal.svelte';
 	import UserJobsModal from './UserJobsModal.svelte';
-	import { loginWithEmail, pullUsersFromServer } from '$lib/db/pb';
+	import { pullUsersFromServer, pb } from '$lib/db/pb';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 
 	let allUsers = $state<User[]>([]);
 
 	const activeUsers = $derived(allUsers.filter((u) => u.active));
 	const deactivatedUsers = $derived(allUsers.filter((u) => !u.active));
+
+	/** Users who look like they never finished first-time setup (welcome / photo). */
+	const awaitingActivationUsers = $derived(
+		activeUsers.filter((u) => userAwaitsActivation(u))
+	);
 
 	let showNewModal = $state(false);
 	let showJobsModal = $state(false);
@@ -34,8 +39,87 @@
 	let editActive = $state(true);
 	let pendingDelete = $state(false);
 	let editUserHasJobs = $state(false);
+	let resendingWelcomeId = $state<string | null>(null);
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
+
+	function userDisplayName(user: User): string {
+		return (
+			`${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+			user.name ||
+			user.email ||
+			'User'
+		);
+	}
+
+	function userHasPhoto(user: User): boolean {
+		const p = (user.photo || '').trim();
+		return p.length > 0;
+	}
+
+	/** Heuristic: still needs welcome / first login / photo setup. */
+	function userAwaitsActivation(user: User): boolean {
+		if (!user.active) return false;
+		if (!user.email?.trim()) return false;
+		if (user.verified === false) return true;
+		// New-user path sets forcePhotoUpdate until they upload a photo.
+		if (user.forcePhotoUpdate && !userHasPhoto(user)) return true;
+		return false;
+	}
+
+	function canResendWelcome(user: User): boolean {
+		return !!user.active && !!user.email?.trim()?.includes('@');
+	}
+
+	async function resendWelcomeEmail(user: User) {
+		if (!isAdmin || !canResendWelcome(user)) return;
+
+		const email = user.email!.trim().toLowerCase();
+		const name = userDisplayName(user);
+		const ok = confirm(
+			`Send a welcome email to ${name}?\n\n` +
+				`To: ${email}\n\n` +
+				`They will get a link to set their password and activate their account. ` +
+				`You can resend this anytime if they lost the first email.`
+		);
+		if (!ok) return;
+
+		const token = pb.authStore.token;
+		if (!token) {
+			toast.error('You need to be signed in as an admin to send welcome emails.');
+			return;
+		}
+		if (!navigator.onLine) {
+			toast.error('Go online to send the welcome email.');
+			return;
+		}
+
+		resendingWelcomeId = user.id || email;
+		try {
+			const res = await fetch('/api/auth/send-welcome', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: token
+				},
+				body: JSON.stringify({ email })
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				toast.error(
+					(data?.error as string) ||
+						'Could not send welcome email. Check the email address and try again.'
+				);
+				return;
+			}
+			toast.success(`Welcome email sent to ${email}`);
+		} catch (err) {
+			console.error('Resend welcome failed:', err);
+			toast.error('Network error sending welcome email. Try again.');
+		} finally {
+			resendingWelcomeId = null;
+		}
+	}
 
 	function closeEditModal() {
 		pendingDelete = false;
@@ -308,6 +392,14 @@
 					>
 						{user.active ? '✅ Active' : '⛔ Inactive'}
 					</span>
+					{#if userAwaitsActivation(user)}
+						<span
+							class="user-management__status-badge user-management__status-badge--pending"
+							title="Has not finished first login / account setup"
+						>
+							Awaiting setup
+						</span>
+					{/if}
 				</div>
 
 				<!-- Actions -->
@@ -320,9 +412,42 @@
 						onclick={() => openEdit(user)}
 						class="user-management__btn user-management__btn--edit">Edit</button
 					>
+					{#if canResendWelcome(user)}
+						<button
+							type="button"
+							onclick={() => resendWelcomeEmail(user)}
+							class="user-management__btn user-management__btn--welcome"
+							class:user-management__btn--welcome-emphasis={userAwaitsActivation(user)}
+							disabled={resendingWelcomeId === (user.id || user.email)}
+							title="Email a link to set password and activate the account"
+						>
+							{resendingWelcomeId === (user.id || user.email)
+								? 'Sending…'
+								: userAwaitsActivation(user)
+									? 'Resend welcome'
+									: 'Send setup email'}
+						</button>
+					{/if}
 				</div>
 			</div>
 		{/snippet}
+
+		{#if awaitingActivationUsers.length > 0}
+			<div class="user-management__section user-management__section--pending">
+				<h3 class="user-management__section-title">
+					Awaiting activation ({awaitingActivationUsers.length})
+				</h3>
+				<p class="user-management__section-hint">
+					These people have an account but look like they have not finished first-time setup.
+					Use <strong>Resend welcome</strong> if they never got the email or the link expired.
+				</p>
+				<div class="user-management__grid">
+					{#each awaitingActivationUsers as user (user.id)}
+						{@render userRow(user)}
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<div class="user-management__section">
 			<h3 class="user-management__section-title">Active Crew ({activeUsers.length})</h3>
@@ -422,6 +547,40 @@
 							Force new photo upload
 						</label>
 					</div>
+
+					{#if canResendWelcome(selectedUser)}
+						<div class="modal__welcome-panel">
+							{#if userAwaitsActivation(selectedUser)}
+								<p class="modal__welcome-title">Account not fully set up yet</p>
+								<p class="modal__welcome-copy">
+									Send (or resend) the welcome email so they can set a password and activate.
+									Current email: <strong>{selectedUser.email}</strong>
+								</p>
+							{:else}
+								<p class="modal__welcome-title">Send setup email</p>
+								<p class="modal__welcome-copy">
+									Emails a password-setup link to <strong>{selectedUser.email}</strong> (same as
+									welcome). Useful if they forgot the first message.
+								</p>
+							{/if}
+							<button
+								type="button"
+								class="modal__btn button button--primary modal__welcome-btn"
+								disabled={resendingWelcomeId === (selectedUser.id || selectedUser.email)}
+								onclick={() => selectedUser && resendWelcomeEmail(selectedUser)}
+							>
+								{resendingWelcomeId === (selectedUser.id || selectedUser.email)
+									? 'Sending welcome email…'
+									: 'Resend welcome email'}
+							</button>
+						</div>
+					{:else if selectedUser && !selectedUser.email}
+						<div class="modal__welcome-panel modal__welcome-panel--muted">
+							<p class="modal__welcome-copy">
+								Add an email address and save before you can send a welcome email.
+							</p>
+						</div>
+					{/if}
 
 					{#if pendingDelete}
 						<div class="modal__delete-pending">
@@ -538,9 +697,26 @@
 		opacity: 0.9;
 	}
 
+	.user-management__section--pending {
+		padding: var(--space-4);
+		border-radius: var(--radius-lg);
+		background: color-mix(in srgb, var(--color-warning, #f59e0b) 8%, var(--color-surface));
+		border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, var(--color-border));
+	}
+	.user-management__section--pending .user-management__section-title {
+		border-bottom-color: color-mix(in srgb, var(--color-warning, #f59e0b) 40%, var(--color-border));
+	}
+	.user-management__section-hint {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		line-height: 1.45;
+		max-width: 52rem;
+	}
+
 	.user-management__row {
 		display: grid;
-		grid-template-columns: 56px minmax(120px, 1.4fr) minmax(100px, 1.8fr) 78px 108px auto;
+		grid-template-columns: 56px minmax(120px, 1.4fr) minmax(100px, 1.8fr) 78px minmax(100px, 1.1fr) auto;
 		align-items: center;
 		gap: var(--space-3);
 		padding: var(--space-3) var(--space-4);
@@ -548,6 +724,70 @@
 		border-radius: var(--radius-lg);
 		box-shadow: var(--shadow-sm);
 		border: 1px solid var(--color-border);
+	}
+
+	.user-management__status-col {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.25rem;
+	}
+
+	.user-management__status-badge--pending {
+		background: color-mix(in srgb, var(--color-warning, #f59e0b) 22%, transparent);
+		color: var(--color-warning-emphasis, #92400e);
+		font-size: var(--font-size-xs);
+		padding: 0.1rem 0.45rem;
+		border-radius: var(--radius-full);
+		font-weight: var(--font-weight-semibold);
+	}
+
+	.user-management__actions-col {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		justify-content: flex-end;
+	}
+
+	.user-management__btn--welcome {
+		white-space: nowrap;
+	}
+	.user-management__btn--welcome-emphasis {
+		background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+		border-color: var(--color-primary);
+		color: var(--color-primary);
+		font-weight: var(--font-weight-semibold);
+	}
+	.user-management__btn--welcome:disabled {
+		opacity: 0.65;
+		cursor: wait;
+	}
+
+	.modal__welcome-panel {
+		margin-top: var(--space-4);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+		background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+	}
+	.modal__welcome-panel--muted {
+		border-color: var(--color-border);
+		background: var(--color-surface);
+	}
+	.modal__welcome-title {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
+	}
+	.modal__welcome-copy {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		line-height: 1.45;
+	}
+	.modal__welcome-btn {
+		width: 100%;
 	}
 
 	.user-management__avatar-col {
@@ -604,6 +844,10 @@
 	}
 	.user-management__status-col {
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.25rem;
 	}
 
 	.user-management__role-badge,
@@ -613,6 +857,13 @@
 		font-size: 0.85rem;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+
+	.user-management__status-badge--pending {
+		background: color-mix(in srgb, var(--color-warning, #f59e0b) 22%, transparent);
+		color: var(--color-warning-emphasis, #92400e);
+		font-size: 0.75rem;
+		padding: 0.15rem 0.55rem;
 	}
 
 	.user-management__role-badge--admin {
@@ -634,6 +885,7 @@
 
 	.user-management__actions-col {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 		justify-content: flex-end;
 	}
@@ -658,6 +910,20 @@
 	.user-management__btn--email {
 		background: var(--color-warning);
 		color: white;
+	}
+	.user-management__btn--welcome {
+		background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+		color: var(--color-primary);
+		border: 1px solid var(--color-primary);
+		white-space: nowrap;
+	}
+	.user-management__btn--welcome-emphasis {
+		background: var(--color-primary);
+		color: white;
+	}
+	.user-management__btn--welcome:disabled {
+		opacity: 0.65;
+		cursor: wait;
 	}
 
 	/* Modal shell base (.modal-overlay / .modal-content) now from globals.css for cohesion.
