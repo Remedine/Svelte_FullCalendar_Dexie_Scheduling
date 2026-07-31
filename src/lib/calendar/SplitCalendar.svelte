@@ -2342,7 +2342,8 @@
 						} else if (isTimeGrid) {
 							info.el.classList.add('fc-event--has-crew-avatars');
 							// Scale by height (short jobs) and width (concurrent stack columns).
-							// Never drop avatars — only size them so faces still read.
+							// Multi-crew stacks shrink sooner so faces stay inside overflow:hidden cards.
+							const multi = crew.length > 1;
 							const applyAvatarSizeClass = () => {
 								const h = info.el.offsetHeight || 0;
 								const w = info.el.offsetWidth || 0;
@@ -2353,12 +2354,16 @@
 									'fc-event--avatar-narrow',
 									'fc-event--avatar-tight'
 								);
-								if (h > 0 && h < 44) info.el.classList.add('fc-event--avatar-xs');
-								else if (h > 0 && h < 72) info.el.classList.add('fc-event--avatar-sm');
-								else if (h > 0 && h < 100) info.el.classList.add('fc-event--avatar-md');
+								// Slightly lower thresholds; multi-crew is even more aggressive.
+								const xsH = multi ? 56 : 48;
+								const smH = multi ? 88 : 76;
+								const mdH = multi ? 110 : 100;
+								if (h > 0 && h < xsH) info.el.classList.add('fc-event--avatar-xs');
+								else if (h > 0 && h < smH) info.el.classList.add('fc-event--avatar-sm');
+								else if (h > 0 && h < mdH) info.el.classList.add('fc-event--avatar-md');
 
-								if (w > 0 && w < 42) info.el.classList.add('fc-event--avatar-tight');
-								else if (w > 0 && w < 72) info.el.classList.add('fc-event--avatar-narrow');
+								if (w > 0 && w < 48) info.el.classList.add('fc-event--avatar-tight');
+								else if (w > 0 && w < 80) info.el.classList.add('fc-event--avatar-narrow');
 							};
 							applyAvatarSizeClass();
 							requestAnimationFrame(applyAvatarSizeClass);
@@ -3210,14 +3215,19 @@
 
 	/* Dense 3-day columns: keep left-rail layout, smaller default faces (tier classes still apply). */
 	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatar) {
-		width: 22px;
-		height: 22px;
-		font-size: 9px;
+		width: 18px;
+		height: 18px;
+		font-size: 8px;
 		border-width: 1px;
 	}
 
+	.split-calendar-container--three-day
+		:global(.fc-timegrid-event .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -10px;
+	}
+
 	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatars) {
-		gap: 2px;
+		gap: 0;
 		position: relative !important;
 		right: auto !important;
 		bottom: auto !important;
@@ -3768,24 +3778,27 @@
 		margin: 0;
 	}
 
+	/* Multi-crew: heavy stack overlap so faces fit inside short/narrow clipped cards */
 	:global(.fc-event__crew-avatars--multi) {
 		gap: 0;
 	}
 
 	:global(.fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
-		margin-top: -10px;
+		/* ~55% vertical overlap of default 38px face */
+		margin-top: -20px;
 	}
 
+	/* Default face size: ~20% smaller than prior 48px */
 	:global(.fc-event__crew-avatar) {
-		width: 48px;
-		height: 48px;
+		width: 38px;
+		height: 38px;
 		flex-shrink: 0;
 		border-radius: 50%;
 		overflow: hidden;
 		border: 2px solid var(--color-surface);
 		background: var(--color-text-muted);
 		color: var(--color-surface);
-		font-size: 16px;
+		font-size: 13px;
 		font-weight: 700;
 		line-height: 1;
 		display: flex;
@@ -3803,29 +3816,30 @@
 		display: block;
 	}
 
-	/* Height tiers — scale only */
+	/* Height tiers — ~20% smaller faces + more overlap as card shrinks */
 	:global(.fc-event--avatar-md .fc-event__crew-avatar) {
-		width: 36px;
-		height: 36px;
-		font-size: 13px;
+		width: 29px;
+		height: 29px;
+		font-size: 11px;
 		border-width: 1.5px;
 	}
 	:global(.fc-event--avatar-md .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
-		margin-top: -8px;
+		margin-top: -16px;
 	}
 
+	/* Short cards: row stack with horizontal overlap (fits better than tall column stack) */
 	:global(.fc-event--avatar-sm .fc-event__crew-avatars) {
 		flex-direction: row;
 	}
 	:global(.fc-event--avatar-sm .fc-event__crew-avatar) {
-		width: 28px;
-		height: 28px;
-		font-size: 11px;
+		width: 22px;
+		height: 22px;
+		font-size: 9px;
 		border-width: 1px;
 	}
 	:global(.fc-event--avatar-sm .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
 		margin-top: 0;
-		margin-left: -8px;
+		margin-left: -12px;
 	}
 
 	:global(.fc-event--avatar-xs .fc-event__crew-avatars) {
@@ -3833,28 +3847,28 @@
 		align-self: flex-start;
 	}
 	:global(.fc-event--avatar-xs .fc-event__crew-avatar) {
-		width: 20px;
-		height: 20px;
-		font-size: 9px;
+		width: 16px;
+		height: 16px;
+		font-size: 8px;
 		border-width: 1px;
 	}
 	:global(.fc-event--avatar-xs .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
 		margin-top: 0;
-		margin-left: -6px;
+		margin-left: -10px;
 	}
 
-	/* Narrow concurrent columns — still LEFT, just smaller */
+	/* Narrow concurrent columns — still LEFT, just smaller + tighter stack */
 	:global(.fc-event--avatar-narrow .fc-event__crew-avatars) {
 		flex-direction: column;
 	}
 	:global(.fc-event--avatar-narrow .fc-event__crew-avatar) {
-		width: 26px;
-		height: 26px;
-		font-size: 10px;
+		width: 21px;
+		height: 21px;
+		font-size: 8px;
 		border-width: 1px;
 	}
 	:global(.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
-		margin-top: -6px;
+		margin-top: -12px;
 		margin-left: 0;
 	}
 
@@ -3863,17 +3877,32 @@
 		align-self: flex-start;
 	}
 	:global(.fc-event--avatar-tight .fc-event__crew-avatar) {
-		width: 22px;
-		height: 22px;
-		font-size: 9px;
+		width: 18px;
+		height: 18px;
+		font-size: 7px;
 		border-width: 1px;
 	}
 	:global(.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
-		margin-top: -6px;
+		margin-top: -11px;
 		margin-left: 0;
 	}
 
-	/* Month view: inline after title */
+	/* Short + multi: prefer horizontal pile even when narrow width classes also apply */
+	:global(.fc-event--avatar-sm.fc-event--avatar-narrow .fc-event__crew-avatars),
+	:global(.fc-event--avatar-xs.fc-event--avatar-narrow .fc-event__crew-avatars),
+	:global(.fc-event--avatar-sm.fc-event--avatar-tight .fc-event__crew-avatars),
+	:global(.fc-event--avatar-xs.fc-event--avatar-tight .fc-event__crew-avatars) {
+		flex-direction: row;
+	}
+	:global(.fc-event--avatar-sm.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	:global(.fc-event--avatar-xs.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	:global(.fc-event--avatar-sm.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	:global(.fc-event--avatar-xs.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -10px;
+	}
+
+	/* Month view: inline after title (~20% smaller) */
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatars),
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatars--inline) {
 		position: static !important;
@@ -3881,7 +3910,7 @@
 		flex-direction: row;
 		vertical-align: middle;
 		margin-left: 4px;
-		gap: 2px;
+		gap: 0;
 		transform: none !important;
 		max-height: none;
 		overflow: visible;
@@ -3890,11 +3919,16 @@
 	}
 
 	:global(.fc-dayGridMonth-view .fc-event__crew-avatar) {
-		width: 14px;
-		height: 14px;
-		font-size: 8px;
+		width: 11px;
+		height: 11px;
+		font-size: 6px;
 		border-width: 1px;
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+	}
+
+	:global(.fc-dayGridMonth-view .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -5px;
 	}
 
 	/* Mobile / touch (portrait day + landscape 3-day):
