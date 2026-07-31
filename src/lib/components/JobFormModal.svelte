@@ -57,6 +57,8 @@
 
 	let crewOptions = $state<string[]>([]);
 	let crewPhotoMap = $state<Record<string, string>>({});
+	/** Read-only contact card for the selected client (phone / service address). */
+	let selectedClient = $state<Client | null>(null);
 	let afterSaveCallback: (() => void) | null = null;
 
 	const areaOptions = $derived(
@@ -173,6 +175,38 @@
 	// Area sync from client → job happens only in ClientPicker onSelect (user picks a client).
 	// Do NOT auto-sync on clientId bind when opening edit — that overwrote the job's saved area
 	// with the client's area (e.g. always showing Valley).
+
+	// Load client contact for the read-only block under ClientPicker (edit open + picker change).
+	$effect(() => {
+		const clientId = currentJob.clientId as string | null | undefined;
+		if (!show || !clientId) {
+			selectedClient = null;
+			return;
+		}
+		let cancelled = false;
+		void db.clients.get(clientId).then((c) => {
+			if (!cancelled) selectedClient = c || null;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const clientContactPhone = $derived((selectedClient?.phone || '').trim());
+	const clientContactAddress = $derived.by(() => {
+		if (!selectedClient) return '';
+		const parts = [
+			selectedClient.serviceAddressStreet,
+			[selectedClient.serviceAddressCity, selectedClient.serviceAddressState]
+				.filter(Boolean)
+				.join(', '),
+			selectedClient.serviceAddressZip
+		]
+			.map((p) => (p || '').trim())
+			.filter(Boolean);
+		return parts.join(' · ');
+	});
+	const hasClientContact = $derived(!!(clientContactPhone || clientContactAddress));
 
 	// Scroll modal content to top when it opens
 	$effect(() => {
@@ -506,12 +540,43 @@
 							if (client?.areaOfTown) {
 								currentJob.areaOfTown = client.areaOfTown;
 							}
+							// Immediate contact card (also reloaded from Dexie when clientId changes).
+							selectedClient = client || null;
 							console.log('✅ Client selected:', client.name);
 						}}
 						onCreate={async (name: string) => {
 							console.log('New client created inline:', name);
 						}}
 					/>
+
+					{#if selectedClient && hasClientContact}
+						<div class="new-job-modal__client-contact" aria-live="polite">
+							<span class="new-job-modal__client-contact-label">Contact</span>
+							{#if clientContactPhone}
+								<a
+									class="new-job-modal__client-contact-line new-job-modal__client-contact-line--phone"
+									href="tel:{clientContactPhone.replace(/[^\d+]/g, '')}"
+								>
+									{clientContactPhone}
+								</a>
+							{/if}
+							{#if clientContactAddress}
+								<p class="new-job-modal__client-contact-line new-job-modal__client-contact-line--address">
+									{clientContactAddress}
+								</p>
+							{/if}
+						</div>
+					{:else if selectedClient}
+						<div
+							class="new-job-modal__client-contact new-job-modal__client-contact--empty"
+							aria-live="polite"
+						>
+							<span class="new-job-modal__client-contact-label">Contact</span>
+							<p class="new-job-modal__client-contact-line new-job-modal__client-contact-line--muted">
+								No phone or address on file
+							</p>
+						</div>
+					{/if}
 				</div>
 
 				<!-- )=- Area of Town moved immediately under the Client picker (as requested).
@@ -783,6 +848,53 @@
 		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text);
+	}
+
+	/* Read-only contact block under ClientPicker (phone + service address). */
+	.new-job-modal__client-contact {
+		margin-top: var(--space-2);
+		padding: var(--space-3);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+		background: var(--color-surface-muted, var(--color-bg-subtle, transparent));
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.new-job-modal__client-contact--empty {
+		opacity: 0.85;
+	}
+
+	.new-job-modal__client-contact-label {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-text-muted);
+	}
+
+	.new-job-modal__client-contact-line {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text);
+		line-height: 1.4;
+		word-break: break-word;
+	}
+
+	.new-job-modal__client-contact-line--phone {
+		color: var(--color-primary);
+		text-decoration: none;
+		font-weight: var(--font-weight-medium);
+	}
+
+	.new-job-modal__client-contact-line--phone:hover {
+		text-decoration: underline;
+	}
+
+	.new-job-modal__client-contact-line--muted {
+		color: var(--color-text-muted);
+		font-style: italic;
 	}
 
 	.new-job-modal__header-meta {
