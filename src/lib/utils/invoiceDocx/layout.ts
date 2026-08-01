@@ -16,14 +16,17 @@ export const PAGE_HEIGHT = Math.round(11 * TWIP);
 /**
  * #10 double-window envelope (tri-fold letter fold).
  * - Return address: ~0.6" from top (upper window)
- * - Recipient: 2.5" from top (lower window)
+ * - Recipient (bill-to or service address): 2.5" from top (lower window)
+ * - Both address blocks share the same left edge (page left margin).
  * - Main invoice body starts after TOP_ADDRESS_PANEL_HEIGHT (~4.25") so it stays below the windows/fold.
+ * - Line items / body use a standard 1" left margin (not further indented under the address column).
  * See docs/invoice-double-window-pattern.md for the canonical reference pattern + prompt.
  */
-export const ENVELOPE_LEFT_MARGIN = Math.round(0.875 * TWIP);
-export const MARGIN_RIGHT = 720; // 0.5"
+/** Standard 1" letter margin; still lands in #10 double-window clear zones. */
+export const ENVELOPE_LEFT_MARGIN = Math.round(1 * TWIP);
+export const MARGIN_RIGHT = Math.round(1 * TWIP); // 1"
 export const MARGIN_TOP = 0;
-export const MARGIN_BOTTOM = 0;
+export const MARGIN_BOTTOM = Math.round(0.5 * TWIP);
 
 /** Return address zone: 0.5–0.75" from sheet top. Recipient zone: 2.5" from sheet top for standard #10 double-window. */
 // )=- Tuned to the double-window pattern (return 0.5–0.75", recipient 2.5", body content after ~4.25"). Matches common recommendations and the HTML reference pattern in docs/invoice-double-window-pattern.md
@@ -34,6 +37,13 @@ export const ENVELOPE_WINDOW_WIDTH = Math.round(4.5 * TWIP);
 
 export const CONTENT_WIDTH = PAGE_WIDTH - ENVELOPE_LEFT_MARGIN - MARGIN_RIGHT;
 export const INVOICE_COL = CONTENT_WIDTH - ENVELOPE_WINDOW_WIDTH;
+
+/** Totals / amount-due box width (right-aligned under the line-item table). */
+export const TOTALS_BOX_WIDTH = Math.round(CONTENT_WIDTH * 0.42);
+
+/** Vertical spacing for body sections (twips). */
+export const SECTION_GAP = 200; // ~0.14"
+export const NOTES_GAP = 280; // ~0.19" above invoice notes
 
 export const COL_DESC = Math.round(CONTENT_WIDTH * 0.52);
 export const COL_QTY = Math.round(CONTENT_WIDTH * 0.12);

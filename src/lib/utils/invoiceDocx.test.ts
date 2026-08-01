@@ -15,6 +15,8 @@ import {
 	hasEnvelopeRecipientRowHeight,
 	hasEnvelopeReturnOffset,
 	hasEnvelopeWindowColumnWidth,
+	hasServiceLocationLeftAligned,
+	hasTotalsBoxAfterLineItems,
 	hasTotalsRightAlignment,
 	readInvoiceDocxStructure
 } from '$lib/utils/invoiceDocx/inspect';
@@ -156,7 +158,27 @@ describe('generateInvoiceDocx structure', () => {
 		expect(hasEnvelopeReturnOffset(structure.documentXml)).toBe(true);
 		expect(hasEnvelopeWindowColumnWidth(structure.documentXml)).toBe(true);
 		expect(hasTotalsRightAlignment(structure.documentXml, 472.5)).toBe(true);
+		expect(hasTotalsBoxAfterLineItems(structure.plainText, 472.5)).toBe(true);
+		expect(hasServiceLocationLeftAligned(structure.documentXml)).toBe(true);
 		expect(hasEnvelopePreviewMarkers(structure.plainText)).toBe(false);
+	});
+
+	it('places payment before invoice notes with notes last', async () => {
+		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
+			invoiceNumber: 'CCW-2026-0002',
+			businessName: 'Capital City Windows',
+			invoiceNotes: 'Gate code 1234'
+		});
+		const structure = await readInvoiceDocxStructure(blob);
+		const paymentIdx = structure.plainText.indexOf('Payment');
+		const notesIdx = structure.plainText.indexOf('Invoice notes');
+		const dueIdx = structure.plainText.indexOf('Amount due by');
+		expect(paymentIdx).toBeGreaterThan(-1);
+		expect(notesIdx).toBeGreaterThan(-1);
+		expect(dueIdx).toBeGreaterThan(-1);
+		expect(dueIdx).toBeLessThan(paymentIdx);
+		expect(paymentIdx).toBeLessThan(notesIdx);
+		expect(structure.plainText).toContain('Gate code 1234');
 	});
 
 	it('includes dev envelope preview overlays when requested in dev', async () => {

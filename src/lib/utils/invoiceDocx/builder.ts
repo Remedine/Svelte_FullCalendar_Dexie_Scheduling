@@ -96,6 +96,7 @@ export function createInvoiceDocxBuilder(docx: DocxModule) {
 			shading?: string;
 			verticalAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign];
 			margins?: { top?: number; bottom?: number; left?: number; right?: number };
+			columnSpan?: number;
 		}
 	) =>
 		new TableCell({
@@ -105,6 +106,7 @@ export function createInvoiceDocxBuilder(docx: DocxModule) {
 			...(opts?.shading
 				? { shading: { fill: opts.shading, type: ShadingType.CLEAR } }
 				: {}),
+			...(opts?.columnSpan ? { columnSpan: opts.columnSpan } : {}),
 			margins: {
 				top: opts?.margins?.top ?? 0,
 				bottom: opts?.margins?.bottom ?? 0,

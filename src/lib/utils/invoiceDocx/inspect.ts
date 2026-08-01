@@ -86,8 +86,36 @@ export function hasTotalsRightAlignment(documentXml: string, total: number): boo
 	const amount = `$${total.toFixed(2)}`;
 	const totalIdx = documentXml.indexOf('Total');
 	if (totalIdx < 0) return false;
-	const slice = documentXml.slice(totalIdx, totalIdx + 800);
+	const slice = documentXml.slice(totalIdx, totalIdx + 1200);
+	// Totals live in a bordered box; amount cell is right-aligned.
 	return slice.includes('w:val="right"') && documentXml.includes(amount);
+}
+
+/** True when Amount due appears after the Total label (totals box order). */
+export function hasTotalsBoxAfterLineItems(plainText: string, total: number): boolean {
+	const amount = `$${total.toFixed(2)}`;
+	const descIdx = plainText.indexOf('Description');
+	const totalIdx = plainText.indexOf('Total');
+	const dueIdx = plainText.indexOf('Amount due by');
+	const paymentIdx = plainText.indexOf('Payment');
+	if (descIdx < 0 || totalIdx < 0 || dueIdx < 0) return false;
+	// Line items → totals box → payment
+	return (
+		descIdx < totalIdx &&
+		totalIdx < dueIdx &&
+		plainText.includes(amount) &&
+		(paymentIdx < 0 || dueIdx < paymentIdx)
+	);
+}
+
+/** Service location lines should be left-aligned (not center). */
+export function hasServiceLocationLeftAligned(documentXml: string): boolean {
+	const marker = 'Service location';
+	const idx = documentXml.indexOf(marker);
+	if (idx < 0) return false;
+	// Look at the paragraph that contains the label; center would set jc center nearby.
+	const slice = documentXml.slice(Math.max(0, idx - 200), idx + 400);
+	return !slice.includes('w:val="center"');
 }
 
 export function hasEnvelopePreviewMarkers(plainText: string): boolean {

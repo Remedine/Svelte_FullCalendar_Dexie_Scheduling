@@ -2,12 +2,12 @@ import type { Client, Invoice, Job } from '$lib/db';
 import { clientFromSnapshot } from '$lib/utils/invoiceSnapshot';
 import { createInvoiceDocxBuilder } from './builder';
 import {
-	buildLineItemsTable,
+	buildInvoiceNotesParagraphs,
 	buildLineItemsTableFromSnapshot,
 	buildPageTable,
 	buildPaymentParagraphs,
 	buildTopFoldTable,
-	buildTotalsParagraphs
+	buildTotalsBox
 } from './panels';
 import {
 	ENVELOPE_LEFT_MARGIN,
@@ -123,17 +123,20 @@ export async function generateInvoiceDocxFromSnapshot(
 		taxPct,
 		invoice.invoiceDiscount
 	);
+	const totalsBox = buildTotalsBox(b, invoice.amount ?? 0, dueDateStr);
 	const paymentParagraphs = buildPaymentParagraphs(
 		b,
 		docCtx,
 		buildPaymentInstructions(snapshotClient, docCtx)
 	);
-	const totalsParagraphs = buildTotalsParagraphs(b, invoice.amount ?? 0, dueDateStr);
+	const notesParagraphs = buildInvoiceNotesParagraphs(b, docCtx.invoiceNotes);
 
+	// Body order: line items (1" left margin) → totals box → payment (section gaps) → notes last
 	const pageTable = buildPageTable(b, topFoldTable, [
 		lineItemsTable,
+		totalsBox,
 		...paymentParagraphs,
-		...totalsParagraphs
+		...notesParagraphs
 	]);
 
 	const doc = new Document({
