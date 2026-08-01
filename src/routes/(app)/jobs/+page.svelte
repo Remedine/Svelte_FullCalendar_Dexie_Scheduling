@@ -217,6 +217,17 @@
 	const crewDirectory = $derived(buildCanonicalCrewDirectory(users));
 	const crewFacetOptions = $derived(crewDirectory.options);
 	const crewAliasToCanonical = $derived(crewDirectory.aliasToCanonical);
+	/** Canonical display name → photo URL for filter chips. */
+	const crewPhotoMap = $derived.by(() => {
+		const map: Record<string, string> = {};
+		for (const u of crewDirectory.users) {
+			const name = getUserDisplayName(u);
+			if (!name || !u.photo) continue;
+			const src = getUserPhotoSrc(u.photo, u);
+			if (src) map[name] = src;
+		}
+		return map;
+	});
 
 	// )=- Rich derived filtered + paginated list.
 	// Search is the primary (kept prominent on own line).
@@ -524,14 +535,27 @@
 				{#if isAdmin}
 					<div class="job-page__filter-group job-page__filter-group--inline">
 						<div class="job-page__filter-group-label">Crew</div>
-						<div class="job-page__facet">
+						<div class="job-page__facet job-page__facet--crew">
 							{#each crewFacetOptions as crewName (crewName)}
 								<button
+									type="button"
 									class="crew-chip"
 									class:active={selectedCrew.includes(crewName)}
 									onclick={() => toggleCrew(crewName)}
+									title={crewName}
+									aria-label={crewName}
+									aria-pressed={selectedCrew.includes(crewName)}
 								>
-									{crewName}
+									<span class="crew-chip__avatar" aria-hidden="true">
+										{#if crewPhotoMap[crewName]}
+											<img src={crewPhotoMap[crewName]} alt="" />
+										{:else}
+											<span class="crew-chip__initial"
+												>{(crewName || '?').charAt(0).toUpperCase()}</span
+											>
+										{/if}
+									</span>
+									<span class="crew-chip__name">{crewName}</span>
 								</button>
 							{/each}
 						</div>
@@ -885,21 +909,72 @@
 		border-color: var(--color-primary);
 	}
 
+	.job-page__facet--crew {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
 	.crew-chip {
-		padding: var(--space-1) var(--space-2);
-		margin-right: var(--space-1);
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: 2px var(--space-2) 2px 2px;
+		margin-right: 0;
 		border: 1px solid var(--color-border-strong);
 		border-radius: var(--radius-full);
 		font-size: var(--font-size-xs);
 		cursor: pointer;
 		background: var(--color-surface);
 		color: var(--color-text);
+		line-height: 1;
+		transition:
+			border-color var(--transition-fast, 0.15s ease),
+			background var(--transition-fast, 0.15s ease),
+			box-shadow var(--transition-fast, 0.15s ease);
+	}
+
+	.crew-chip__avatar {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		overflow: hidden;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-surface-alt, var(--color-border));
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--color-text-muted);
+	}
+
+	.crew-chip__avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.crew-chip__initial {
+		text-transform: uppercase;
+	}
+
+	.crew-chip__name {
+		padding-right: var(--space-1);
+		white-space: nowrap;
 	}
 
 	.crew-chip.active {
-		background: var(--color-primary);
-		color: white;
+		background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+		color: var(--color-text);
 		border-color: var(--color-primary);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
+	}
+
+	.crew-chip.active .crew-chip__avatar {
+		box-shadow: 0 0 0 1px var(--color-primary);
 	}
 
 	/* Invoice toggle inside financial group - pill like the primary quick toggles */
