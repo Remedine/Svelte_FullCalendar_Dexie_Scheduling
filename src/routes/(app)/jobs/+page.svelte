@@ -22,7 +22,12 @@
 	import { optionsStore } from '$lib/stores/options.svelte';
 	import { getDisplayAreaColor } from '$lib/utils/colors';
 	import { openJobDetailsModal } from '$lib/components/JobDetailsModal.svelte';
-	import { getUserDisplayName, isJobAssignedToCrew } from '$lib/utils/crew';
+	import {
+		buildCanonicalCrewDirectory,
+		getUserDisplayName,
+		isJobAssignedToAnyCrewFilter,
+		isJobAssignedToCrew
+	} from '$lib/utils/crew';
 
 	// )=- Phase 5 overhaul of /jobs page per JOBS_AND_INVOICES_SPEC.md.
 	// Rich filters (quick presets, date range, facets, broad search, has-invoice), pagination, enriched cards,
@@ -207,6 +212,12 @@
 		void openFromDeepLink();
 	});
 
+	// )=- Crew facet: one chip per real active user (same as calendar).
+	// Do NOT union job.assignedCrew strings — renames/typos/imports inflated the list past the roster.
+	const crewDirectory = $derived(buildCanonicalCrewDirectory(users));
+	const crewFacetOptions = $derived(crewDirectory.options);
+	const crewAliasToCanonical = $derived(crewDirectory.aliasToCanonical);
+
 	// )=- Rich derived filtered + paginated list.
 	// Search is the primary (kept prominent on own line).
 	// Quick row: All + Upcoming/Past toggle + ThisMonth/ThisWeek toggle + Show/Hide Cancel toggle + Reset.
@@ -293,10 +304,11 @@
 			result = result.filter((j) => selectedAreas.includes(j.areaOfTown || ''));
 		}
 
-		// Crew multi-select facet (admin only in UI; filter still safe if state set)
+		// Crew multi-select facet (admin only in UI; filter still safe if state set).
+		// Alias-aware so first-name / full-name / rename variants on jobs still match chips.
 		if (selectedCrew.length > 0) {
 			result = result.filter((j) =>
-				(j.assignedCrew || []).some((c) => selectedCrew.includes((c || '').trim()))
+				isJobAssignedToAnyCrewFilter(j, selectedCrew, crewAliasToCanonical)
 			);
 		}
 
@@ -409,24 +421,6 @@
 	// Filtering still uses the area id (stored on jobs).
 	// This was the root cause of "areas filter pulling in the area id and not the corresponding area label or color".
 	const areaOptions = $derived(optionsStore.data?.areasOfTown ?? []);
-
-	// )=- Crew facet names: active users + any names already on jobs (legacy imports).
-	const crewFacetOptions = $derived.by(() => {
-		const names = new Set<string>();
-		for (const u of users) {
-			if (u.active !== false) {
-				const n = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
-				if (n) names.add(n);
-			}
-		}
-		for (const j of jobs) {
-			for (const c of j.assignedCrew || []) {
-				const t = (c || '').trim();
-				if (t) names.add(t);
-			}
-		}
-		return [...names].sort((a, b) => a.localeCompare(b));
-	});
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 </script>
