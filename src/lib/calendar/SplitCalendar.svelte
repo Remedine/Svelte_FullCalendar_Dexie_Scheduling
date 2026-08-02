@@ -3796,7 +3796,8 @@
 		flex-shrink: 0;
 		border-radius: 50%;
 		overflow: hidden;
-		border: 2px solid var(--color-surface);
+		/* Hairline only — thick ring + outline shadow ate too much of the photo */
+		border: 1px solid color-mix(in srgb, var(--color-surface) 70%, rgba(0, 0, 0, 0.35));
 		background: var(--color-text-muted);
 		color: var(--color-surface);
 		font-size: 13px;
@@ -3805,9 +3806,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow:
-			0 0 0 1px rgba(0, 0, 0, 0.2),
-			0 1px 3px rgba(0, 0, 0, 0.2);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 	}
 
 	:global(.fc-event__crew-avatar img) {
@@ -3822,7 +3821,7 @@
 		width: 29px;
 		height: 29px;
 		font-size: 11px;
-		border-width: 1.5px;
+		border-width: 1px;
 	}
 	:global(.fc-event--avatar-md .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
 		margin-top: -16px;
@@ -3925,7 +3924,7 @@
 		width: 38px;
 		height: 38px;
 		font-size: 13px;
-		border-width: 1.5px;
+		border-width: 1px;
 	}
 	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
 		:global(.fc-event--avatar-md .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
@@ -4029,9 +4028,8 @@
 				box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
 				z-index 0s;
 			box-shadow:
-				0 0 0 2px var(--color-surface),
-				0 0 0 3px color-mix(in srgb, var(--color-primary) 45%, transparent),
-				0 8px 20px rgba(0, 0, 0, 0.28);
+				0 0 0 1px color-mix(in srgb, var(--color-primary) 50%, transparent),
+				0 6px 16px rgba(0, 0, 0, 0.25);
 		}
 
 		/* Month chips stay compact; no grow (too dense) */
