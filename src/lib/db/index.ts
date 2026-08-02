@@ -342,6 +342,11 @@ export interface AppOptions {
 	invoiceNumberPrefix?: string;
 	nextInvoiceNumber?: number;
 	invoiceNumberYear?: number;
+	/**
+	 * Word invoice layout: quiet | pay_first | job_packet
+	 * (Admin → Options → Invoice).
+	 */
+	invoiceLayout?: 'quiet' | 'pay_first' | 'job_packet';
 	lastUpdated: Date;
 	updatedBy: string;
 }

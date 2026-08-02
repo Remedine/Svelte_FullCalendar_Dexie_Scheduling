@@ -69,6 +69,10 @@ function buildOptionsPbPayload(cleanData: any) {
 		invoiceNumberPrefix: cleanData.invoiceNumberPrefix || 'CCW',
 		nextInvoiceNumber: Number(cleanData.nextInvoiceNumber ?? 1),
 		invoiceNumberYear: Number(cleanData.invoiceNumberYear ?? new Date().getFullYear()),
+		invoiceLayout:
+			cleanData.invoiceLayout === 'pay_first' || cleanData.invoiceLayout === 'job_packet'
+				? cleanData.invoiceLayout
+				: 'quiet',
 		areasOfTown: cleanData.areasOfTown || [],
 		defaultBillableItems: cleanData.defaultBillableItems || [],
 		cancelReasons: cleanData.cancelReasons || [],
@@ -115,6 +119,7 @@ export const optionsStore = $state({
 						salesTaxJurisdiction: 'City and Borough of Juneau sales tax',
 						invoiceNumberPrefix: 'CCW',
 						nextInvoiceNumber: 1,
+						invoiceLayout: 'quiet',
 						crewAssignmentDaysBefore: 1,
 						crewAssignmentHour: 7,
 						calendarDayStartHour: 6,
@@ -212,6 +217,7 @@ export const optionsStore = $state({
 						invoiceNumberPrefix: 'CCW',
 						nextInvoiceNumber: 1,
 						invoiceNumberYear: new Date().getFullYear(),
+						invoiceLayout: 'quiet',
 						crewAssignmentDaysBefore: 1,
 						crewAssignmentHour: 7,
 						calendarDayStartHour: 6,
@@ -290,6 +296,10 @@ export const optionsStore = $state({
 				invoiceNumberPrefix: record.invoiceNumberPrefix ?? 'CCW',
 				nextInvoiceNumber: Number(record.nextInvoiceNumber ?? 1),
 				invoiceNumberYear: Number(record.invoiceNumberYear ?? new Date().getFullYear()),
+				invoiceLayout:
+					record.invoiceLayout === 'pay_first' || record.invoiceLayout === 'job_packet'
+						? record.invoiceLayout
+						: 'quiet',
 				areasOfTown: record.areasOfTown ?? [],
 				defaultBillableItems: record.defaultBillableItems ?? [],
 				cancelReasons: record.cancelReasons ?? [],

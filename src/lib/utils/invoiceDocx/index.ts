@@ -2,12 +2,9 @@ import type { Client, Invoice, Job } from '$lib/db';
 import { clientFromSnapshot } from '$lib/utils/invoiceSnapshot';
 import { createInvoiceDocxBuilder } from './builder';
 import {
-	buildInvoiceNotesParagraphs,
-	buildLineItemsTableFromSnapshot,
+	assembleInvoiceBody,
 	buildPageTable,
-	buildPaymentParagraphs,
-	buildTopFoldTable,
-	buildTotalsBox
+	buildTopFoldTable
 } from './panels';
 import {
 	ENVELOPE_LEFT_MARGIN,
@@ -27,6 +24,7 @@ import {
 	getRecipientMailingLines
 } from './addresses';
 import { normalizeTaxRateToPercent } from '$lib/utils/tax';
+import { normalizeInvoiceLayout } from './invoiceLayouts';
 import type { InvoiceDocxContext, InvoiceDocxGenerateOptions } from './types';
 
 export type {
@@ -34,6 +32,14 @@ export type {
 	InvoiceDocxContext,
 	InvoiceDocxGenerateOptions
 } from './types';
+
+export type { InvoiceLayoutId } from './invoiceLayouts';
+export {
+	DEFAULT_INVOICE_LAYOUT,
+	INVOICE_LAYOUT_IDS,
+	INVOICE_LAYOUT_OPTIONS,
+	normalizeInvoiceLayout
+} from './invoiceLayouts';
 
 export {
 	buildPaymentInstructions,
@@ -94,13 +100,23 @@ export async function generateInvoiceDocxFromSnapshot(
 	const serviceLines = [serviceLoc.street, serviceLoc.csz].filter((l) => l.trim().length > 0);
 	if (serviceLines.length === 0) serviceLines.push('—');
 
+	const billTo = getClientBillToAddress(snapshotClient);
+	const billToAddressLines = [billTo.street, billTo.csz.trim()].filter(
+		(l) => l && l.trim().length > 0
+	);
+
 	const envelopePreview = import.meta.env.DEV && options?.envelopePreview === true;
+	const layout = normalizeInvoiceLayout(ctx.invoiceLayout);
 
 	const docCtx: InvoiceDocxContext = {
 		...ctx,
 		invoiceNumber: invoice.invoiceNumber || ctx.invoiceNumber,
-		invoiceNotes: invoice.notes || ctx.invoiceNotes
+		invoiceNotes: invoice.notes || ctx.invoiceNotes,
+		invoiceLayout: layout
 	};
+
+	const meta = { serviceDate, serviceEnd, invoiceDate, dueDateStr };
+	const total = invoice.amount ?? 0;
 
 	const topFoldTable = buildTopFoldTable(
 		b,
@@ -108,36 +124,33 @@ export async function generateInvoiceDocxFromSnapshot(
 			returnLines: getBusinessReturnAddressLines(docCtx),
 			recipientLines: getRecipientMailingLines(snapshotClient, clientName),
 			serviceLines,
-			envelopePreview
+			envelopePreview,
+			totalAmount: total
 		},
 		docCtx,
-		{ serviceDate, serviceEnd, invoiceDate, dueDateStr }
+		meta,
+		layout
 	);
 
-	const lineItemsTable = buildLineItemsTableFromSnapshot(
-		b,
-		invoice.billableItems || [],
-		invoice.subtotal ?? 0,
-		invoice.taxAmount ?? 0,
+	const bodyChildren = assembleInvoiceBody(b, {
+		layout,
+		clientName,
+		billToAddressLines,
+		serviceLines,
+		items: invoice.billableItems || [],
+		subtotal: invoice.subtotal ?? 0,
+		taxAmount: invoice.taxAmount ?? 0,
 		taxLabel,
 		taxPct,
-		invoice.invoiceDiscount
-	);
-	const totalsBox = buildTotalsBox(b, invoice.amount ?? 0, dueDateStr);
-	const paymentParagraphs = buildPaymentParagraphs(
-		b,
-		docCtx,
-		buildPaymentInstructions(snapshotClient, docCtx)
-	);
-	const notesParagraphs = buildInvoiceNotesParagraphs(b, docCtx.invoiceNotes);
+		total,
+		dueDateStr,
+		invoiceDiscount: invoice.invoiceDiscount,
+		paymentLines: buildPaymentInstructions(snapshotClient, docCtx),
+		ctx: docCtx,
+		meta
+	});
 
-	// Body order: line items (1" left margin) → totals box → payment (section gaps) → notes last
-	const pageTable = buildPageTable(b, topFoldTable, [
-		lineItemsTable,
-		totalsBox,
-		...paymentParagraphs,
-		...notesParagraphs
-	]);
+	const pageTable = buildPageTable(b, topFoldTable, bodyChildren);
 
 	const doc = new Document({
 		styles: {
@@ -179,7 +192,9 @@ export async function generateInvoiceDocx(
 	options?: InvoiceDocxGenerateOptions
 ): Promise<Blob> {
 	const { buildSnapshotDefaults } = await import('$lib/utils/invoiceSnapshot');
-	const { calculateInvoiceTotals, normalizeBillableItems } = await import('$lib/utils/invoiceTotals');
+	const { calculateInvoiceTotals, normalizeBillableItems } = await import(
+		'$lib/utils/invoiceTotals'
+	);
 	const defaults = buildSnapshotDefaults(job, client, ctx.invoiceDueDays ?? 30);
 	const items = normalizeBillableItems(defaults.billableItems);
 	const totals = calculateInvoiceTotals({
@@ -226,6 +241,7 @@ export function businessInfoFromOptions(opts: Record<string, unknown> | null | u
 		taxRate: opts.taxRate as number | undefined,
 		invoiceDueDays: opts.invoiceDueDays as number | undefined,
 		invoiceSignatoryName: opts.invoiceSignatoryName as string | undefined,
-		invoiceSignatoryPhone: opts.invoiceSignatoryPhone as string | undefined
+		invoiceSignatoryPhone: opts.invoiceSignatoryPhone as string | undefined,
+		invoiceLayout: normalizeInvoiceLayout(opts.invoiceLayout)
 	};
 }

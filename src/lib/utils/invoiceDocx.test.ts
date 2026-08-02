@@ -7,7 +7,8 @@ import {
 	getBusinessReturnAddressLines,
 	getClientBillToAddress,
 	getClientServiceAddress,
-	getRecipientMailingLines
+	getRecipientMailingLines,
+	normalizeInvoiceLayout
 } from '$lib/utils/invoiceDocx';
 import {
 	hasEnvelopeMailToLabel,
@@ -190,5 +191,44 @@ describe('generateInvoiceDocx structure', () => {
 		);
 		const structure = await readInvoiceDocxStructure(blob);
 		expect(hasEnvelopePreviewMarkers(structure.plainText)).toBe(import.meta.env.DEV);
+	});
+
+	it('pay_first layout highlights amount due and work section order', async () => {
+		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
+			invoiceNumber: 'CCW-2026-0100',
+			invoiceLayout: 'pay_first'
+		});
+		const structure = await readInvoiceDocxStructure(blob);
+		expect(structure.plainText).toContain('AMOUNT DUE');
+		expect(structure.plainText).toContain('Bill to');
+		expect(structure.plainText.indexOf('Amount due')).toBeGreaterThan(-1);
+		expect(structure.plainText.indexOf('AMOUNT DUE')).toBeGreaterThan(
+			structure.plainText.indexOf('Description')
+		);
+	});
+
+	it('job_packet layout uses work performed and payment instructions titles', async () => {
+		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
+			invoiceNumber: 'CCW-2026-0101',
+			invoiceLayout: 'job_packet',
+			invoiceNotes: 'Leave gate open'
+		});
+		const structure = await readInvoiceDocxStructure(blob);
+		expect(structure.plainText).toContain('WORK PERFORMED');
+		expect(structure.plainText).toContain('Payment instructions');
+		expect(structure.plainText).toContain('Job / tax info');
+		expect(structure.plainText).toContain('Leave gate open');
+		expect(structure.plainText.indexOf('WORK PERFORMED')).toBeLessThan(
+			structure.plainText.indexOf('Payment instructions')
+		);
+	});
+});
+
+describe('normalizeInvoiceLayout', () => {
+	it('defaults unknown values to quiet', () => {
+		expect(normalizeInvoiceLayout(undefined)).toBe('quiet');
+		expect(normalizeInvoiceLayout('nope')).toBe('quiet');
+		expect(normalizeInvoiceLayout('pay_first')).toBe('pay_first');
+		expect(normalizeInvoiceLayout('job_packet')).toBe('job_packet');
 	});
 });

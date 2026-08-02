@@ -6,8 +6,12 @@ export const FONT_BODY = 20; // 10pt
 export const FONT_LABEL = 20;
 export const FONT_TITLE = 68; // 34pt
 export const FONT_TOTAL = 32; // 16pt
+/** Large amount-due hero (pay_first layout). */
+export const FONT_HERO = 40; // 20pt
+export const FONT_SECTION = 22; // 11pt section titles
 export const FONT_ENVELOPE = 20;
 export const COLOR_MUTED = '2B2C2F';
+export const COLOR_INK = '111111';
 export const TIGHT = 60;
 
 export const PAGE_WIDTH = Math.round(8.5 * TWIP);

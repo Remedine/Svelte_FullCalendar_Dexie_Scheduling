@@ -1,3 +1,5 @@
+import type { InvoiceLayoutId } from './invoiceLayouts';
+
 /** Business + invoice settings pulled from AppOptions for docx generation. */
 export interface InvoiceDocxBusinessInfo {
 	businessName?: string;
@@ -19,6 +21,11 @@ export interface InvoiceDocxBusinessInfo {
 	/** Closing signature on payment block (defaults when omitted). */
 	invoiceSignatoryName?: string;
 	invoiceSignatoryPhone?: string;
+	/**
+	 * Word invoice layout style (Admin → Options → Invoice).
+	 * quiet | pay_first | job_packet
+	 */
+	invoiceLayout?: InvoiceLayoutId;
 }
 
 export interface InvoiceDocxContext extends InvoiceDocxBusinessInfo {
