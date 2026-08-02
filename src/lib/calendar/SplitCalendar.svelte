@@ -3213,17 +3213,18 @@
 		padding-bottom: 0;
 	}
 
-	/* Dense 3-day columns: keep left-rail layout, smaller default faces (tier classes still apply). */
+	/* Dense 3-day columns: left-rail layout; faces ~30% larger than prior 18px, lighter stack. */
 	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatar) {
-		width: 18px;
-		height: 18px;
-		font-size: 8px;
+		width: 24px;
+		height: 24px;
+		font-size: 10px;
 		border-width: 1px;
 	}
 
 	.split-calendar-container--three-day
 		:global(.fc-timegrid-event .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
-		margin-top: -10px;
+		/* ~25% overlap (was ~55%) so multi-crew is readable in narrow columns */
+		margin-top: -6px;
 	}
 
 	.split-calendar-container--three-day :global(.fc-timegrid-event .fc-event__crew-avatars) {
@@ -3900,6 +3901,145 @@
 	:global(.fc-event--avatar-xs.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
 		margin-top: 0;
 		margin-left: -10px;
+	}
+
+	/*
+	 * Mobile time-grid cards: faces +30% vs desktop tiers, lighter stack so assigned
+	 * crew is identifiable (portrait day + any --mobile shell; 3-day sizes set above).
+	 */
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-timegrid-event .fc-event__crew-avatar) {
+		width: 49px;
+		height: 49px;
+		font-size: 16px;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		/* ~28% vertical overlap (was ~53% at -20px / 38px) */
+		margin-top: -14px;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-md .fc-event__crew-avatar) {
+		width: 38px;
+		height: 38px;
+		font-size: 13px;
+		border-width: 1.5px;
+	}
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-md .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -11px;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-sm .fc-event__crew-avatar) {
+		width: 29px;
+		height: 29px;
+		font-size: 11px;
+	}
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-sm .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -8px;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-xs .fc-event__crew-avatar) {
+		width: 21px;
+		height: 21px;
+		font-size: 9px;
+	}
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-xs .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -6px;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-narrow .fc-event__crew-avatar) {
+		width: 27px;
+		height: 27px;
+		font-size: 10px;
+	}
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -8px;
+		margin-left: 0;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-tight .fc-event__crew-avatar) {
+		width: 23px;
+		height: 23px;
+		font-size: 9px;
+	}
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: -7px;
+		margin-left: 0;
+	}
+
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-sm.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-xs.fc-event--avatar-narrow .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-sm.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar),
+	.split-calendar-container--mobile:not(.split-calendar-container--three-day)
+		:global(.fc-event--avatar-xs.fc-event--avatar-tight .fc-event__crew-avatars--multi .fc-event__crew-avatar + .fc-event__crew-avatar) {
+		margin-top: 0;
+		margin-left: -7px;
+	}
+
+	/* Desktop (fine pointer + hover): grow face 40% on hover, pop above siblings */
+	@media (hover: hover) and (pointer: fine) {
+		:global(.fc-timegrid-event .fc-event__crew-avatars) {
+			/* Allow hover; keep clipped until a face is hovered so concurrent cards don't bleed */
+			pointer-events: auto;
+		}
+
+		:global(.fc-timegrid-event.fc-event--has-crew-avatars:has(.fc-event__crew-avatar:hover)) {
+			overflow: visible !important;
+			z-index: 40;
+		}
+
+		:global(.fc-timegrid-event.fc-event--has-crew-avatars:has(.fc-event__crew-avatar:hover) .fc-event-main),
+		:global(.fc-timegrid-event.fc-event--has-crew-avatars:has(.fc-event__crew-avatar:hover) .fc-event__crew-avatars) {
+			overflow: visible;
+		}
+
+		:global(.fc-event__crew-avatar) {
+			position: relative;
+			z-index: 1;
+			transform: scale(1);
+			transform-origin: center center;
+			transition:
+				transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+				box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+				z-index 0s linear 0.22s;
+		}
+
+		:global(.fc-event__crew-avatar:hover) {
+			transform: scale(1.4);
+			z-index: 30;
+			/* Apply z-index immediately on hover (override delayed leave) */
+			transition:
+				transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+				box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+				z-index 0s;
+			box-shadow:
+				0 0 0 2px var(--color-surface),
+				0 0 0 3px color-mix(in srgb, var(--color-primary) 45%, transparent),
+				0 8px 20px rgba(0, 0, 0, 0.28);
+		}
+
+		/* Month chips stay compact; no grow (too dense) */
+		:global(.fc-dayGridMonth-view .fc-event__crew-avatar:hover) {
+			transform: none;
+			z-index: 1;
+			box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+		}
 	}
 
 	/* Month view: inline after title (~20% smaller) */
