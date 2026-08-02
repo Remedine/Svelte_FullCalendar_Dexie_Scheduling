@@ -463,7 +463,8 @@
 		.month-picker {
 			/* Midpoint between the prior compact (~1/3) and original (~2/3) mobile picker. */
 			--month-picker-grid-height: 134px;
-			--month-picker-nav-height: 47px;
+			/* ~40% shorter than the previous 47px nav row. */
+			--month-picker-nav-height: 28px;
 			padding: 4px 6px;
 		}
 
@@ -497,24 +498,40 @@
 			font-size: 11px;
 		}
 
+		/* Larger, partially stacked dots so area colors stay readable in tight cells. */
 		.month-picker__dots {
-			gap: 1px;
+			gap: 0;
 			margin-top: 1px;
+			flex-wrap: wrap;
+			justify-content: center;
+			max-width: 100%;
+			line-height: 0;
 		}
 
 		.month-picker__dot {
-			width: 3px;
-			height: 3px;
+			width: 8px;
+			height: 8px;
+			/* Partial horizontal + vertical overlap when several jobs share a day. */
+			margin: -2px 0 0 -3px;
+			border: 1px solid var(--color-surface);
+			box-sizing: border-box;
+			flex-shrink: 0;
+		}
+
+		.month-picker__dot:first-child {
+			margin-left: 0;
 		}
 
 		.month-picker__footer {
-			margin-top: 3px;
+			margin-top: 2px;
 			gap: 4px;
 		}
 
 		.month-picker__nav {
 			min-height: var(--month-picker-nav-height);
-			font-size: var(--font-size-lg);
+			padding-block: 0;
+			font-size: var(--font-size-base);
+			line-height: 1;
 		}
 
 		.month-picker__today-btn {
