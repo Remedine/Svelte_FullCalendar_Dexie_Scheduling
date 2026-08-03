@@ -624,9 +624,6 @@
 					{#if selectedClient}
 						<div class="new-job-modal__client-contact" aria-live="polite">
 							<span class="new-job-modal__client-contact-label">Contact</span>
-							<p class="new-job-modal__client-contact-help">
-								Edits update this client when you save the job.
-							</p>
 
 							<div class="new-job-modal__client-contact-fields">
 								<div class="new-job-modal__client-contact-field">
@@ -1038,13 +1035,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--color-text-muted);
-	}
-
-	.new-job-modal__client-contact-help {
-		margin: 0;
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		line-height: 1.35;
 	}
 
 	.new-job-modal__client-contact-fields {
