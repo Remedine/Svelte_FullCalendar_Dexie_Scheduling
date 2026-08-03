@@ -57,8 +57,19 @@
 
 	let crewOptions = $state<string[]>([]);
 	let crewPhotoMap = $state<Record<string, string>>({});
-	/** Read-only contact card for the selected client (phone / service address). */
+	/** Selected client for contact fields under ClientPicker (phone / email / service address). */
 	let selectedClient = $state<Client | null>(null);
+	/** Editable contact form bound to the selected client; persisted via updateClient on job save. */
+	let contactForm = $state({
+		phone: '',
+		email: '',
+		serviceAddressStreet: '',
+		serviceAddressCity: '',
+		serviceAddressState: '',
+		serviceAddressZip: ''
+	});
+	/** Tracks which client id the contact form was seeded from (avoids clobbering in-progress edits). */
+	let contactFormClientId = $state<string | null>(null);
 	let afterSaveCallback: (() => void) | null = null;
 
 	const areaOptions = $derived(
@@ -176,7 +187,7 @@
 	// Do NOT auto-sync on clientId bind when opening edit — that overwrote the job's saved area
 	// with the client's area (e.g. always showing Valley).
 
-	// Load client contact for the read-only block under ClientPicker (edit open + picker change).
+	// Load client for the editable contact block under ClientPicker (edit open + picker change).
 	$effect(() => {
 		const clientId = currentJob.clientId as string | null | undefined;
 		if (!show || !clientId) {
@@ -192,21 +203,102 @@
 		};
 	});
 
-	const clientContactPhone = $derived((selectedClient?.phone || '').trim());
-	const clientContactAddress = $derived.by(() => {
-		if (!selectedClient) return '';
-		const parts = [
-			selectedClient.serviceAddressStreet,
-			[selectedClient.serviceAddressCity, selectedClient.serviceAddressState]
-				.filter(Boolean)
-				.join(', '),
-			selectedClient.serviceAddressZip
-		]
-			.map((p) => (p || '').trim())
-			.filter(Boolean);
-		return parts.join(' · ');
+	// Seed contact form when the selected client identity changes (not on every field keystroke).
+	$effect(() => {
+		const client = selectedClient;
+		const id = client?.id ?? null;
+		if (id === contactFormClientId) return;
+		contactFormClientId = id;
+		if (client) {
+			contactForm = {
+				phone: client.phone || '',
+				email: client.email || '',
+				serviceAddressStreet: client.serviceAddressStreet || '',
+				serviceAddressCity: client.serviceAddressCity || '',
+				serviceAddressState: client.serviceAddressState || '',
+				serviceAddressZip: client.serviceAddressZip || ''
+			};
+		} else {
+			contactForm = {
+				phone: '',
+				email: '',
+				serviceAddressStreet: '',
+				serviceAddressCity: '',
+				serviceAddressState: '',
+				serviceAddressZip: ''
+			};
+		}
 	});
-	const hasClientContact = $derived(!!(clientContactPhone || clientContactAddress));
+
+	function formatPhone(value: string): string {
+		const digits = value.replace(/\D/g, '');
+		if (digits.length === 0) return '';
+		if (digits.length <= 3) return `(${digits}`;
+		if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+		return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+	}
+
+	function isValidEmail(value: string): boolean {
+		return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+	}
+
+	/** Persist contact fields to the selected client (and area backfill when client has none). */
+	async function saveClientContactFromForm(): Promise<boolean> {
+		if (!currentJob.clientId) return true;
+
+		const email = (contactForm.email || '').trim();
+		if (email && !isValidEmail(email)) {
+			alert('Please enter a valid email address for the client.');
+			return false;
+		}
+
+		const client = await db.clients.get(currentJob.clientId);
+		if (!client) return true;
+
+		const phone = (contactForm.phone || '').trim();
+		const serviceAddressStreet = (contactForm.serviceAddressStreet || '').trim();
+		const serviceAddressCity = (contactForm.serviceAddressCity || '').trim();
+		const serviceAddressState = (contactForm.serviceAddressState || '').trim().toUpperCase();
+		const serviceAddressZip = (contactForm.serviceAddressZip || '').trim();
+		const areaOfTown = client.areaOfTown || currentJob.areaOfTown || '';
+
+		const unchanged =
+			(client.phone || '') === phone &&
+			(client.email || '') === email &&
+			(client.serviceAddressStreet || '') === serviceAddressStreet &&
+			(client.serviceAddressCity || '') === serviceAddressCity &&
+			(client.serviceAddressState || '') === serviceAddressState &&
+			(client.serviceAddressZip || '') === serviceAddressZip &&
+			// Area backfill only when client had none and job has one
+			!(!client.areaOfTown && currentJob.areaOfTown);
+
+		if (unchanged) return true;
+
+		await updateClient(currentJob.clientId, {
+			...client,
+			phone,
+			email,
+			serviceAddressStreet,
+			serviceAddressCity,
+			serviceAddressState,
+			serviceAddressZip,
+			areaOfTown,
+			updatedAt: new Date()
+		});
+
+		// Keep local selection in sync for subsequent saves without reopening.
+		selectedClient = {
+			...client,
+			phone,
+			email,
+			serviceAddressStreet,
+			serviceAddressCity,
+			serviceAddressState,
+			serviceAddressZip,
+			areaOfTown
+		};
+		return true;
+	}
 
 	// Scroll modal content to top when it opens
 	$effect(() => {
@@ -312,20 +404,9 @@
 			}
 		}
 
-		// )=- If the client has no areaOfTown yet but this job does, backfill the client.
-		// In almost all cases client and job share the area; this makes the job form "teach" the client
-		// its area when the client was created without one (e.g. inline creation in this modal or older data).
-		// We do this on every save (create or edit) so historical jobs can correct the client's area.
-		if (currentJob.clientId && currentJob.areaOfTown) {
-			const client = await db.clients.get(currentJob.clientId);
-			if (client && !client.areaOfTown) {
-				await updateClient(currentJob.clientId, {
-					...client,
-					areaOfTown: currentJob.areaOfTown,
-					updatedAt: new Date()
-				});
-			}
-		}
+		// Persist phone / email / service address edits to the client, and backfill areaOfTown
+		// when the client has none but the job does.
+		if (!(await saveClientContactFromForm())) return;
 
 		const cleanPayload = {
 			title: currentJob.title || 'Untitled Job',
@@ -419,16 +500,7 @@
 
 		completingJob = true;
 		try {
-			if (currentJob.clientId && currentJob.areaOfTown) {
-				const client = await db.clients.get(currentJob.clientId);
-				if (client && !client.areaOfTown) {
-					await updateClient(currentJob.clientId, {
-						...client,
-						areaOfTown: currentJob.areaOfTown,
-						updatedAt: new Date()
-					});
-				}
-			}
+			if (!(await saveClientContactFromForm())) return;
 
 			const cleanPayload = {
 				title: currentJob.title || 'Untitled Job',
@@ -549,32 +621,100 @@
 						}}
 					/>
 
-					{#if selectedClient && hasClientContact}
+					{#if selectedClient}
 						<div class="new-job-modal__client-contact" aria-live="polite">
 							<span class="new-job-modal__client-contact-label">Contact</span>
-							{#if clientContactPhone}
-								<a
-									class="new-job-modal__client-contact-line new-job-modal__client-contact-line--phone"
-									href="tel:{clientContactPhone.replace(/[^\d+]/g, '')}"
-								>
-									{clientContactPhone}
-								</a>
-							{/if}
-							{#if clientContactAddress}
-								<p class="new-job-modal__client-contact-line new-job-modal__client-contact-line--address">
-									{clientContactAddress}
-								</p>
-							{/if}
-						</div>
-					{:else if selectedClient}
-						<div
-							class="new-job-modal__client-contact new-job-modal__client-contact--empty"
-							aria-live="polite"
-						>
-							<span class="new-job-modal__client-contact-label">Contact</span>
-							<p class="new-job-modal__client-contact-line new-job-modal__client-contact-line--muted">
-								No phone or address on file
+							<p class="new-job-modal__client-contact-help">
+								Edits update this client when you save the job.
 							</p>
+
+							<div class="new-job-modal__client-contact-fields">
+								<div class="new-job-modal__client-contact-field">
+									<label for="job-client-phone" class="new-job-modal__client-contact-field-label"
+										>Phone</label
+									>
+									<input
+										id="job-client-phone"
+										type="tel"
+										class="new-job-modal__input input"
+										placeholder="(907) 555-1234"
+										bind:value={contactForm.phone}
+										oninput={(e) =>
+											(contactForm.phone = formatPhone((e.target as HTMLInputElement).value))}
+									/>
+								</div>
+
+								<div class="new-job-modal__client-contact-field">
+									<label for="job-client-email" class="new-job-modal__client-contact-field-label"
+										>Email</label
+									>
+									<input
+										id="job-client-email"
+										type="email"
+										class="new-job-modal__input input"
+										placeholder="client@example.com"
+										bind:value={contactForm.email}
+										autocomplete="email"
+									/>
+								</div>
+
+								<div class="new-job-modal__client-contact-field">
+									<label for="job-client-street" class="new-job-modal__client-contact-field-label"
+										>Service address</label
+									>
+									<input
+										id="job-client-street"
+										type="text"
+										class="new-job-modal__input input"
+										placeholder="Street"
+										bind:value={contactForm.serviceAddressStreet}
+										autocomplete="street-address"
+									/>
+								</div>
+
+								<div class="new-job-modal__client-contact-address-row">
+									<div class="new-job-modal__client-contact-field new-job-modal__client-contact-field--city">
+										<label for="job-client-city" class="new-job-modal__client-contact-field-label"
+											>City</label
+										>
+										<input
+											id="job-client-city"
+											type="text"
+											class="new-job-modal__input input"
+											placeholder="City"
+											bind:value={contactForm.serviceAddressCity}
+											autocomplete="address-level2"
+										/>
+									</div>
+									<div class="new-job-modal__client-contact-field new-job-modal__client-contact-field--state">
+										<label for="job-client-state" class="new-job-modal__client-contact-field-label"
+											>State</label
+										>
+										<input
+											id="job-client-state"
+											type="text"
+											class="new-job-modal__input input"
+											placeholder="AK"
+											maxlength="2"
+											bind:value={contactForm.serviceAddressState}
+											autocomplete="address-level1"
+										/>
+									</div>
+									<div class="new-job-modal__client-contact-field new-job-modal__client-contact-field--zip">
+										<label for="job-client-zip" class="new-job-modal__client-contact-field-label"
+											>ZIP</label
+										>
+										<input
+											id="job-client-zip"
+											type="text"
+											class="new-job-modal__input input"
+											placeholder="ZIP"
+											bind:value={contactForm.serviceAddressZip}
+											autocomplete="postal-code"
+										/>
+									</div>
+								</div>
+							</div>
 						</div>
 					{/if}
 				</div>
@@ -629,34 +769,64 @@
 					</div>
 				</div>
 
-				<!-- Crew / Assigned Staff: avatars only (no names), border highlight for selected -->
+				<!-- Crew: avatar multi-select. Selected = dual ring (surface gap + primary) + check badge
+				     so selection still reads on blue/busy photos where a thin border alone fails. -->
 				<fieldset class="new-job-modal__field">
-					<legend class="new-job-modal__label label">Crew / Assigned Staff</legend>
-					<div class="new-job-modal__crew-grid">
+					<legend class="new-job-modal__label label">
+						Crew / Assigned Staff
+						{#if currentJob.assignedCrew?.length}
+							<span class="new-job-modal__crew-count">
+								({currentJob.assignedCrew.length} assigned)
+							</span>
+						{/if}
+					</legend>
+					<div class="new-job-modal__crew-grid" role="group" aria-label="Assign crew">
 						{#each crewOptions as crew (crew)}
-							<label class="new-job-modal__crew-option">
+							{@const isAssigned = currentJob.assignedCrew.includes(crew)}
+							<label
+								class="new-job-modal__crew-option"
+								class:new-job-modal__crew-option--selected={isAssigned}
+							>
 								<input
 									type="checkbox"
-									checked={currentJob.assignedCrew.includes(crew)}
+									checked={isAssigned}
 									onchange={(e) => {
 										const checked = (e.currentTarget as HTMLInputElement).checked;
 										currentJob.assignedCrew = checked
 											? [...currentJob.assignedCrew, crew]
 											: currentJob.assignedCrew.filter((c: string) => c !== crew);
 									}}
-									aria-label={crew}
+									aria-label={isAssigned ? `${crew}, assigned` : `${crew}, not assigned`}
 								/>
-								<div
+								<span
 									class="new-job-modal__crew-avatar"
-									class:selected={currentJob.assignedCrew.includes(crew)}
+									class:selected={isAssigned}
 									title={crew}
 								>
-									{#if crewPhotoMap[crew]}
-										<img src={crewPhotoMap[crew]} alt={crew} />
-									{:else}
-										<span class="initial">{crew?.charAt(0)?.toUpperCase() || '?'}</span>
+									<span class="new-job-modal__crew-avatar-face">
+										{#if crewPhotoMap[crew]}
+											<img src={crewPhotoMap[crew]} alt="" />
+										{:else}
+											<span class="initial">{crew?.charAt(0)?.toUpperCase() || '?'}</span>
+										{/if}
+									</span>
+									{#if isAssigned}
+										<span class="new-job-modal__crew-check" aria-hidden="true">
+											<svg
+												viewBox="0 0 16 16"
+												width="10"
+												height="10"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2.4"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+											>
+												<path d="M3 8.5 6.5 12 13 4" />
+											</svg>
+										</span>
 									{/if}
-								</div>
+								</span>
 							</label>
 						{/each}
 					</div>
@@ -850,7 +1020,7 @@
 		color: var(--color-text);
 	}
 
-	/* Read-only contact block under ClientPicker (phone + service address). */
+	/* Editable contact block under ClientPicker (phone, email, service address). */
 	.new-job-modal__client-contact {
 		margin-top: var(--space-2);
 		padding: var(--space-3);
@@ -859,11 +1029,7 @@
 		background: var(--color-surface-muted, var(--color-bg-subtle, transparent));
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.new-job-modal__client-contact--empty {
-		opacity: 0.85;
+		gap: var(--space-2);
 	}
 
 	.new-job-modal__client-contact-label {
@@ -874,27 +1040,41 @@
 		color: var(--color-text-muted);
 	}
 
-	.new-job-modal__client-contact-line {
+	.new-job-modal__client-contact-help {
 		margin: 0;
-		font-size: var(--font-size-sm);
-		color: var(--color-text);
-		line-height: 1.4;
-		word-break: break-word;
-	}
-
-	.new-job-modal__client-contact-line--phone {
-		color: var(--color-primary);
-		text-decoration: none;
-		font-weight: var(--font-weight-medium);
-	}
-
-	.new-job-modal__client-contact-line--phone:hover {
-		text-decoration: underline;
-	}
-
-	.new-job-modal__client-contact-line--muted {
+		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
-		font-style: italic;
+		line-height: 1.35;
+	}
+
+	.new-job-modal__client-contact-fields {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.new-job-modal__client-contact-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		min-width: 0;
+	}
+
+	.new-job-modal__client-contact-field-label {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
+	}
+
+	.new-job-modal__client-contact-address-row {
+		display: grid;
+		grid-template-columns: 1fr minmax(3.25rem, 4rem) minmax(4.5rem, 5.5rem);
+		gap: var(--space-2);
+		align-items: end;
+	}
+
+	.new-job-modal__client-contact-field--state .new-job-modal__input {
+		text-transform: uppercase;
 	}
 
 	.new-job-modal__header-meta {
@@ -971,20 +1151,31 @@
 
 	/* .new-job-modal__input relies on global .input primitive */
 
+	.new-job-modal__crew-count {
+		margin-left: 0.35em;
+		font-weight: var(--font-weight-medium);
+		text-transform: none;
+		letter-spacing: normal;
+		color: var(--color-primary);
+		font-size: var(--font-size-sm);
+	}
+
 	.new-job-modal__crew-grid {
 		display: flex;
 		flex-wrap: wrap;
-		gap: var(--space-4);
+		gap: var(--space-3);
 		padding: var(--space-2) 0;
 	}
 
 	.new-job-modal__crew-option {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		cursor: pointer;
 	}
 
-	.new-job-modal__crew-option input[type="checkbox"] {
+	.new-job-modal__crew-option input[type='checkbox'] {
 		position: absolute;
 		opacity: 0;
 		pointer-events: none;
@@ -992,12 +1183,36 @@
 		height: 0;
 	}
 
+	/* Outer shell: room for dual ring + check badge (overflow visible). */
 	.new-job-modal__crew-avatar {
+		position: relative;
+		width: 44px;
+		height: 44px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition:
+			transform 0.15s ease,
+			opacity 0.15s ease;
+	}
+
+	/* Unassigned stay quieter so assigned faces read as the active set. */
+	.new-job-modal__crew-option:not(.new-job-modal__crew-option--selected)
+		.new-job-modal__crew-avatar {
+		opacity: 0.72;
+	}
+
+	.new-job-modal__crew-option:hover .new-job-modal__crew-avatar {
+		opacity: 1;
+	}
+
+	.new-job-modal__crew-avatar-face {
 		width: 42px;
 		height: 42px;
 		border-radius: 50%;
 		overflow: hidden;
-		border: 2px solid transparent;
+		border: 2px solid var(--color-border);
 		background: var(--color-surface-alt);
 		display: flex;
 		align-items: center;
@@ -1005,18 +1220,57 @@
 		font-size: 14px;
 		font-weight: 600;
 		color: var(--color-text-muted);
-		cursor: pointer;
+		box-sizing: border-box;
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease,
+			transform 0.15s ease;
 	}
-	.new-job-modal__crew-avatar.selected {
-		border-color: var(--color-primary);
+
+	/* Dual ring: surface gap + primary outer — never blends into photo blues. */
+	.new-job-modal__crew-avatar.selected .new-job-modal__crew-avatar-face {
+		border-color: var(--color-surface, #fff);
+		box-shadow:
+			0 0 0 2px var(--color-surface, #fff),
+			0 0 0 4px var(--color-primary);
+		transform: scale(1.04);
 	}
+
 	.new-job-modal__crew-avatar img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+		display: block;
 	}
+
 	.new-job-modal__crew-avatar .initial {
 		text-transform: uppercase;
+	}
+
+	/* Selection badge — high-signal affordance independent of photo colors. */
+	.new-job-modal__crew-check {
+		position: absolute;
+		right: -1px;
+		bottom: -1px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		background: var(--color-primary);
+		color: #fff;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 2px solid var(--color-surface, #fff);
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.22);
+		pointer-events: none;
+		z-index: 1;
+	}
+
+	.new-job-modal__crew-option input[type='checkbox']:focus-visible
+		+ .new-job-modal__crew-avatar
+		.new-job-modal__crew-avatar-face {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 3px;
 	}
 
 	.billable-items {
