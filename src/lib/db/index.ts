@@ -138,14 +138,21 @@ export async function repairJobDateFields(): Promise<number> {
 	return fixed;
 }
 
+/** PocketBase `users.photo` allowlist (see pb_migrations for the file field). */
+const PB_USER_PHOTO_MIME_TYPES = new Set([
+	'image/jpeg',
+	'image/png',
+	'image/gif',
+	'image/webp',
+	'image/svg+xml'
+]);
+
 /**
  * Convert a data URL (from camera FileReader) into a File for PocketBase file fields.
  *
- * Important: the PocketBase JS SDK only treats `File` (not bare `Blob`) as a file upload.
- * `hasFileField` / `isFile` check `instanceof File`. A plain Blob is JSON.stringified to `{}`
- * and never reaches the server — which is why mobile camera photos lived in Dexie only.
- *
- * Returns a File (subclass of Blob) with a filename so multipart FormData is used.
+ * Important: older PocketBase JS SDK builds only treated `File` (not bare `Blob`) as a
+ * multipart upload. A plain Blob can be JSON.stringified to `{}` and never reach the server.
+ * Always emit a real `File` with a filename.
  */
 export function dataUrlToBlob(dataUrl: string, filenameBase = 'photo'): File {
 	const arr = dataUrl.split(',');
@@ -174,6 +181,36 @@ export function dataUrlToBlob(dataUrl: string, filenameBase = 'photo'): File {
 /** @deprecated Alias — same as dataUrlToBlob (returns File). */
 export function dataUrlToFile(dataUrl: string, filenameBase = 'photo'): File {
 	return dataUrlToBlob(dataUrl, filenameBase);
+}
+
+/**
+ * Build a PB-safe File for users.photo from a data URL.
+ * Re-encodes large or disallowed mimes (e.g. HEIC, multi‑MB camera JPEG) to JPEG when possible.
+ */
+export async function photoDataUrlToUploadFile(
+	dataUrl: string,
+	filenameBase = 'photo'
+): Promise<File> {
+	const mimeMatch = dataUrl.match(/^data:([^;,]+)/i);
+	const mime = (mimeMatch?.[1] || '').toLowerCase();
+	// ~1.2MB data URL ≈ ~900KB binary — keep under typical PB defaults / mobile memory pressure.
+	const tooLarge = dataUrl.length > 1_200_000;
+	const disallowed = mime && !PB_USER_PHOTO_MIME_TYPES.has(mime);
+
+	if (!tooLarge && !disallowed && dataUrl.startsWith('data:')) {
+		return dataUrlToBlob(dataUrl, filenameBase);
+	}
+
+	try {
+		const { compressImageToJpegDataUrl } = await import('$lib/utils/avatarImage');
+		const res = await fetch(dataUrl);
+		const blob = await res.blob();
+		const jpegDataUrl = await compressImageToJpegDataUrl(blob);
+		return dataUrlToBlob(jpegDataUrl, filenameBase);
+	} catch (err) {
+		console.warn('[photoDataUrlToUploadFile] re-encode failed, sending original', err);
+		return dataUrlToBlob(dataUrl, filenameBase);
+	}
 }
 
 // ==================== AREA HELPER (simplified for fresh start) ====================
@@ -1772,6 +1809,66 @@ export async function updateUser(userId: string, updates: Partial<User>) {
 	if (navigator.onLine) await processSyncQueue();
 }
 
+/**
+ * Profile / force-photo path: save avatar locally then ensure it reaches PocketBase.
+ * Returns whether the server accepted the file (local photo is always updated first).
+ */
+export async function updateUserPhoto(
+	userId: string,
+	photoDataUrl: string
+): Promise<{ synced: boolean; photo: string }> {
+	if (!photoDataUrl?.startsWith('data:')) {
+		throw new Error('Invalid photo data');
+	}
+
+	await updateUser(userId, {
+		photo: photoDataUrl,
+		forcePhotoUpdate: false
+	});
+
+	let fresh = await db.users.get(userId);
+	if (fresh?.photo && !fresh.photo.startsWith('data:')) {
+		return { synced: true, photo: fresh.photo };
+	}
+
+	// Queue may have skipped (missing pbId) or PB rejected the file — try a direct multipart push.
+	if (navigator.onLine) {
+		try {
+			await forcePushUserPhoto(userId, photoDataUrl);
+			fresh = await db.users.get(userId);
+			if (fresh?.photo && !fresh.photo.startsWith('data:')) {
+				return { synced: true, photo: fresh.photo };
+			}
+		} catch (err) {
+			console.error('[updateUserPhoto] direct push failed', err);
+		}
+	}
+
+	return { synced: false, photo: fresh?.photo || photoDataUrl };
+}
+
+/** Direct multipart photo push (bypasses queue) for profile avatar reliability. */
+async function forcePushUserPhoto(userId: string, photoDataUrl: string): Promise<void> {
+	let realId = await resolveUserPbId(userId);
+	if (!realId) {
+		const authId = pb.authStore.model?.id as string | undefined;
+		if (authId) {
+			realId = authId;
+			await db.users.update(userId, { pbId: authId, updatedAt: new Date() });
+		}
+	}
+	if (!realId) {
+		throw new Error('Cannot sync photo: user is not linked to a server account yet');
+	}
+
+	const file = await photoDataUrlToUploadFile(photoDataUrl, 'photo');
+	const record = (await pb.collection('users').update(realId, {
+		photo: file,
+		forcePhotoUpdate: false
+	})) as Record<string, unknown>;
+	await applyServerPhotoToLocalUser(userId, realId, record);
+}
+
 /** Fields safe to PATCH on PocketBase auth `users` (custom firstName/lastName may not exist). */
 function buildUserPbUpdatePayload(
 	localUser: User | undefined,
@@ -1896,6 +1993,32 @@ export async function resolveUserPbId(localUserId: string): Promise<string | nul
 	await new Promise((r) => setTimeout(r, 60));
 	user = await db.users.get(localUserId);
 	if (user?.pbId) return user.pbId;
+
+	// Profile avatar uploads often hit hybrid rows (local UUID, missing pbId). Fall back to the
+	// signed-in auth record and persist the link so the queue can multipart-upload photo files.
+	try {
+		const authId = pb.authStore.model?.id as string | undefined;
+		const authEmail = String(pb.authStore.model?.email || '')
+			.trim()
+			.toLowerCase();
+		if (authId) {
+			if (localUserId === authId) {
+				if (user && !user.pbId) {
+					await db.users.update(localUserId, { pbId: authId, updatedAt: new Date() });
+				}
+				return authId;
+			}
+			const localEmail = String(user?.email || '')
+				.trim()
+				.toLowerCase();
+			if (user && authEmail && localEmail && authEmail === localEmail) {
+				await db.users.update(localUserId, { pbId: authId, updatedAt: new Date() });
+				return authId;
+			}
+		}
+	} catch {
+		// non-fatal — fall through
+	}
 
 	const isUuid = (id: string) =>
 		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -2240,8 +2363,12 @@ async function runProcessSyncQueue(): Promise<void> {
 					});
 
 					// Convert data-URL photo to File (not bare Blob) so PB SDK uses multipart FormData.
+					// Re-encode large / disallowed mimes (HEIC, multi‑MB camera) to JPEG when needed.
 					if (typeof safeUserData.photo === 'string' && safeUserData.photo.startsWith('data:')) {
-						safeUserData.photo = dataUrlToBlob(safeUserData.photo, 'photo');
+						safeUserData.photo = await photoDataUrlToUploadFile(
+							safeUserData.photo as string,
+							'photo'
+						);
 					}
 
 					// Never include verified / emailConfirm / similar system auth fields in the *create* payload.
@@ -2312,9 +2439,13 @@ async function runProcessSyncQueue(): Promise<void> {
 							item.data as Record<string, unknown> | undefined
 						);
 
-						// PocketBase JS SDK only multipart-uploads `File` (not bare Blob). Bare Blob → JSON `{}`.
+						// PocketBase JS SDK multipart-uploads File/Blob. Prefer File with a name.
+						// Also re-encode HEIC / oversized camera data URLs so PB mime/size rules pass.
 						if (typeof pbPayload.photo === 'string' && pbPayload.photo.startsWith('data:')) {
-							pbPayload.photo = dataUrlToBlob(pbPayload.photo as string, 'photo');
+							pbPayload.photo = await photoDataUrlToUploadFile(
+								pbPayload.photo as string,
+								'photo'
+							);
 						}
 
 						const keys = Object.keys(pbPayload);

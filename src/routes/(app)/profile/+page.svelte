@@ -13,8 +13,9 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { db, updateUser, getUserPhotoSrc } from '$lib/db';
+	import { db, updateUser, updateUserPhoto, getUserPhotoSrc } from '$lib/db';
 	import { pb } from '$lib/db/pb';
+	import { compressImageToJpegDataUrl } from '$lib/utils/avatarImage';
 	import PinInput from '$lib/components/PinInput.svelte';
 	import {
 		disableQuickUnlock,
@@ -286,8 +287,9 @@
 		}
 	}
 
-	// Handle camera photo upload (phone-friendly capture="user"). Triggered directly by pencil next to avatar.
-	// Local Dexie gets the data URL immediately; processSyncQueue converts it to a File for PB multipart upload.
+	// Camera / gallery avatar. Compress to JPEG first (mobile HEIC + multi‑MB originals often
+	// failed PB mime/size rules, so the photo lived in Dexie only). Then updateUserPhoto queues
+	// + forces a multipart push when still pending after processSyncQueue.
 	async function handlePhoto(e: Event) {
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
@@ -298,26 +300,21 @@
 		success = '';
 
 		try {
-			const dataUrl = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onload = () => resolve(String(reader.result || ''));
-				reader.onerror = () => reject(new Error('Could not read photo'));
-				reader.readAsDataURL(file);
-			});
+			const dataUrl = await compressImageToJpegDataUrl(file);
 			if (!dataUrl.startsWith('data:')) {
 				throw new Error('Invalid photo data');
 			}
-			await updateUser(auth.currentUser.id!, {
-				photo: dataUrl,
-				forcePhotoUpdate: false
-			});
-			// Prefer whatever Dexie has after sync (may already be PB filename).
-			const fresh = await db.users.get(auth.currentUser.id!);
-			auth.currentUser.photo = fresh?.photo || dataUrl;
+			const { synced, photo } = await updateUserPhoto(auth.currentUser.id!, dataUrl);
+			auth.currentUser.photo = photo;
 			auth.currentUser.forcePhotoUpdate = false;
-			success = navigator.onLine
-				? 'Photo updated and synced'
-				: 'Photo saved offline — will sync when online';
+			if (synced) {
+				success = 'Photo updated and synced';
+			} else if (navigator.onLine) {
+				success =
+					'Photo saved on this device — server sync is pending and will retry when online';
+			} else {
+				success = 'Photo saved offline — will sync when online';
+			}
 			editing = null;
 		} catch (e: any) {
 			error = e.message || 'Failed to process photo';

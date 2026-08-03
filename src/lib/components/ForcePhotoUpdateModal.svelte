@@ -1,8 +1,9 @@
 <!-- ForcePhotoUpdateModal.svelte — shown after login when admin flagged forcePhotoUpdate -->
 <script lang="ts">
 	import { auth } from '$lib/stores/auth.svelte';
-	import { updateUser, getUserPhotoSrc, type User } from '$lib/db';
+	import { updateUserPhoto, getUserPhotoSrc, type User } from '$lib/db';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
+	import { compressImageToJpegDataUrl } from '$lib/utils/avatarImage';
 
 	interface Props {
 		user: User;
@@ -25,18 +26,16 @@
 		fileInput?.click();
 	}
 
-	function onFileSelected(e: Event) {
+	async function onFileSelected(e: Event) {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (!file) return;
 		error = '';
-		const reader = new FileReader();
-		reader.onload = (ev) => {
-			previewDataUrl = ev.target?.result as string;
-		};
-		reader.onerror = () => {
-			error = 'Could not read the selected photo. Please try again.';
-		};
-		reader.readAsDataURL(file);
+		try {
+			previewDataUrl = await compressImageToJpegDataUrl(file);
+		} catch (err: any) {
+			error = err?.message || 'Could not read the selected photo. Please try again.';
+			previewDataUrl = null;
+		}
 		(e.target as HTMLInputElement).value = '';
 	}
 
@@ -48,13 +47,9 @@
 		saving = true;
 		error = '';
 		try {
-			await updateUser(user.id, {
-				photo: previewDataUrl,
-				forcePhotoUpdate: false,
-				updatedAt: new Date()
-			});
+			const { photo } = await updateUserPhoto(user.id, previewDataUrl);
 			if (auth.currentUser && auth.currentUser.id === user.id) {
-				auth.currentUser.photo = previewDataUrl;
+				auth.currentUser.photo = photo;
 				auth.currentUser.forcePhotoUpdate = false;
 			}
 			done = true;

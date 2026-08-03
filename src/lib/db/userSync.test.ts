@@ -78,6 +78,28 @@ describe('buildUserFromPbRecord timestamps', () => {
 });
 
 describe('mergeServerUserOverLocal', () => {
+	it('preserves pending local data: photo even when server row is newer', () => {
+		const local = {
+			id: 'local-1',
+			pbId: 'pb-1',
+			name: 'Cam',
+			photo: 'data:image/jpeg;base64,LOCALPENDING',
+			forcePhotoUpdate: false,
+			updatedAt: new Date('2026-01-01T00:00:00Z')
+		};
+		const server = {
+			id: 'local-1',
+			pbId: 'pb-1',
+			name: 'Cam',
+			photo: 'old_server.jpg',
+			forcePhotoUpdate: true,
+			updatedAt: new Date('2026-06-01T00:00:00Z')
+		};
+		const merged = mergeServerUserOverLocal(local as any, server as any);
+		expect(merged.photo).toBe('data:image/jpeg;base64,LOCALPENDING');
+		expect(merged.forcePhotoUpdate).toBe(false);
+	});
+
 	it('patches missing email when local updatedAt is newer', () => {
 		const local = {
 			id: 'local-1',

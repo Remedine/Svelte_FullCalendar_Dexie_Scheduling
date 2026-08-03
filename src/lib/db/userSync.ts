@@ -98,8 +98,21 @@ function splitNameFromRecord(rec: PbUserRecord): { first: string; last: string; 
 export function mergeServerUserOverLocal(local: User | undefined, server: User): User {
 	if (!local) return server;
 
+	// Unsynced camera/gallery captures live as data: URLs until processSyncQueue replaces
+	// them with a PB filename. Never clobber those with an older (or equal) server photo.
+	const pendingLocalPhoto =
+		typeof local.photo === 'string' && local.photo.startsWith('data:') ? local.photo : null;
+
 	if (server.updatedAt >= local.updatedAt) {
-		return { ...server, id: local.id };
+		return {
+			...server,
+			id: local.id,
+			// Keep local UUID ↔ PB link if server row only had pbId as id.
+			pbId: local.pbId || server.pbId,
+			photo: pendingLocalPhoto || server.photo,
+			// Local just cleared the force flag when saving a pending photo.
+			forcePhotoUpdate: pendingLocalPhoto ? false : server.forcePhotoUpdate
+		};
 	}
 
 	return {
@@ -111,13 +124,12 @@ export function mergeServerUserOverLocal(local: User | undefined, server: User):
 		name: local.name || server.name,
 		role: server.role || local.role,
 		verified: typeof server.verified === 'boolean' ? server.verified : local.verified,
-		photo:
-			local.photo && local.photo.startsWith('data:')
-				? local.photo
-				: local.photo || server.photo,
+		photo: pendingLocalPhoto || local.photo || server.photo,
 		active: server.active ?? local.active,
 		forcePinUpdate: server.forcePinUpdate ?? local.forcePinUpdate,
-		forcePhotoUpdate: server.forcePhotoUpdate ?? local.forcePhotoUpdate
+		forcePhotoUpdate: pendingLocalPhoto
+			? false
+			: (server.forcePhotoUpdate ?? local.forcePhotoUpdate)
 	};
 }
 

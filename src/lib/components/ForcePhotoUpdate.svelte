@@ -9,9 +9,10 @@
      - BEM naming, design tokens, Svelte 5 runes only. Cohesive with WelcomeModal + profile photo UI.
      Reference: Remedine/Svelte_FullCalendar_Dexie_Scheduling -->
 <script lang="ts">
-	import { updateUser, getUserPhotoSrc, type User } from '$lib/db';
+	import { updateUserPhoto, getUserPhotoSrc, type User } from '$lib/db';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
+	import { compressImageToJpegDataUrl } from '$lib/utils/avatarImage';
 
 	interface Props {
 		user: User;
@@ -33,21 +34,20 @@
 		photoInput?.click();
 	}
 
-	function handleFileSelect(e: Event) {
+	async function handleFileSelect(e: Event) {
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
 		if (!file) return;
 
 		error = '';
-
-		const reader = new FileReader();
-		reader.onload = (ev) => {
-			photoDataUrl = ev.target?.result as string;
-		};
-		reader.onerror = () => {
-			error = 'Could not read the selected photo. Please try again.';
-		};
-		reader.readAsDataURL(file);
+		try {
+			// Compress on select so preview matches what we upload (JPEG, modest size).
+			photoDataUrl = await compressImageToJpegDataUrl(file);
+		} catch (err: any) {
+			console.error('Photo compress failed:', err);
+			error = err?.message || 'Could not read the selected photo. Please try again.';
+			photoDataUrl = null;
+		}
 
 		// Allow re-selecting the same file later
 		target.value = '';
@@ -67,21 +67,20 @@
 		error = '';
 
 		try {
-			await updateUser(user.id, {
-				photo: photoDataUrl,
-				forcePhotoUpdate: false,
-				updatedAt: new Date()
-			});
+			const { synced, photo } = await updateUserPhoto(user.id, photoDataUrl);
 
 			// Optimistic live update if the auth store is already populated (common after login + setCurrentUser).
 			if (auth?.currentUser && (auth.currentUser.id === user.id || auth.currentUser.pbId === user.pbId)) {
-				auth.currentUser.photo = photoDataUrl;
+				auth.currentUser.photo = photo;
 				auth.currentUser.forcePhotoUpdate = false;
 			}
 
-			// Note: We no longer mutate the `user` prop directly (caused Svelte ownership warnings).
-			// The Dexie update + auth store patch are sufficient; parent closes the modal on success.
-			// For the PB side, updateUser queues the change (with blob conversion); on 404 the processor now clears stale pbId.
+			// Local save always succeeds; server may still be pending (queued for retry).
+			if (!synced && navigator.onLine) {
+				console.warn(
+					'[ForcePhotoUpdate] Photo saved locally; server multipart push still pending'
+				);
+			}
 
 			success = true;
 		} catch (err: any) {
