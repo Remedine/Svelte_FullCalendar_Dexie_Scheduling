@@ -14,7 +14,7 @@
 	import { toast } from '$lib/stores/toast.svelte';
 	import NewUserModal from './NewUserModal.svelte';
 	import UserJobsModal from './UserJobsModal.svelte';
-	import { pullUsersFromServer, pb } from '$lib/db/pb';
+	import { pullUsersFromServer, pb, requestPasswordReset } from '$lib/db/pb';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
 	import { compressImageToJpegDataUrl } from '$lib/utils/avatarImage';
 
@@ -38,7 +38,8 @@
 	let editActive = $state(true);
 	let pendingDelete = $state(false);
 	let editUserHasJobs = $state(false);
-	let resendingWelcome = $state(false);
+	/** Sending welcome activation or password-reset email from the edit modal. */
+	let sendingAccountEmail = $state(false);
 	/** New photo chosen in edit modal (JPEG data URL); saved via updateUserPhoto on Save. */
 	let editPhotoPreview = $state<string | null>(null);
 	let editPhotoInput: HTMLInputElement | null = $state(null);
@@ -53,12 +54,18 @@
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 
-	function canResendWelcome(user: User): boolean {
+	/** Active account with a usable email — can receive welcome or password-reset mail. */
+	function canSendAccountEmail(user: User): boolean {
 		return !!user.active && !!user.email?.trim()?.includes('@');
 	}
 
+	/** Not yet activated (first-login welcome still pending). */
+	function needsWelcomeActivation(user: User): boolean {
+		return user.verified === false;
+	}
+
 	async function resendWelcomeEmail(user: User) {
-		if (!isAdmin || !canResendWelcome(user)) return;
+		if (!isAdmin || !canSendAccountEmail(user) || !needsWelcomeActivation(user)) return;
 
 		const email = user.email!.trim().toLowerCase();
 		const name =
@@ -80,7 +87,7 @@
 			return;
 		}
 
-		resendingWelcome = true;
+		sendingAccountEmail = true;
 		try {
 			const res = await fetch('/api/auth/send-welcome', {
 				method: 'POST',
@@ -103,7 +110,37 @@
 			console.error('Resend welcome failed:', err);
 			toast.error('Network error sending welcome email. Try again.');
 		} finally {
-			resendingWelcome = false;
+			sendingAccountEmail = false;
+		}
+	}
+
+	async function sendPasswordResetEmail(user: User) {
+		if (!isAdmin || !canSendAccountEmail(user) || needsWelcomeActivation(user)) return;
+
+		const email = user.email!.trim().toLowerCase();
+		const name =
+			`${user.firstName || ''} ${user.lastName || ''}`.trim() || user.name || email;
+		const ok = confirm(
+			`Send a password reset email to ${name}?\n\n` +
+				`To: ${email}\n\n` +
+				`They will get a link to choose a new password.`
+		);
+		if (!ok) return;
+
+		if (!navigator.onLine) {
+			toast.error('Go online to send the password reset email.');
+			return;
+		}
+
+		sendingAccountEmail = true;
+		try {
+			await requestPasswordReset(email);
+			toast.success(`Password reset email sent to ${email}`);
+		} catch (err: any) {
+			console.error('Password reset email failed:', err);
+			toast.error(err?.message || 'Could not send password reset email. Try again.');
+		} finally {
+			sendingAccountEmail = false;
 		}
 	}
 
@@ -530,6 +567,34 @@
 				<!-- Scrollable body so actions stay anchored at bottom regardless of form height -->
 				<div class="modal__body">
 					<div class="modal__form">
+						<label class="modal__label label">
+							First Name
+							<input type="text" bind:value={editFirstName} class="modal__input input" />
+						</label>
+
+						<label class="modal__label label">
+							Last Name
+							<input type="text" bind:value={editLastName} class="modal__input input" />
+						</label>
+
+						<label class="modal__label label">
+							Role
+							<select bind:value={editRole} class="modal__select input">
+								<option value="crew">Crew</option>
+								<option value="admin">Admin</option>
+							</select>
+						</label>
+
+						<label class="modal__label label">
+							Email Address
+							<input
+								type="email"
+								bind:value={editEmail}
+								class="modal__input input"
+								placeholder="user@capitalcitywindows.com"
+							/>
+						</label>
+
 						<!-- Admin photo management: avatar, upload, force + lock in one box -->
 						<div class="modal__photo-panel">
 							<span class="modal__photo-panel-title">Photo</span>
@@ -598,57 +663,52 @@
 								</label>
 							</div>
 						</div>
-
-						<label class="modal__label label">
-							First Name
-							<input type="text" bind:value={editFirstName} class="modal__input input" />
-						</label>
-
-						<label class="modal__label label">
-							Last Name
-							<input type="text" bind:value={editLastName} class="modal__input input" />
-						</label>
-
-						<label class="modal__label label">
-							Role
-							<select bind:value={editRole} class="modal__select input">
-								<option value="crew">Crew</option>
-								<option value="admin">Admin</option>
-							</select>
-						</label>
-
-						<label class="modal__label label">
-							Email Address
-							<input
-								type="email"
-								bind:value={editEmail}
-								class="modal__input input"
-								placeholder="user@capitalcitywindows.com"
-							/>
-						</label>
 					</div>
 
-					{#if canResendWelcome(selectedUser)}
-						<div class="modal__welcome-panel">
-							<p class="modal__welcome-title">Welcome email</p>
-							<p class="modal__welcome-copy">
-								Sends a link to set their password and activate the account to
-								<strong> {selectedUser.email}</strong>. Use this if they never got the first email
-								or the link expired.
-							</p>
-							<button
-								type="button"
-								class="modal__btn button button--primary modal__welcome-btn"
-								disabled={resendingWelcome}
-								onclick={() => selectedUser && resendWelcomeEmail(selectedUser)}
-							>
-								{resendingWelcome ? 'Sending…' : 'Resend welcome email'}
-							</button>
-						</div>
-					{:else if selectedUser && !selectedUser.email}
+					{#if canSendAccountEmail(selectedUser)}
+						{#if needsWelcomeActivation(selectedUser)}
+							<div class="modal__welcome-panel">
+								<p class="modal__welcome-title">Welcome email</p>
+								<p class="modal__welcome-copy">
+									Account not activated yet. Sends a link to set their password and activate the
+									account to
+									<strong> {selectedUser.email}</strong>. Use this if they never got the first email
+									or the link expired.
+								</p>
+								<button
+									type="button"
+									class="modal__btn button button--primary modal__welcome-btn"
+									disabled={sendingAccountEmail}
+									onclick={() => selectedUser && resendWelcomeEmail(selectedUser)}
+								>
+									{sendingAccountEmail ? 'Sending…' : 'Resend welcome email'}
+								</button>
+							</div>
+						{:else}
+							<div class="modal__welcome-panel">
+								<p class="modal__welcome-title">Password reset</p>
+								<p class="modal__welcome-copy">
+									Account is active. Sends a password reset link to
+									<strong> {selectedUser.email}</strong> if they forgot their password.
+								</p>
+								<button
+									type="button"
+									class="modal__btn button button--primary modal__welcome-btn"
+									disabled={sendingAccountEmail}
+									onclick={() => selectedUser && sendPasswordResetEmail(selectedUser)}
+								>
+									{sendingAccountEmail ? 'Sending…' : 'Send password reset'}
+								</button>
+								<p class="modal__account-email-hint">
+									To change their login email (username), update <strong>Email Address</strong> above
+									and press Save.
+								</p>
+							</div>
+						{/if}
+					{:else if selectedUser && !selectedUser.email?.trim()?.includes('@')}
 						<div class="modal__welcome-panel modal__welcome-panel--muted">
 							<p class="modal__welcome-copy">
-								Add an email address and save before you can send a welcome email.
+								Add an email address and save before you can send a welcome or password reset email.
 							</p>
 						</div>
 					{/if}
@@ -809,6 +869,12 @@
 	}
 	.modal__welcome-btn {
 		width: 100%;
+	}
+	.modal__account-email-hint {
+		margin: var(--space-3) 0 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		line-height: 1.4;
 	}
 
 	.user-management__avatar-col {
