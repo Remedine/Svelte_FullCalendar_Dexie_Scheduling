@@ -385,8 +385,8 @@ export interface AppOptions {
 	nextInvoiceNumber?: number;
 	invoiceNumberYear?: number;
 	/**
-	 * Word invoice layout: quiet | pay_first | job_packet
-	 * (Admin → Options → Invoice).
+	 * Word invoice layout id. App currently forces `pay_first` (layout picker removed).
+	 * Other ids remain for tests / future re-enable.
 	 */
 	invoiceLayout?: 'quiet' | 'pay_first' | 'job_packet';
 	lastUpdated: Date;

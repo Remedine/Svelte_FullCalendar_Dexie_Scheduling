@@ -4,11 +4,6 @@
 	// )=- Cleaned up redundant role guards and legacy onMount (causing load-time errors and potential auth redirects on navigation).
 	// Central layout guard in (app)/+layout.svelte now handles admin-only access consistently.
 	import { optionsStore } from '$lib/stores/options.svelte';
-	import {
-		INVOICE_LAYOUT_OPTIONS,
-		normalizeInvoiceLayout,
-		type InvoiceLayoutId
-	} from '$lib/utils/invoiceDocx';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import {
@@ -264,7 +259,7 @@
 				salesTaxJurisdiction: 'City and Borough of Juneau sales tax',
 				invoiceNumberPrefix: 'CCW',
 				nextInvoiceNumber: 1,
-				invoiceLayout: 'quiet',
+				invoiceLayout: 'pay_first',
 				crewAssignmentDaysBefore: 1,
 				crewAssignmentHour: 7,
 				calendarDayStartHour: 6,
@@ -1150,38 +1145,6 @@
 			</div>
 		{:else if activeTab === 'invoice'}
 			<h2>Invoice & Billing Settings</h2>
-
-			<div class="form-section">
-				<h3>Invoice layout</h3>
-				<p class="options-page__help">
-					Word invoice style for new and regenerated .docx files. All layouts keep return and
-					bill-to addresses aligned for a #10 double-window envelope.
-				</p>
-				<div class="invoice-layout-picker" role="radiogroup" aria-label="Invoice layout">
-					{#each INVOICE_LAYOUT_OPTIONS as layoutOpt (layoutOpt.id)}
-						{@const selected =
-							normalizeInvoiceLayout(editingOptions.invoiceLayout) === layoutOpt.id}
-						<button
-							type="button"
-							class="invoice-layout-card"
-							class:invoice-layout-card--selected={selected}
-							role="radio"
-							aria-checked={selected}
-							onclick={() => {
-								editingOptions.invoiceLayout = layoutOpt.id as InvoiceLayoutId;
-							}}
-						>
-							<span class="invoice-layout-card__title">{layoutOpt.label}</span>
-							<span class="invoice-layout-card__summary">{layoutOpt.summary}</span>
-							<ul class="invoice-layout-card__bullets">
-								{#each layoutOpt.bullets as bullet}
-									<li>{bullet}</li>
-								{/each}
-							</ul>
-						</button>
-					{/each}
-				</div>
-			</div>
 
 			<div class="form-section">
 				<h3>Billing & Tax</h3>
@@ -2843,59 +2806,4 @@
 		}
 	}
 
-	/* Invoice layout picker (Admin → Options → Invoice) */
-	.invoice-layout-picker {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: var(--space-3);
-		margin-top: var(--space-3);
-	}
-	@media (min-width: 720px) {
-		.invoice-layout-picker {
-			grid-template-columns: repeat(3, 1fr);
-		}
-	}
-	.invoice-layout-card {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: var(--space-2);
-		text-align: left;
-		padding: var(--space-4);
-		border: 2px solid var(--color-border);
-		border-radius: var(--radius-md);
-		background: var(--color-surface, #fff);
-		color: var(--color-text);
-		cursor: pointer;
-		transition:
-			border-color 0.15s ease,
-			box-shadow 0.15s ease;
-	}
-	.invoice-layout-card:hover {
-		border-color: var(--color-primary, #2563eb);
-	}
-	.invoice-layout-card--selected {
-		border-color: var(--color-primary, #2563eb);
-		box-shadow: 0 0 0 1px var(--color-primary, #2563eb);
-		background: var(--color-primary-soft, rgba(37, 99, 235, 0.06));
-	}
-	.invoice-layout-card__title {
-		font-weight: var(--font-weight-bold, 700);
-		font-size: var(--font-size-base, 1rem);
-	}
-	.invoice-layout-card__summary {
-		font-size: var(--font-size-sm, 0.875rem);
-		color: var(--color-text-muted);
-		line-height: 1.4;
-	}
-	.invoice-layout-card__bullets {
-		margin: var(--space-1) 0 0;
-		padding-left: 1.15rem;
-		font-size: var(--font-size-sm, 0.875rem);
-		color: var(--color-text-muted);
-		line-height: 1.45;
-	}
-	.invoice-layout-card__bullets li {
-		margin-bottom: 0.15rem;
-	}
 </style>

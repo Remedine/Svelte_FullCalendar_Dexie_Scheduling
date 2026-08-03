@@ -146,10 +146,11 @@ const sampleClient: Client = {
 };
 
 describe('generateInvoiceDocx structure', () => {
-	it('positions envelope rows and omits Mail to: label in window zone', async () => {
+	it('positions envelope rows and omits Mail to: label in window zone (quiet layout)', async () => {
 		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
 			invoiceNumber: 'CCW-2026-0001',
-			businessName: 'Capital City Windows'
+			businessName: 'Capital City Windows',
+			invoiceLayout: 'quiet'
 		});
 		const structure = await readInvoiceDocxStructure(blob);
 
@@ -164,11 +165,12 @@ describe('generateInvoiceDocx structure', () => {
 		expect(hasEnvelopePreviewMarkers(structure.plainText)).toBe(false);
 	});
 
-	it('places payment before invoice notes with notes last', async () => {
+	it('places payment before invoice notes with notes last (quiet layout)', async () => {
 		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
 			invoiceNumber: 'CCW-2026-0002',
 			businessName: 'Capital City Windows',
-			invoiceNotes: 'Gate code 1234'
+			invoiceNotes: 'Gate code 1234',
+			invoiceLayout: 'quiet'
 		});
 		const structure = await readInvoiceDocxStructure(blob);
 		const paymentIdx = structure.plainText.indexOf('Payment');
@@ -180,6 +182,16 @@ describe('generateInvoiceDocx structure', () => {
 		expect(dueIdx).toBeLessThan(paymentIdx);
 		expect(paymentIdx).toBeLessThan(notesIdx);
 		expect(structure.plainText).toContain('Gate code 1234');
+	});
+
+	it('defaults to pay_first layout when no layout is specified', async () => {
+		const blob = await generateInvoiceDocx(sampleJob, sampleClient, {
+			invoiceNumber: 'CCW-2026-0003',
+			businessName: 'Capital City Windows'
+		});
+		const structure = await readInvoiceDocxStructure(blob);
+		expect(structure.plainText).toContain('AMOUNT DUE');
+		expect(structure.plainText).toContain('Bill to');
 	});
 
 	it('includes dev envelope preview overlays when requested in dev', async () => {
@@ -225,10 +237,11 @@ describe('generateInvoiceDocx structure', () => {
 });
 
 describe('normalizeInvoiceLayout', () => {
-	it('defaults unknown values to quiet', () => {
-		expect(normalizeInvoiceLayout(undefined)).toBe('quiet');
-		expect(normalizeInvoiceLayout('nope')).toBe('quiet');
+	it('defaults unknown values to pay_first', () => {
+		expect(normalizeInvoiceLayout(undefined)).toBe('pay_first');
+		expect(normalizeInvoiceLayout('nope')).toBe('pay_first');
 		expect(normalizeInvoiceLayout('pay_first')).toBe('pay_first');
 		expect(normalizeInvoiceLayout('job_packet')).toBe('job_packet');
+		expect(normalizeInvoiceLayout('quiet')).toBe('quiet');
 	});
 });

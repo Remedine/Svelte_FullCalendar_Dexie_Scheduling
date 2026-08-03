@@ -232,7 +232,7 @@ export function buildTopFoldTable(
 	input: TopFoldInput,
 	ctx: InvoiceDocxContext,
 	meta: TopFoldMeta,
-	layout: InvoiceLayoutId = 'quiet'
+	layout: InvoiceLayoutId = 'pay_first'
 ) {
 	const layoutId = normalizeInvoiceLayout(layout);
 	return b.makeTable([ENVELOPE_WINDOW_WIDTH, INVOICE_COL], [
