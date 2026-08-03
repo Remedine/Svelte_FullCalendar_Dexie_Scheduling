@@ -530,9 +530,9 @@
 				<!-- Scrollable body so actions stay anchored at bottom regardless of form height -->
 				<div class="modal__body">
 					<div class="modal__form">
-						<!-- Admin photo management: camera or gallery, then optional lock. -->
-						<div class="modal__photo-block">
-							<span class="modal__label label">Photo</span>
+						<!-- Admin photo management: avatar, upload, force + lock in one box -->
+						<div class="modal__photo-panel">
+							<span class="modal__photo-panel-title">Photo</span>
 							<div class="modal__photo-row">
 								<div class="modal__photo-preview" aria-hidden={editPhotoDisplaySrc ? 'false' : 'true'}>
 									{#if editPhotoDisplaySrc}
@@ -556,11 +556,7 @@
 										onclick={triggerEditPhoto}
 										disabled={editPhotoBusy || editSaving}
 									>
-										{editPhotoBusy
-											? 'Processing…'
-											: editPhotoPreview
-												? 'Change photo'
-												: 'Take photo or upload'}
+										{editPhotoBusy ? 'Processing…' : 'Update Photo'}
 									</button>
 									<input
 										bind:this={editPhotoInput}
@@ -580,11 +576,26 @@
 											Undo new photo
 										</button>
 									{/if}
-									<p class="modal__photo-hint">
-										Uses this device’s camera or photo library. Saved to the crew record when you
-										press Save.
-									</p>
 								</div>
+							</div>
+							<div class="modal__photo-options">
+								<label class="modal__checkbox-label label">
+									<input
+										type="checkbox"
+										checked={editForcePhoto}
+										onchange={onForcePhotoChange}
+										disabled={editPhotoLocked}
+									/>
+									Force new photo upload
+								</label>
+								<label class="modal__checkbox-label label">
+									<input
+										type="checkbox"
+										checked={editPhotoLocked}
+										onchange={onPhotoLockedChange}
+									/>
+									Lock photo (crew cannot change it)
+								</label>
 							</div>
 						</div>
 
@@ -615,28 +626,6 @@
 								placeholder="user@capitalcitywindows.com"
 							/>
 						</label>
-
-						<label class="modal__checkbox-label label">
-							<input
-								type="checkbox"
-								checked={editForcePhoto}
-								onchange={onForcePhotoChange}
-								disabled={editPhotoLocked}
-							/>
-							Force new photo upload
-						</label>
-
-						<label class="modal__checkbox-label label">
-							<input
-								type="checkbox"
-								checked={editPhotoLocked}
-								onchange={onPhotoLockedChange}
-							/>
-							Lock photo (crew cannot change it)
-						</label>
-						<p class="modal__field-help">
-							Off by default. When locked, only admins can update this person’s photo.
-						</p>
 					</div>
 
 					{#if canResendWelcome(selectedUser)}
@@ -976,22 +965,25 @@
 		font-size: var(--font-size-sm);
 	}
 
-	.modal__field-help {
-		margin: calc(var(--space-2) * -1) 0 0;
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		line-height: 1.35;
-	}
-
-	.modal__photo-block {
+	.modal__photo-panel {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-2);
+		gap: var(--space-3);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+		background: var(--color-surface);
+	}
+
+	.modal__photo-panel-title {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text);
 	}
 
 	.modal__photo-row {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		gap: var(--space-4);
 	}
 
@@ -1048,11 +1040,12 @@
 		border: 0;
 	}
 
-	.modal__photo-hint {
-		margin: 0;
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		line-height: 1.35;
+	.modal__photo-options {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
 	}
 
 	/* Anchored actions at bottom of modal (right aligned).
