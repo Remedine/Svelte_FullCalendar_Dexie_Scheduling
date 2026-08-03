@@ -627,35 +627,6 @@
 
 							<div class="new-job-modal__client-contact-fields">
 								<div class="new-job-modal__client-contact-field">
-									<label for="job-client-phone" class="new-job-modal__client-contact-field-label"
-										>Phone</label
-									>
-									<input
-										id="job-client-phone"
-										type="tel"
-										class="new-job-modal__input input"
-										placeholder="(907) 555-1234"
-										bind:value={contactForm.phone}
-										oninput={(e) =>
-											(contactForm.phone = formatPhone((e.target as HTMLInputElement).value))}
-									/>
-								</div>
-
-								<div class="new-job-modal__client-contact-field">
-									<label for="job-client-email" class="new-job-modal__client-contact-field-label"
-										>Email</label
-									>
-									<input
-										id="job-client-email"
-										type="email"
-										class="new-job-modal__input input"
-										placeholder="client@example.com"
-										bind:value={contactForm.email}
-										autocomplete="email"
-									/>
-								</div>
-
-								<div class="new-job-modal__client-contact-field">
 									<label for="job-client-street" class="new-job-modal__client-contact-field-label"
 										>Service address</label
 									>
@@ -710,6 +681,35 @@
 											autocomplete="postal-code"
 										/>
 									</div>
+								</div>
+
+								<div class="new-job-modal__client-contact-field">
+									<label for="job-client-phone" class="new-job-modal__client-contact-field-label"
+										>Phone</label
+									>
+									<input
+										id="job-client-phone"
+										type="tel"
+										class="new-job-modal__input input"
+										placeholder="(907) 555-1234"
+										bind:value={contactForm.phone}
+										oninput={(e) =>
+											(contactForm.phone = formatPhone((e.target as HTMLInputElement).value))}
+									/>
+								</div>
+
+								<div class="new-job-modal__client-contact-field">
+									<label for="job-client-email" class="new-job-modal__client-contact-field-label"
+										>Email</label
+									>
+									<input
+										id="job-client-email"
+										type="email"
+										class="new-job-modal__input input"
+										placeholder="client@example.com"
+										bind:value={contactForm.email}
+										autocomplete="email"
+									/>
 								</div>
 							</div>
 						</div>
@@ -1017,7 +1017,7 @@
 		color: var(--color-text);
 	}
 
-	/* Editable contact block under ClientPicker (phone, email, service address). */
+	/* Editable contact block under ClientPicker (address, phone, email). */
 	.new-job-modal__client-contact {
 		margin-top: var(--space-2);
 		padding: var(--space-3);
@@ -1027,6 +1027,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2);
+		/* Contain grid so address columns can shrink without overflow/overlap. */
+		min-width: 0;
+		width: 100%;
+		box-sizing: border-box;
 	}
 
 	.new-job-modal__client-contact-label {
@@ -1041,6 +1045,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2);
+		min-width: 0;
 	}
 
 	.new-job-modal__client-contact-field {
@@ -1056,11 +1061,29 @@
 		color: var(--color-text-muted);
 	}
 
+	/* City / State / ZIP — flexible fractions (not fixed rem caps) so padded .input
+	   never overflows and overlaps neighbors on narrow modal widths. */
 	.new-job-modal__client-contact-address-row {
 		display: grid;
-		grid-template-columns: 1fr minmax(3.25rem, 4rem) minmax(4.5rem, 5.5rem);
+		grid-template-columns: minmax(0, 2fr) minmax(0, 0.7fr) minmax(0, 1fr);
 		gap: var(--space-2);
 		align-items: end;
+		min-width: 0;
+		width: 100%;
+	}
+
+	.new-job-modal__client-contact-address-row .new-job-modal__input {
+		min-width: 0;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	/* Compact padding so 2-letter state and ZIP fit without colliding. */
+	.new-job-modal__client-contact-field--state .new-job-modal__input,
+	.new-job-modal__client-contact-field--zip .new-job-modal__input {
+		padding-left: var(--space-2);
+		padding-right: var(--space-2);
+		text-align: center;
 	}
 
 	.new-job-modal__client-contact-field--state .new-job-modal__input {
