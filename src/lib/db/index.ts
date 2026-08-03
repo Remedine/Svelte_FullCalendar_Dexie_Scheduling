@@ -300,6 +300,11 @@ export interface User {
 	active: boolean;
 	forcePinUpdate: boolean; // )=- Legacy flag (PIN removed). No code paths read or act on it for auth gating anymore.
 	forcePhotoUpdate: boolean;
+	/**
+	 * When true, only admins may change this user's photo (crew profile camera disabled).
+	 * Default false / undefined — crew can still self-serve avatars.
+	 */
+	photoLocked?: boolean;
 	verified?: boolean; // )=- PB email verification flag for the user record. Optional for legacy rows.
 	createdAt: Date;
 	updatedAt: Date;
@@ -1810,15 +1815,26 @@ export async function updateUser(userId: string, updates: Partial<User>) {
 }
 
 /**
- * Profile / force-photo path: save avatar locally then ensure it reaches PocketBase.
+ * Profile / force-photo / admin-crew path: save avatar locally then ensure it reaches PocketBase.
  * Returns whether the server accepted the file (local photo is always updated first).
+ *
+ * Non-admins cannot change a photo when `photoLocked` is set (admin-managed crew photos).
  */
 export async function updateUserPhoto(
 	userId: string,
-	photoDataUrl: string
+	photoDataUrl: string,
+	options?: { bypassLock?: boolean }
 ): Promise<{ synced: boolean; photo: string }> {
 	if (!photoDataUrl?.startsWith('data:')) {
 		throw new Error('Invalid photo data');
+	}
+
+	const existing = await db.users.get(userId);
+	if (existing?.photoLocked && !options?.bypassLock) {
+		const role = (pb.authStore.model as { role?: string } | null)?.role;
+		if (role !== 'admin') {
+			throw new Error('Your photo is managed by an administrator and cannot be changed.');
+		}
 	}
 
 	await updateUser(userId, {
@@ -1847,18 +1863,15 @@ export async function updateUserPhoto(
 	return { synced: false, photo: fresh?.photo || photoDataUrl };
 }
 
-/** Direct multipart photo push (bypasses queue) for profile avatar reliability. */
+/** Direct multipart photo push (bypasses queue) for profile / admin-set avatar reliability. */
 async function forcePushUserPhoto(userId: string, photoDataUrl: string): Promise<void> {
-	let realId = await resolveUserPbId(userId);
+	const realId = await resolveUserPbId(userId);
+	// Do NOT fall back to the signed-in admin's id — that would attach another crew member's
+	// photo to the wrong PB account when admin uploads for a hybrid local-only row.
 	if (!realId) {
-		const authId = pb.authStore.model?.id as string | undefined;
-		if (authId) {
-			realId = authId;
-			await db.users.update(userId, { pbId: authId, updatedAt: new Date() });
-		}
-	}
-	if (!realId) {
-		throw new Error('Cannot sync photo: user is not linked to a server account yet');
+		throw new Error(
+			'Cannot sync photo: this user is not linked to a server account yet (missing pbId). Have them sign in once, or refresh the roster.'
+		);
 	}
 
 	const file = await photoDataUrlToUploadFile(photoDataUrl, 'photo');
@@ -1894,6 +1907,7 @@ function buildUserPbUpdatePayload(
 
 	if (data.photo !== undefined) pbPayload.photo = data.photo;
 	if (data.forcePhotoUpdate !== undefined) pbPayload.forcePhotoUpdate = data.forcePhotoUpdate;
+	if (data.photoLocked !== undefined) pbPayload.photoLocked = data.photoLocked;
 	if (data.active !== undefined) pbPayload.active = data.active;
 	if (data.role !== undefined) pbPayload.role = data.role;
 

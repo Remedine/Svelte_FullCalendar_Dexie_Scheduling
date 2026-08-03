@@ -125,6 +125,15 @@ describe('deviceUnlock', () => {
 				photo: 'data:image/png;base64,x'
 			})
 		).toBe(false);
+		// Admin-locked photos never force self-upload at login.
+		expect(
+			userNeedsPhotoOnboarding({
+				verified: true,
+				forcePhotoUpdate: true,
+				photoLocked: true,
+				photo: ''
+			})
+		).toBe(false);
 	});
 
 	it('shouldOfferQuickUnlockSetup is false when already enabled', async () => {

@@ -13,6 +13,7 @@ export type PbUserRecord = {
 	active?: boolean;
 	forcePinUpdate?: boolean;
 	forcePhotoUpdate?: boolean;
+	photoLocked?: boolean;
 	verified?: boolean;
 	pinHash?: string;
 	created?: string;
@@ -111,7 +112,9 @@ export function mergeServerUserOverLocal(local: User | undefined, server: User):
 			pbId: local.pbId || server.pbId,
 			photo: pendingLocalPhoto || server.photo,
 			// Local just cleared the force flag when saving a pending photo.
-			forcePhotoUpdate: pendingLocalPhoto ? false : server.forcePhotoUpdate
+			forcePhotoUpdate: pendingLocalPhoto ? false : server.forcePhotoUpdate,
+			// photoLocked is admin-controlled; prefer server when server wins the clock.
+			photoLocked: server.photoLocked ?? local.photoLocked
 		};
 	}
 
@@ -129,7 +132,9 @@ export function mergeServerUserOverLocal(local: User | undefined, server: User):
 		forcePinUpdate: server.forcePinUpdate ?? local.forcePinUpdate,
 		forcePhotoUpdate: pendingLocalPhoto
 			? false
-			: (server.forcePhotoUpdate ?? local.forcePhotoUpdate)
+			: (server.forcePhotoUpdate ?? local.forcePhotoUpdate),
+		// Local wins when newer — keep admin's just-set lock until PB echoes it.
+		photoLocked: local.photoLocked ?? server.photoLocked
 	};
 }
 
@@ -162,6 +167,7 @@ export function buildUserFromPbRecord(
 		active: rec.active ?? existingLocal?.active ?? true,
 		forcePinUpdate: existingLocal?.forcePinUpdate ?? rec.forcePinUpdate ?? false,
 		forcePhotoUpdate: rec.forcePhotoUpdate ?? existingLocal?.forcePhotoUpdate ?? false,
+		photoLocked: rec.photoLocked ?? existingLocal?.photoLocked ?? false,
 		verified:
 			typeof rec.verified === 'boolean' ? rec.verified : (existingLocal?.verified ?? false),
 		createdAt:
@@ -207,6 +213,7 @@ export function mergeAuthUserIntoLocal(
 			active: pbUser.active ?? existing.active ?? true,
 			forcePinUpdate: pbUser.forcePinUpdate ?? existing.forcePinUpdate ?? false,
 			forcePhotoUpdate: pbUser.forcePhotoUpdate ?? existing.forcePhotoUpdate ?? false,
+			photoLocked: pbUser.photoLocked ?? existing.photoLocked ?? false,
 			verified: !!pbUser.verified,
 			createdAt: new Date(pbUser.created || pbUser.createdAt || existing.createdAt),
 			updatedAt: new Date(pbUser.updated || pbUser.updatedAt || existing.updatedAt)
@@ -232,6 +239,7 @@ export function mergeAuthUserIntoLocal(
 		active: pbUser.active ?? true,
 		forcePinUpdate: pbUser.forcePinUpdate ?? false,
 		forcePhotoUpdate: pbUser.forcePhotoUpdate ?? false,
+		photoLocked: pbUser.photoLocked ?? false,
 		verified: !!pbUser.verified,
 		createdAt: new Date(pbUser.created || pbUser.createdAt || Date.now()),
 		updatedAt: new Date(pbUser.updated || pbUser.updatedAt || Date.now())

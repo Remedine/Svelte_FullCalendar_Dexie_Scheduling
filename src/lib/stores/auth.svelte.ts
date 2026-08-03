@@ -46,6 +46,7 @@ async function resolveUserFromPbSession(db: typeof import('$lib/db').db): Promis
 			active: m.active ?? true,
 			verified: !!m.verified,
 			forcePhotoUpdate: !!m.forcePhotoUpdate,
+			photoLocked: !!m.photoLocked,
 			photo: m.photo || undefined,
 			createdAt: new Date(m.created || Date.now()),
 			updatedAt: new Date(m.updated || Date.now())

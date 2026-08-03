@@ -169,6 +169,8 @@ export async function shouldOfferQuickUnlockSetup(userId: string): Promise<boole
 export type LoginOnboardingUser = {
 	verified?: boolean | null;
 	forcePhotoUpdate?: boolean;
+	/** When true, photo is admin-managed — do not prompt crew to self-upload. */
+	photoLocked?: boolean;
 	photo?: string | null;
 };
 
@@ -179,6 +181,8 @@ export function userNeedsWelcomeOnboarding(user: LoginOnboardingUser): boolean {
 
 /** Admin-mandated photo still pending (ForcePhotoUpdate). */
 export function userNeedsPhotoOnboarding(user: LoginOnboardingUser): boolean {
+	// Locked photos are set by admins only — never block login with a self-upload gate.
+	if (user.photoLocked) return false;
 	if (!user.forcePhotoUpdate) return false;
 	const photo = user.photo?.trim();
 	return !photo;

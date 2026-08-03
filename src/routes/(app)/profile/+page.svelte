@@ -287,6 +287,8 @@
 		}
 	}
 
+	const photoLocked = $derived(!!auth.currentUser?.photoLocked);
+
 	// Camera / gallery avatar. Compress to JPEG first (mobile HEIC + multi‑MB originals often
 	// failed PB mime/size rules, so the photo lived in Dexie only). Then updateUserPhoto queues
 	// + forces a multipart push when still pending after processSyncQueue.
@@ -294,6 +296,12 @@
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
 		if (!file || !auth.currentUser) return;
+
+		if (auth.currentUser.photoLocked) {
+			error = 'Your photo is managed by an administrator and cannot be changed.';
+			target.value = '';
+			return;
+		}
 
 		loading = true;
 		error = '';
@@ -325,6 +333,10 @@
 	}
 
 	function triggerCamera() {
+		if (auth.currentUser?.photoLocked) {
+			error = 'Your photo is managed by an administrator and cannot be changed.';
+			return;
+		}
 		photoInput?.click();
 	}
 
@@ -611,35 +623,40 @@
 						{(auth.currentUser.firstName || auth.currentUser.name || 'U').slice(0, 1).toUpperCase()}
 					</div>
 				{/if}
-				<!-- Pencil edit icon directly for avatar/photo. Triggers camera input (no text, title only). -->
-				<button
-					class="profile__edit-btn profile__edit-btn--photo"
-					onclick={triggerCamera}
-					title="Edit photo"
-					disabled={loading}
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="13"
-						height="13"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.5"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+				<!-- Pencil edit for avatar — hidden when admin locked the photo. -->
+				{#if !photoLocked}
+					<button
+						class="profile__edit-btn profile__edit-btn--photo"
+						onclick={triggerCamera}
+						title="Edit photo"
+						disabled={loading}
 					>
-				</button>
-				<input
-					bind:this={photoInput}
-					type="file"
-					accept="image/*"
-					capture="user"
-					style="display:none"
-					onchange={handlePhoto}
-				/>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="13"
+							height="13"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.5"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg
+						>
+					</button>
+					<input
+						bind:this={photoInput}
+						type="file"
+						accept="image/*"
+						capture="user"
+						style="display:none"
+						onchange={handlePhoto}
+					/>
+				{/if}
 			</div>
+			{#if photoLocked}
+				<p class="profile__photo-locked-note">Photo managed by admin</p>
+			{/if}
 
 			<!-- Badge body with labeled fields (BEM). Name & Email rows have right-aligned edit buttons.
            Avatar pencil overlay remains in its original position on the photo. Role is labeled but static. -->
@@ -1225,6 +1242,14 @@
 		border-radius: var(--radius-sm);
 		font-weight: var(--font-weight-semibold);
 		letter-spacing: 0.3px;
+	}
+
+	.profile__photo-locked-note {
+		margin: calc(var(--space-2) * -0.5) 0 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-style: italic;
+		line-height: 1.3;
 	}
 
 	/* Field actions container (holds save/cancel icon buttons when editing a field) */

@@ -107,6 +107,7 @@ export function buildUserFromAppSession(row: AppSession): User | null {
 		active: model?.active !== false,
 		verified: !!model?.verified,
 		forcePhotoUpdate: !!model?.forcePhotoUpdate,
+		photoLocked: !!model?.photoLocked,
 		photo: (model?.photo as string) || undefined,
 		pinHash: '',
 		forcePinUpdate: false,

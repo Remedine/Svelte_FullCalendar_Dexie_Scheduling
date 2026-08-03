@@ -4,6 +4,7 @@
 		db,
 		type User,
 		updateUser,
+		updateUserPhoto,
 		deleteUser as deleteUserFromDb,
 		getUserPhotoSrc,
 		cleanupDuplicateUsers,
@@ -15,6 +16,7 @@
 	import UserJobsModal from './UserJobsModal.svelte';
 	import { pullUsersFromServer, pb } from '$lib/db/pb';
 	import { createBackdropDismiss } from '$lib/utils/modalBackdrop';
+	import { compressImageToJpegDataUrl } from '$lib/utils/avatarImage';
 
 	let allUsers = $state<User[]>([]);
 
@@ -30,11 +32,24 @@
 	let editLastName = $state('');
 	let editRole = $state<'admin' | 'crew'>('crew');
 	let editForcePhoto = $state(false);
+	/** Admin-managed photo: crew cannot change avatar on profile (default off). */
+	let editPhotoLocked = $state(false);
 	let editEmail = $state('');
 	let editActive = $state(true);
 	let pendingDelete = $state(false);
 	let editUserHasJobs = $state(false);
 	let resendingWelcome = $state(false);
+	/** New photo chosen in edit modal (JPEG data URL); saved via updateUserPhoto on Save. */
+	let editPhotoPreview = $state<string | null>(null);
+	let editPhotoInput: HTMLInputElement | null = $state(null);
+	let editPhotoBusy = $state(false);
+	let editSaving = $state(false);
+
+	const editPhotoDisplaySrc = $derived.by(() => {
+		if (editPhotoPreview) return editPhotoPreview;
+		if (!selectedUser) return '';
+		return getUserPhotoSrc(selectedUser.photo, selectedUser) || '';
+	});
 
 	const isAdmin = $derived(auth.currentUser?.role === 'admin');
 
@@ -95,8 +110,51 @@
 	function closeEditModal() {
 		pendingDelete = false;
 		editUserHasJobs = false;
+		editPhotoPreview = null;
+		editPhotoBusy = false;
+		editSaving = false;
 		showEditModal = false;
 		selectedUser = null;
+	}
+
+	function triggerEditPhoto() {
+		editPhotoInput?.click();
+	}
+
+	async function onEditPhotoSelected(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		editPhotoBusy = true;
+		try {
+			editPhotoPreview = await compressImageToJpegDataUrl(file);
+			// Admin just set a photo — no need to force the crew to re-upload.
+			editForcePhoto = false;
+		} catch (err: any) {
+			console.error('Crew photo compress failed:', err);
+			toast.error(err?.message || 'Could not read that photo. Try another image.');
+			editPhotoPreview = null;
+		} finally {
+			editPhotoBusy = false;
+			target.value = '';
+		}
+	}
+
+	function clearEditPhotoPreview() {
+		editPhotoPreview = null;
+	}
+
+	function onPhotoLockedChange(e: Event) {
+		const checked = (e.currentTarget as HTMLInputElement).checked;
+		editPhotoLocked = checked;
+		// Forcing a self-upload while locked is contradictory.
+		if (checked) editForcePhoto = false;
+	}
+
+	function onForcePhotoChange(e: Event) {
+		const checked = (e.currentTarget as HTMLInputElement).checked;
+		editForcePhoto = checked;
+		if (checked) editPhotoLocked = false;
 	}
 
 	// Only close when pointerdown + click both hit the overlay (not text-select drag-outs)
@@ -151,8 +209,10 @@
 		editLastName = user.lastName || (user.name ? user.name.split(' ').slice(1).join(' ') : '');
 		editRole = user.role;
 		editForcePhoto = user.forcePhotoUpdate ?? false;
+		editPhotoLocked = user.photoLocked ?? false;
 		editEmail = user.email || '';
 		editActive = user.active;
+		editPhotoPreview = null;
 		pendingDelete = false;
 
 		// Check if this user (by name) is still assigned to any jobs.
@@ -167,13 +227,12 @@
 
 	async function saveEdit() {
 		if (!selectedUser || (!editFirstName.trim() && !editLastName.trim()) || !isAdmin) return;
+		if (editSaving || editPhotoBusy) return;
 
 		if (pendingDelete) {
 			// Actual delete (and any error checks) happens here on Save, giving the user time to Cancel the modal.
 			await deleteUser(selectedUser.id!);
-			showEditModal = false;
-			selectedUser = null;
-			pendingDelete = false;
+			closeEditModal();
 			return;
 		}
 
@@ -205,23 +264,50 @@
 			return;
 		}
 
-		const first = editFirstName.trim();
-		const last = editLastName.trim();
-		await updateUser(selectedUser.id!, {
-			firstName: first,
-			lastName: last,
-			name: `${first} ${last}`.trim(),
-			role: editRole,
-			forcePhotoUpdate: editForcePhoto,
-			email: editEmail.trim() || undefined,
-			active: editActive,
-			updatedAt: new Date()
-		});
+		editSaving = true;
+		try {
+			const first = editFirstName.trim();
+			const last = editLastName.trim();
+			const userId = selectedUser.id!;
 
-		showEditModal = false;
-		selectedUser = null;
-		pendingDelete = false;
-		await loadUsers();
+			// Admin-set photo first so forcePhotoUpdate can stay false after a successful set.
+			if (editPhotoPreview) {
+				try {
+					const { synced } = await updateUserPhoto(userId, editPhotoPreview, {
+						bypassLock: true
+					});
+					if (!synced && navigator.onLine) {
+						toast.error(
+							'Photo saved on this device but could not reach the server. Refresh roster after they sign in, or try again online.'
+						);
+					} else if (synced) {
+						toast.success('Crew photo updated');
+					}
+				} catch (err: any) {
+					console.error('Admin crew photo save failed:', err);
+					toast.error(err?.message || 'Failed to save crew photo');
+					return;
+				}
+			}
+
+			await updateUser(userId, {
+				firstName: first,
+				lastName: last,
+				name: `${first} ${last}`.trim(),
+				role: editRole,
+				// If admin uploaded a photo this save, never leave force-on.
+				forcePhotoUpdate: editPhotoPreview ? false : editForcePhoto,
+				photoLocked: editPhotoLocked,
+				email: editEmail.trim() || undefined,
+				active: editActive,
+				updatedAt: new Date()
+			});
+
+			closeEditModal();
+			await loadUsers();
+		} finally {
+			editSaving = false;
+		}
 	}
 
 	async function toggleActive(user: User) {
@@ -444,6 +530,64 @@
 				<!-- Scrollable body so actions stay anchored at bottom regardless of form height -->
 				<div class="modal__body">
 					<div class="modal__form">
+						<!-- Admin photo management: camera or gallery, then optional lock. -->
+						<div class="modal__photo-block">
+							<span class="modal__label label">Photo</span>
+							<div class="modal__photo-row">
+								<div class="modal__photo-preview" aria-hidden={editPhotoDisplaySrc ? 'false' : 'true'}>
+									{#if editPhotoDisplaySrc}
+										<img
+											src={editPhotoDisplaySrc}
+											alt=""
+											class="modal__photo-img"
+										/>
+									{:else}
+										<span class="modal__photo-placeholder">
+											{(editFirstName || selectedUser.firstName || selectedUser.name || 'U')
+												.slice(0, 1)
+												.toUpperCase()}
+										</span>
+									{/if}
+								</div>
+								<div class="modal__photo-controls">
+									<button
+										type="button"
+										class="modal__btn button button--primary modal__photo-upload-btn"
+										onclick={triggerEditPhoto}
+										disabled={editPhotoBusy || editSaving}
+									>
+										{editPhotoBusy
+											? 'Processing…'
+											: editPhotoPreview
+												? 'Change photo'
+												: 'Take photo or upload'}
+									</button>
+									<input
+										bind:this={editPhotoInput}
+										type="file"
+										accept="image/*"
+										capture="environment"
+										class="modal__photo-file-input"
+										onchange={onEditPhotoSelected}
+									/>
+									{#if editPhotoPreview}
+										<button
+											type="button"
+											class="modal__text-action"
+											onclick={clearEditPhotoPreview}
+											disabled={editSaving}
+										>
+											Undo new photo
+										</button>
+									{/if}
+									<p class="modal__photo-hint">
+										Uses this device’s camera or photo library. Saved to the crew record when you
+										press Save.
+									</p>
+								</div>
+							</div>
+						</div>
+
 						<label class="modal__label label">
 							First Name
 							<input type="text" bind:value={editFirstName} class="modal__input input" />
@@ -473,9 +617,26 @@
 						</label>
 
 						<label class="modal__checkbox-label label">
-							<input type="checkbox" bind:checked={editForcePhoto} />
+							<input
+								type="checkbox"
+								checked={editForcePhoto}
+								onchange={onForcePhotoChange}
+								disabled={editPhotoLocked}
+							/>
 							Force new photo upload
 						</label>
+
+						<label class="modal__checkbox-label label">
+							<input
+								type="checkbox"
+								checked={editPhotoLocked}
+								onchange={onPhotoLockedChange}
+							/>
+							Lock photo (crew cannot change it)
+						</label>
+						<p class="modal__field-help">
+							Off by default. When locked, only admins can update this person’s photo.
+						</p>
 					</div>
 
 					{#if canResendWelcome(selectedUser)}
@@ -524,9 +685,13 @@
 							}}
 							class="modal__btn modal__btn--cancel button button--ghost">Cancel</button
 						>
-						<button onclick={saveEdit} class="modal__btn modal__btn--save button button--primary"
-							>Save</button
+						<button
+							onclick={saveEdit}
+							class="modal__btn modal__btn--save button button--primary"
+							disabled={editSaving || editPhotoBusy}
 						>
+							{editSaving ? 'Saving…' : 'Save'}
+						</button>
 					</div>
 
 					<div class="modal__secondary-actions">
@@ -809,6 +974,85 @@
 		align-items: center;
 		gap: var(--space-2);
 		font-size: var(--font-size-sm);
+	}
+
+	.modal__field-help {
+		margin: calc(var(--space-2) * -1) 0 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		line-height: 1.35;
+	}
+
+	.modal__photo-block {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.modal__photo-row {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-4);
+	}
+
+	.modal__photo-preview {
+		width: 72px;
+		height: 72px;
+		border-radius: 50%;
+		overflow: hidden;
+		flex-shrink: 0;
+		border: 2px solid var(--color-border);
+		background: var(--color-surface-alt);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.modal__photo-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.modal__photo-placeholder {
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+	}
+
+	.modal__photo-controls {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-2);
+		min-width: 0;
+		flex: 1;
+	}
+
+	.modal__photo-upload-btn {
+		width: auto;
+		padding: var(--space-2) var(--space-4);
+		font-size: var(--font-size-sm);
+	}
+
+	.modal__photo-file-input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.modal__photo-hint {
+		margin: 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		line-height: 1.35;
 	}
 
 	/* Anchored actions at bottom of modal (right aligned).
